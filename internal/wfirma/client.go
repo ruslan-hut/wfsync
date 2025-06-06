@@ -94,12 +94,7 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 }
 
 // getOrCreateContractor returns contractor ID in wFirma for the invoice customer.
-func (c *Client) getOrCreateContractor(ctx context.Context, inv *stripe.Invoice) (int64, error) {
-	customerId, err := c.getContractor(ctx, inv)
-	if customerId != 0 || err != nil {
-		return customerId, nil
-	}
-
+func (c *Client) createContractor(ctx context.Context, inv *stripe.Invoice) (int64, error) {
 	email := inv.CustomerEmail
 	if email == "" {
 		email = fmt.Sprintf("%s@example.com", inv.Number)
@@ -233,12 +228,20 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, pdf []byt
 		slog.String("invoiceNumber", inv.Number),
 		slog.String("customerEmail", inv.CustomerEmail))
 
-	contractorID, err := c.getOrCreateContractor(ctx, inv)
+	contractorID, err := c.getContractor(ctx, inv)
 	if err != nil {
-		c.log.Error("Failed to get or create contractor",
+		c.log.Error("Failed to get contractor",
 			slog.String("invoiceNumber", inv.Number),
 			slog.String("error", err.Error()))
 		return fmt.Errorf("contractor: %w", err)
+	}
+	if contractorID == 0 {
+		c.log.Debug("No contractor found", slog.String("invoiceNumber", inv.Number))
+		contractorID, err = c.createContractor(ctx, inv)
+		if err != nil {
+			c.log.Error("Failed to create contractor")
+			return fmt.Errorf("create contractor: %w", err)
+		}
 	}
 
 	// Build contents from invoice lines.
@@ -259,6 +262,10 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, pdf []byt
 	}
 
 	iso := func(ts int64) string { return time.Unix(ts, 0).Format("2006-01-02") }
+	attach := ""
+	if len(pdf) > 0 {
+		attach = base64.StdEncoding.EncodeToString(pdf)
+	}
 
 	c.log.Debug("Preparing invoice payload",
 		slog.String("invoiceNumber", inv.Number),
@@ -280,6 +287,7 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, pdf []byt
 						"currency":        strings.ToUpper(string(inv.Currency)),
 						"lang":            "pl",
 						"invoicecontents": contents,
+						"attachment":      attach,
 					},
 				},
 			},
@@ -297,58 +305,56 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, pdf []byt
 
 	var addResp struct {
 		Invoices struct {
-			List []struct {
-				ID int64 `json:"id"`
-			} `json:"invoice"`
+			Element0 struct {
+				Invoice struct {
+					ID int64 `json:"id"`
+				} `json:"invoice"`
+			} `json:"0"`
 		} `json:"invoices"`
 	}
-	if err := json.Unmarshal(addRes, &addResp); err != nil {
+	if err = json.Unmarshal(addRes, &addResp); err != nil {
 		c.log.Error("Failed to parse invoice creation response",
 			slog.String("invoiceNumber", inv.Number),
 			slog.String("error", err.Error()))
 		return err
 	}
-	if len(addResp.Invoices.List) == 0 {
-		c.log.Error("No invoice ID returned from wFirma", slog.String("invoiceNumber", inv.Number))
-		return fmt.Errorf("no invoice id returned")
-	}
 
-	invID := addResp.Invoices.List[0].ID
+	invID := addResp.Invoices.Element0.Invoice.ID
 	c.log.Info("Invoice created successfully",
 		slog.String("invoiceNumber", inv.Number),
 		slog.Int64("wfirmaInvoiceID", invID))
 
-	if len(pdf) == 0 {
-		c.log.Debug("No PDF to attach", slog.String("invoiceNumber", inv.Number))
-		return nil
-	}
-
-	c.log.Debug("Attaching PDF to invoice",
-		slog.String("invoiceNumber", inv.Number),
-		slog.Int("pdfSize", len(pdf)))
-
-	attachPayload := map[string]interface{}{
-		"invoices": []map[string]interface{}{
-			{
-				"invoice": map[string]interface{}{
-					"id":         invID,
-					"attachment": base64.StdEncoding.EncodeToString(pdf),
-				},
-			},
-		},
-	}
-
-	if _, err := c.request(ctx, "invoices", "edit", attachPayload); err != nil {
-		c.log.Error("Failed to attach PDF to invoice",
-			slog.String("invoiceNumber", inv.Number),
-			slog.Int64("wfirmaInvoiceID", invID),
-			slog.String("error", err.Error()))
-		return fmt.Errorf("attach pdf: %w", err)
-	}
-
-	c.log.Info("PDF attached successfully",
-		slog.String("invoiceNumber", inv.Number),
-		slog.Int64("wfirmaInvoiceID", invID))
+	//if len(pdf) == 0 {
+	//	c.log.Debug("No PDF to attach", slog.String("invoiceNumber", inv.Number))
+	//	return nil
+	//}
+	//
+	//c.log.Debug("Attaching PDF to invoice",
+	//	slog.String("invoiceNumber", inv.Number),
+	//	slog.Int("pdfSize", len(pdf)))
+	//
+	//attachPayload := map[string]interface{}{
+	//	"invoices": []map[string]interface{}{
+	//		{
+	//			"invoice": map[string]interface{}{
+	//				"id":         invID,
+	//				"attachment": base64.StdEncoding.EncodeToString(pdf),
+	//			},
+	//		},
+	//	},
+	//}
+	//
+	//if _, err := c.request(ctx, "invoices", "edit", attachPayload); err != nil {
+	//	c.log.Error("Failed to attach PDF to invoice",
+	//		slog.String("invoiceNumber", inv.Number),
+	//		slog.Int64("wfirmaInvoiceID", invID),
+	//		slog.String("error", err.Error()))
+	//	return fmt.Errorf("attach pdf: %w", err)
+	//}
+	//
+	//c.log.Info("PDF attached successfully",
+	//	slog.String("invoiceNumber", inv.Number),
+	//	slog.Int64("wfirmaInvoiceID", invID))
 
 	return nil
 }
