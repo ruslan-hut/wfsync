@@ -1,0 +1,11 @@
+---
+
+env: local
+port: 8080
+stripe:
+  api_key: your-stripe-api-key
+  webhook_secret: your-stripe-webhook-secret
+wfirma:
+  access_key: your-wfirma-access-key
+  secret_key: your-wfirma-secret-key
+  app_id: your-wfirma-app-id

@@ -1,0 +1,11 @@
+---
+
+env: dev
+port: 9090
+stripe:
+  api_key: ${STRIPE_API_KEY}
+  webhook_secret: ${STRIPE_WH_SECRET}
+wfirma:
+  access_key: ${WF_ACCESS_KEY}
+  secret_key: ${WF_SECRET_KEY}
+  app_id: ${WF_APP_ID}
