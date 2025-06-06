@@ -3,7 +3,6 @@ package wfirma
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -240,6 +239,10 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, pdf []byt
 		}
 	}
 
+	contractor := map[string]interface{}{
+		"id": contractorID,
+	}
+
 	// Build contents from invoice lines.
 	c.log.Debug("Building invoice contents",
 		slog.String("invoiceNumber", inv.Number),
@@ -251,50 +254,51 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, pdf []byt
 			"invoicecontent": map[string]interface{}{
 				"name":  line.Description,
 				"count": line.Quantity,
-				"price": float64(line.UnitAmountExcludingTax) / 100.0,
-				"vat":   "23", // default VAT
+				"price": float64(line.Amount) / 100.0,
+				"unit":  "szt.",
 			},
 		})
 	}
 
 	iso := func(ts int64) string { return time.Unix(ts, 0).Format("2006-01-02") }
-	attach := ""
-	if len(pdf) > 0 {
-		attach = base64.StdEncoding.EncodeToString(pdf)
-	}
+	//attach := ""
+	//if len(pdf) > 0 {
+	//	attach = base64.StdEncoding.EncodeToString(pdf)
+	//}
+
+	total := float64(inv.Total) / 100.0
 
 	c.log.Debug("Preparing invoice payload",
-		slog.String("invoiceNumber", inv.Number),
+		slog.String("number", inv.Number),
 		slog.String("currency", string(inv.Currency)),
-		slog.String("sellDate", iso(inv.PeriodStart)),
-		slog.String("issueDate", iso(inv.Created)))
+		slog.Float64("total", total),
+	)
 
 	addPayload := map[string]interface{}{
 		"api": map[string]interface{}{
 			"invoices": []map[string]interface{}{
 				{
 					"invoice": map[string]interface{}{
-						"contractor_id":   contractorID,
-						"number":          inv.Number,
-						"sell_date":       iso(inv.PeriodStart),
-						"issue_date":      iso(inv.Created),
-						"paymentdate":     iso(inv.DueDate),
-						"paymentmethod":   "przelew",
+						"contractor":      contractor,
+						"type":            "normal",
+						"price_type":      "brutto",
+						"total":           total,
+						"id_external":     inv.Number,
+						"description":     "Stripe #" + inv.Number,
+						"date":            iso(inv.PeriodStart),
 						"currency":        strings.ToUpper(string(inv.Currency)),
-						"lang":            "pl",
 						"invoicecontents": contents,
-						"attachment":      attach,
 					},
 				},
 			},
 		},
 	}
 
-	c.log.Info("Creating invoice in wFirma", slog.String("invoiceNumber", inv.Number))
+	c.log.Info("Creating invoice in wFirma", slog.String("number", inv.Number))
 	addRes, err := c.request(ctx, "invoices", "add", addPayload)
 	if err != nil {
 		c.log.Error("Failed to add invoice",
-			slog.String("invoiceNumber", inv.Number),
+			slog.String("number", inv.Number),
 			slog.String("error", err.Error()))
 		return fmt.Errorf("add invoice: %w", err)
 	}
@@ -310,15 +314,38 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, pdf []byt
 	}
 	if err = json.Unmarshal(addRes, &addResp); err != nil {
 		c.log.Error("Failed to parse invoice creation response",
-			slog.String("invoiceNumber", inv.Number),
+			slog.String("number", inv.Number),
 			slog.String("error", err.Error()))
 		return err
 	}
 
 	invID := addResp.Invoices.Element0.Invoice.ID
 	c.log.Info("Invoice created successfully",
-		slog.String("invoiceNumber", inv.Number),
+		slog.String("number", inv.Number),
 		slog.Int64("wfirmaInvoiceID", invID))
+
+	payment := map[string]interface{}{
+		"api": map[string]interface{}{
+			"payments": []map[string]interface{}{
+				{
+					"payment": map[string]interface{}{
+						"object_name": "invoice",
+						"object_id":   invID,
+						"value":       float64(inv.AmountPaid) / 100.0,
+						"date":        iso(inv.PeriodStart),
+					},
+				},
+			},
+		},
+	}
+
+	_, err = c.request(ctx, "payments", "add", payment)
+	if err != nil {
+		c.log.Error("Failed to add payment",
+			slog.String("number", inv.Number),
+			slog.String("error", err.Error()))
+		return fmt.Errorf("add payment: %w", err)
+	}
 
 	//if len(pdf) == 0 {
 	//	c.log.Debug("No PDF to attach", slog.String("invoiceNumber", inv.Number))
