@@ -66,9 +66,9 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Api-App-Id", c.appID)
-	req.Header.Set("Api-Key", c.accessKey)
-	req.Header.Set("Api-Secret", c.secretKey)
+	req.Header.Set("appKey", c.appID)
+	req.Header.Set("accessKey", c.accessKey)
+	req.Header.Set("secretKey", c.secretKey)
 
 	c.log.Debug("Sending request to wFirma API")
 	resp, err := c.hc.Do(req)
