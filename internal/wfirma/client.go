@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v76"
 )
 
@@ -94,12 +95,16 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 
 // getOrCreateContractor returns contractor ID in wFirma for the invoice customer.
 func (c *Client) getOrCreateContractor(ctx context.Context, inv *stripe.Invoice) (int64, error) {
-	c.log.Debug("Looking up contractor by email", slog.String("email", inv.CustomerEmail))
+	email := inv.CustomerEmail
+	if email == "" {
+		email = fmt.Sprintf("%s@example.com", uuid.New().String()) // fallback to dummy email if not available
+	}
+	c.log.Debug("Looking up contractor by email", slog.String("email", email))
 
 	// Try to find by customer email first.
 	search := map[string]interface{}{
 		"parameters": map[string]interface{}{
-			"query": inv.CustomerEmail,
+			"query": email,
 		},
 	}
 	res, err := c.request(ctx, "contractors", "find", search)
@@ -113,25 +118,30 @@ func (c *Client) getOrCreateContractor(ctx context.Context, inv *stripe.Invoice)
 		if len(findResp.Contractors) > 0 {
 			contractorID := findResp.Contractors[0].ID
 			c.log.Info("Found existing contractor",
-				slog.String("email", inv.CustomerEmail),
+				slog.String("email", email),
 				slog.Int64("contractorID", contractorID))
 			return contractorID, nil
 		}
-		c.log.Debug("No contractor found with email", slog.String("email", inv.CustomerEmail))
+		c.log.Debug("No contractor found with email", slog.String("email", email))
 	} else {
 		c.log.Debug("Error searching for contractor",
-			slog.String("email", inv.CustomerEmail),
+			slog.String("email", email),
 			slog.String("error", err.Error()))
 	}
 
+	name := email
+	if inv.Customer != nil && inv.Customer.Name != "" {
+		name = inv.Customer.Name
+	}
+
 	// If not found, create a new contractor.
-	c.log.Info("Creating new contractor", slog.String("email", inv.CustomerEmail))
+	c.log.Info("Creating new contractor", slog.String("email", email), slog.String("name", name))
 	payload := map[string]interface{}{
 		"contractors": []map[string]interface{}{
 			{
 				"contractor": map[string]interface{}{
-					"name":          inv.CustomerEmail,
-					"email":         inv.CustomerEmail,
+					"name":          name,
+					"email":         email,
 					"tax_code_type": "other",
 				},
 			},
@@ -140,7 +150,7 @@ func (c *Client) getOrCreateContractor(ctx context.Context, inv *stripe.Invoice)
 	createRes, err := c.request(ctx, "contractors", "add", payload)
 	if err != nil {
 		c.log.Error("Failed to create contractor",
-			slog.String("email", inv.CustomerEmail),
+			slog.String("email", email),
 			slog.String("error", err.Error()))
 		return 0, err
 	}
@@ -149,7 +159,7 @@ func (c *Client) getOrCreateContractor(ctx context.Context, inv *stripe.Invoice)
 			ID int64 `json:"id"`
 		} `json:"contractor"`
 	}
-	if err := json.Unmarshal(createRes, &addResp); err != nil {
+	if err = json.Unmarshal(createRes, &addResp); err != nil {
 		c.log.Error("Failed to parse contractor creation response", slog.String("error", err.Error()))
 		return 0, err
 	}
@@ -159,7 +169,8 @@ func (c *Client) getOrCreateContractor(ctx context.Context, inv *stripe.Invoice)
 	}
 	contractorID := addResp.Contractors[0].ID
 	c.log.Info("Successfully created new contractor",
-		slog.String("email", inv.CustomerEmail),
+		slog.String("email", email),
+		slog.String("name", name),
 		slog.Int64("contractorID", contractorID))
 	return contractorID, nil
 }
