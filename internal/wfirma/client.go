@@ -320,6 +320,10 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, pdf []byt
 	}
 
 	invID := addResp.Invoices.Element0.Invoice.ID
+	if invID == 0 {
+		c.log.Error("No invoice ID returned from wFirma", slog.String("number", inv.Number))
+		return fmt.Errorf("no invoice id returned")
+	}
 	c.log.Info("Invoice created successfully",
 		slog.String("number", inv.Number),
 		slog.Int64("wfirmaInvoiceID", invID))
