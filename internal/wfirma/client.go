@@ -10,10 +10,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stripe/stripe-go/v76"
 )
 
@@ -95,54 +95,48 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 
 // getOrCreateContractor returns contractor ID in wFirma for the invoice customer.
 func (c *Client) getOrCreateContractor(ctx context.Context, inv *stripe.Invoice) (int64, error) {
+	customerId, err := c.getContractor(ctx, inv)
+	if customerId != 0 || err != nil {
+		return customerId, nil
+	}
+
 	email := inv.CustomerEmail
 	if email == "" {
-		email = fmt.Sprintf("%s@example.com", uuid.New().String()) // fallback to dummy email if not available
+		email = fmt.Sprintf("%s@example.com", inv.Number)
 	}
-	c.log.Debug("Looking up contractor by email", slog.String("email", email))
-
-	// Try to find by customer email first.
-	search := map[string]interface{}{
-		"parameters": map[string]interface{}{
-			"query": email,
-		},
-	}
-	res, err := c.request(ctx, "contractors", "find", search)
-	if err == nil {
-		var findResp struct {
-			Contractors []struct {
-				ID int64 `json:"id"`
-			} `json:"contractor"`
-		}
-		_ = json.Unmarshal(res, &findResp)
-		if len(findResp.Contractors) > 0 {
-			contractorID := findResp.Contractors[0].ID
-			c.log.Info("Found existing contractor",
-				slog.String("email", email),
-				slog.Int64("contractorID", contractorID))
-			return contractorID, nil
-		}
-		c.log.Debug("No contractor found with email", slog.String("email", email))
-	} else {
-		c.log.Debug("Error searching for contractor",
-			slog.String("email", email),
-			slog.String("error", err.Error()))
-	}
-
-	name := email
-	if inv.Customer != nil && inv.Customer.Name != "" {
+	name := ""
+	zip := ""
+	city := ""
+	if inv.Customer != nil {
 		name = inv.Customer.Name
+		if inv.Customer.Address != nil {
+			zip = inv.Customer.Address.PostalCode
+			city = inv.Customer.Address.City
+		}
+	}
+	if name == "" {
+		name = "Kontrahent " + inv.Number
+	}
+	if zip == "" {
+		zip = "10-100"
+	}
+	if city == "" {
+		city = "Wrocław"
 	}
 
 	// If not found, create a new contractor.
 	c.log.Info("Creating new contractor", slog.String("email", email), slog.String("name", name))
 	payload := map[string]interface{}{
-		"contractors": []map[string]interface{}{
-			{
-				"contractor": map[string]interface{}{
-					"name":          name,
-					"email":         email,
-					"tax_code_type": "other",
+		"api": map[string]interface{}{
+			"contractors": []map[string]interface{}{
+				{
+					"contractor": map[string]interface{}{
+						"name":        name,
+						"email":       email,
+						"zip":         zip,
+						"city":        city,
+						"tax_id_type": "other",
+					},
 				},
 			},
 		},
@@ -155,24 +149,82 @@ func (c *Client) getOrCreateContractor(ctx context.Context, inv *stripe.Invoice)
 		return 0, err
 	}
 	var addResp struct {
-		Contractors []struct {
-			ID int64 `json:"id"`
-		} `json:"contractor"`
+		Contractors struct {
+			Element0 struct {
+				Contractor struct {
+					ID string `json:"id"`
+				} `json:"contractor"`
+			} `json:"0"`
+		} `json:"contractors"`
 	}
 	if err = json.Unmarshal(createRes, &addResp); err != nil {
 		c.log.Error("Failed to parse contractor creation response", slog.String("error", err.Error()))
 		return 0, err
 	}
-	if len(addResp.Contractors) == 0 {
-		c.log.Error("Empty contractor add response")
-		return 0, fmt.Errorf("empty contractor add response")
+	if addResp.Contractors.Element0.Contractor.ID == "" {
+		c.log.Error("No contractor ID returned from wFirma", slog.String("email", email))
+		return 0, fmt.Errorf("no contractor id returned")
 	}
-	contractorID := addResp.Contractors[0].ID
+	contractorID, _ := strconv.ParseInt(addResp.Contractors.Element0.Contractor.ID, 10, 64)
 	c.log.Info("Successfully created new contractor",
 		slog.String("email", email),
 		slog.String("name", name),
 		slog.Int64("contractorID", contractorID))
 	return contractorID, nil
+}
+
+func (c *Client) getContractor(ctx context.Context, inv *stripe.Invoice) (int64, error) {
+	if inv.CustomerEmail == "" {
+		return 0, fmt.Errorf("no customer email")
+	}
+	c.log.Debug("Looking up contractor by email", slog.String("email", inv.CustomerEmail))
+
+	// Try to find by customer email first.
+	search := map[string]interface{}{
+		"api": map[string]interface{}{
+			"contractors": map[string]interface{}{
+				"parameters": map[string]interface{}{
+					"conditions": []map[string]interface{}{
+						{
+							"condition": map[string]interface{}{
+								"field":    "email",
+								"operator": "eq",
+								"value":    inv.CustomerEmail,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	res, err := c.request(ctx, "contractors", "find", search)
+	if err == nil {
+		var findResp struct {
+			Contractors struct {
+				Element0 struct {
+					Contractor struct {
+						ID string `json:"id"`
+					} `json:"contractor"`
+				} `json:"0"`
+			} `json:"contractors"`
+		}
+		_ = json.Unmarshal(res, &findResp)
+		if findResp.Contractors.Element0.Contractor.ID != "" {
+			contractorID, _ := strconv.ParseInt(findResp.Contractors.Element0.Contractor.ID, 10, 64)
+			c.log.Info("Found existing contractor",
+				slog.String("email", inv.CustomerEmail),
+				slog.Int64("contractorID", contractorID))
+			return contractorID, nil
+		}
+		c.log.Debug("No contractor found with email", slog.String("email", inv.CustomerEmail))
+	} else {
+		c.log.Debug("Error searching for contractor",
+			slog.String("email", inv.CustomerEmail),
+			slog.String("error", err.Error()))
+	}
+
+	return 0, fmt.Errorf("no contractor found")
 }
 
 // SyncInvoice creates/updates invoice in wFirma and attaches PDF.
@@ -215,18 +267,20 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, pdf []byt
 		slog.String("issueDate", iso(inv.Created)))
 
 	addPayload := map[string]interface{}{
-		"invoices": []map[string]interface{}{
-			{
-				"invoice": map[string]interface{}{
-					"contractor_id":   contractorID,
-					"number":          inv.Number,
-					"sell_date":       iso(inv.PeriodStart),
-					"issue_date":      iso(inv.Created),
-					"paymentdate":     iso(inv.DueDate),
-					"paymentmethod":   "przelew",
-					"currency":        strings.ToUpper(string(inv.Currency)),
-					"lang":            "pl",
-					"invoicecontents": contents,
+		"api": map[string]interface{}{
+			"invoices": []map[string]interface{}{
+				{
+					"invoice": map[string]interface{}{
+						"contractor_id":   contractorID,
+						"number":          inv.Number,
+						"sell_date":       iso(inv.PeriodStart),
+						"issue_date":      iso(inv.Created),
+						"paymentdate":     iso(inv.DueDate),
+						"paymentmethod":   "przelew",
+						"currency":        strings.ToUpper(string(inv.Currency)),
+						"lang":            "pl",
+						"invoicecontents": contents,
+					},
 				},
 			},
 		},
