@@ -170,7 +170,7 @@ func (c *Client) createContractor(ctx context.Context, inv *stripe.Invoice) (int
 
 func (c *Client) getContractor(ctx context.Context, inv *stripe.Invoice) (int64, error) {
 	if inv.CustomerEmail == "" {
-		return 0, fmt.Errorf("no customer email")
+		return 0, nil
 	}
 	c.log.Debug("Looking up contractor by email", slog.String("email", inv.CustomerEmail))
 
@@ -219,7 +219,7 @@ func (c *Client) getContractor(ctx context.Context, inv *stripe.Invoice) (int64,
 			slog.String("error", err.Error()))
 	}
 
-	return 0, fmt.Errorf("no contractor found")
+	return 0, nil
 }
 
 // SyncInvoice creates/updates invoice in wFirma and attaches PDF.
@@ -230,16 +230,12 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, pdf []byt
 
 	contractorID, err := c.getContractor(ctx, inv)
 	if err != nil {
-		c.log.Error("Failed to get contractor",
-			slog.String("invoiceNumber", inv.Number),
-			slog.String("error", err.Error()))
 		return fmt.Errorf("contractor: %w", err)
 	}
 	if contractorID == 0 {
 		c.log.Debug("No contractor found", slog.String("invoiceNumber", inv.Number))
 		contractorID, err = c.createContractor(ctx, inv)
 		if err != nil {
-			c.log.Error("Failed to create contractor")
 			return fmt.Errorf("create contractor: %w", err)
 		}
 	}
