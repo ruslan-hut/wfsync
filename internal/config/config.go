@@ -7,6 +7,11 @@ import (
 	"sync"
 )
 
+type Listen struct {
+	BindIp string `yaml:"bind_ip" env-default:"0.0.0.0"`
+	Port   string `yaml:"port" env-default:"8080"`
+}
+
 type StripeConfig struct {
 	APIKey        string `yaml:"api_key" env-default:""`
 	WebhookSecret string `yaml:"webhook_secret" env-default:""`
@@ -21,7 +26,7 @@ type WfirmaConfig struct {
 type Config struct {
 	Stripe StripeConfig `yaml:"stripe"`
 	WFirma WfirmaConfig `yaml:"wfirma"`
-	Port   string       `yaml:"port" env-default:"8080"`
+	Listen Listen       `yaml:"listen"`
 	Env    string       `yaml:"env" env-default:"local"`
 }
 

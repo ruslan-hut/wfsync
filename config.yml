@@ -1,7 +1,9 @@
 ---
 
 env: local
-port: 8080
+listen:
+  bind_ip: 0.0.0.0
+  port: 8080
 stripe:
   api_key: your-stripe-api-key
   webhook_secret: your-stripe-webhook-secret

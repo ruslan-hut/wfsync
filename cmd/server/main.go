@@ -39,7 +39,7 @@ func main() {
 	r.Post("/webhook/stripe", stripeHandler.HandleWebhook)
 
 	srv := &http.Server{
-		Addr:         ":" + conf.Port,
+		Addr:         conf.Listen.BindIp + ":" + conf.Listen.Port,
 		Handler:      r,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
