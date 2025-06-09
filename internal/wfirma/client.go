@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
 	"io"
 	"log/slog"
 	"net/http"
@@ -93,23 +94,21 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 }
 
 // getOrCreateContractor returns contractor ID in wFirma for the invoice customer.
-func (c *Client) createContractor(ctx context.Context, inv *stripe.Invoice) (int64, error) {
-	email := inv.CustomerEmail
-	if email == "" {
-		email = fmt.Sprintf("%s@example.com", inv.Number)
-	}
+func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer, suffix string) (int64, error) {
+	email := fmt.Sprintf("%s@example.com", suffix)
 	name := ""
 	zip := ""
 	city := ""
-	if inv.Customer != nil {
-		name = inv.Customer.Name
-		if inv.Customer.Address != nil {
-			zip = inv.Customer.Address.PostalCode
-			city = inv.Customer.Address.City
+	if customer != nil {
+		name = customer.Name
+		email = customer.Email
+		if customer.Address != nil {
+			zip = customer.Address.PostalCode
+			city = customer.Address.City
 		}
 	}
 	if name == "" {
-		name = "Kontrahent " + inv.Number
+		name = "Kontrahent " + suffix
 	}
 	if zip == "" {
 		zip = "10-100"
@@ -167,11 +166,11 @@ func (c *Client) createContractor(ctx context.Context, inv *stripe.Invoice) (int
 	return contractorID, nil
 }
 
-func (c *Client) getContractor(ctx context.Context, inv *stripe.Invoice) (int64, error) {
-	if inv.CustomerEmail == "" {
+func (c *Client) getContractor(ctx context.Context, email string) (int64, error) {
+	if email == "" {
 		return 0, nil
 	}
-	c.log.Debug("Looking up contractor by email", slog.String("email", inv.CustomerEmail))
+	c.log.Debug("looking up contractor by email", slog.String("email", email))
 
 	// Try to find by customer email first.
 	search := map[string]interface{}{
@@ -183,7 +182,7 @@ func (c *Client) getContractor(ctx context.Context, inv *stripe.Invoice) (int64,
 							"condition": map[string]interface{}{
 								"field":    "email",
 								"operator": "eq",
-								"value":    inv.CustomerEmail,
+								"value":    email,
 							},
 						},
 					},
@@ -206,15 +205,14 @@ func (c *Client) getContractor(ctx context.Context, inv *stripe.Invoice) (int64,
 		_ = json.Unmarshal(res, &findResp)
 		if findResp.Contractors.Element0.Contractor.ID != "" {
 			contractorID, _ := strconv.ParseInt(findResp.Contractors.Element0.Contractor.ID, 10, 64)
-			c.log.Info("Found existing contractor",
-				slog.String("email", inv.CustomerEmail),
-				slog.Int64("contractorID", contractorID))
+			c.log.Info("found existing contractor",
+				slog.String("email", email),
+				slog.Int64("contractor_id", contractorID))
 			return contractorID, nil
 		}
-		c.log.Debug("No contractor found with email", slog.String("email", inv.CustomerEmail))
 	} else {
-		c.log.Debug("Error searching for contractor",
-			slog.String("email", inv.CustomerEmail),
+		c.log.Warn("searching for contractor",
+			slog.String("email", email),
 			slog.String("error", err.Error()))
 	}
 
@@ -222,18 +220,18 @@ func (c *Client) getContractor(ctx context.Context, inv *stripe.Invoice) (int64,
 }
 
 // SyncInvoice creates/updates invoice in wFirma and attaches PDF.
-func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, pdf []byte) error {
+func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte) error {
 	c.log.Info("Starting invoice synchronization",
 		slog.String("invoiceNumber", inv.Number),
 		slog.String("customerEmail", inv.CustomerEmail))
 
-	contractorID, err := c.getContractor(ctx, inv)
+	contractorID, err := c.getContractor(ctx, inv.CustomerEmail)
 	if err != nil {
 		return fmt.Errorf("contractor: %w", err)
 	}
 	if contractorID == 0 {
 		c.log.Debug("No contractor found", slog.String("invoiceNumber", inv.Number))
-		contractorID, err = c.createContractor(ctx, inv)
+		contractorID, err = c.createContractor(ctx, inv.Customer, inv.Number)
 		if err != nil {
 			return fmt.Errorf("create contractor: %w", err)
 		}
@@ -373,6 +371,151 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, pdf []byt
 	if payResp.Status.Code == "ERROR" {
 		c.log.Error("Failed to add payment",
 			slog.String("number", inv.Number),
+			slog.String("error", payResp.Status.Message))
+		//return fmt.Errorf("add payment failed")
+	}
+
+	return nil
+}
+
+func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession) error {
+	log := c.log.With(slog.String("session_id", sess.ID), slog.String("customer_email", sess.CustomerEmail))
+	log.Info("starting session synchronization")
+
+	contractorID, err := c.getContractor(ctx, sess.CustomerEmail)
+	if err != nil {
+		return fmt.Errorf("contractor: %w", err)
+	}
+	if contractorID == 0 {
+		log.Debug("no contractor found")
+		contractorID, err = c.createContractor(ctx, sess.Customer, uuid.New().String())
+		if err != nil {
+			return fmt.Errorf("create contractor: %w", err)
+		}
+	}
+
+	contractor := map[string]interface{}{
+		"id": contractorID,
+	}
+
+	// Build contents from invoice lines.
+	log.With(
+		slog.Int("line_count", len(sess.LineItems.Data)),
+	).Debug("building invoice contents")
+
+	var contents []map[string]interface{}
+	for _, line := range sess.LineItems.Data {
+		contents = append(contents, map[string]interface{}{
+			"invoicecontent": map[string]interface{}{
+				"name":  line.Description,
+				"count": line.Quantity,
+				"price": float64(line.AmountTotal) / 100.0,
+				"unit":  "szt.",
+			},
+		})
+	}
+
+	iso := func(ts int64) string { return time.Unix(ts, 0).Format("2006-01-02") }
+	total := float64(sess.AmountTotal) / 100.0
+
+	log.With(
+		slog.String("currency", string(sess.Currency)),
+		slog.Float64("total", total),
+	).Debug("preparing invoice payload")
+
+	addPayload := map[string]interface{}{
+		"api": map[string]interface{}{
+			"invoices": []map[string]interface{}{
+				{
+					"invoice": map[string]interface{}{
+						"contractor":      contractor,
+						"type":            "normal",
+						"price_type":      "brutto",
+						"total":           total,
+						"id_external":     sess.ID,
+						"description":     "Stripe ID:" + sess.ID,
+						"date":            iso(sess.Created),
+						"currency":        strings.ToUpper(string(sess.Currency)),
+						"invoicecontents": contents,
+					},
+				},
+			},
+		},
+	}
+
+	log.Info("creating invoice in wFirma")
+	addRes, err := c.request(ctx, "invoices", "add", addPayload)
+	if err != nil {
+		log.Error("add invoice",
+			slog.String("error", err.Error()))
+		return fmt.Errorf("add invoice: %w", err)
+	}
+
+	var addResp struct {
+		Invoices struct {
+			Element0 struct {
+				Invoice struct {
+					ID string `json:"id"`
+				} `json:"invoice"`
+			} `json:"0"`
+		} `json:"invoices"`
+	}
+	if err = json.Unmarshal(addRes, &addResp); err != nil {
+		log.Error("parse invoice creation response",
+			slog.String("error", err.Error()))
+		return err
+	}
+
+	invID := addResp.Invoices.Element0.Invoice.ID
+	if invID == "" {
+		c.log.Error("no invoice ID returned from wFirma")
+		return fmt.Errorf("no invoice id returned")
+	}
+	log.Info("invoice created successfully",
+		slog.String("wfirma_id", invID))
+
+	payment := map[string]interface{}{
+		"api": map[string]interface{}{
+			"payments": []map[string]interface{}{
+				{
+					"payment": map[string]interface{}{
+						"object_name": "invoice",
+						"object_id":   invID,
+						"value":       total,
+						"date":        iso(sess.Created),
+					},
+				},
+			},
+		},
+	}
+
+	payRes, err := c.request(ctx, "payments", "add", payment)
+	if err != nil {
+		log.Error("add payment",
+			slog.String("error", err.Error()))
+		return fmt.Errorf("add payment: %w", err)
+	}
+
+	var payResp struct {
+		Payments struct {
+			Element0 struct {
+				Payment struct {
+					ID string `json:"id"`
+				} `json:"payment"`
+			} `json:"0"`
+		} `json:"payments"`
+		Status struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"status"`
+	}
+	if err = json.Unmarshal(payRes, &payResp); err != nil {
+		log.Error("parse payment creation response",
+			slog.String("error", err.Error()))
+		return err
+	}
+	if payResp.Status.Code == "ERROR" {
+		log.Error("add payment response",
 			slog.String("error", payResp.Status.Message))
 		//return fmt.Errorf("add payment failed")
 	}

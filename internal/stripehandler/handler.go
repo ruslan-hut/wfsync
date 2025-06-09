@@ -18,6 +18,11 @@ import (
 	"github.com/stripe/stripe-go/v76/client"
 )
 
+const (
+	eventCheckoutCompleted = "checkout.session.completed"
+	eventInvoiceFinalized  = "invoice.finalized"
+)
+
 type Handler struct {
 	sc            *client.API
 	webhookSecret string
@@ -78,10 +83,17 @@ func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 	).Debug("parsed webhook event")
 
 	switch evt.Type {
-	case "invoice.finalized":
+	case eventCheckoutCompleted:
 		h.log.With(
 			slog.String("event_id", evt.ID),
-		).Info("handling invoice finalized event")
+			slog.Any("type", evt.Type),
+		).Info("handling event")
+		h.handleCheckoutCompleted(context.Background(), &evt)
+	case eventInvoiceFinalized:
+		h.log.With(
+			slog.String("event_id", evt.ID),
+			slog.Any("type", evt.Type),
+		).Info("handling event")
 		h.handleInvoiceFinalized(context.Background(), &evt)
 	default:
 		h.log.With(
@@ -141,6 +153,35 @@ func (h *Handler) verifySignature(payload []byte, header string, tolerance time.
 	return isValid
 }
 
+func (h *Handler) handleCheckoutCompleted(ctx context.Context, evt *stripe.Event) {
+	invID := evt.GetObjectValue("id")
+	h.log.With(
+		slog.String("session_id", invID),
+	).Debug("fetching session from stripe")
+	sess, err := h.sc.CheckoutSessions.Get(invID, nil)
+	if err != nil {
+		h.log.With(
+			slog.Any("error", err),
+		).Error("failed to get session from stripe")
+		return
+	}
+	h.log.With(
+		slog.String("session_id", invID),
+		slog.String("customer_email", sess.CustomerEmail),
+		slog.Int64("amount", sess.AmountTotal),
+	).Info("session fetched successfully")
+	err = h.wfirma.SyncSession(ctx, sess)
+	if err != nil {
+		h.log.With(
+			slog.Any("error", err),
+		).Error("failed to sync with wfirma")
+	} else {
+		h.log.With(
+			slog.String("invoice_id", invID),
+		).Info("session synced successfully with wfirma")
+	}
+}
+
 func (h *Handler) handleInvoiceFinalized(ctx context.Context, evt *stripe.Event) {
 	invID := evt.GetObjectValue("id")
 	h.log.With(
@@ -158,24 +199,25 @@ func (h *Handler) handleInvoiceFinalized(ctx context.Context, evt *stripe.Event)
 		slog.Int64("amount", inv.AmountPaid),
 	).Info("invoice fetched successfully")
 
-	h.log.With(
-		slog.String("url", inv.InvoicePDF),
-	).Debug("fetching PDF")
-	pdfBuf, err := fetchPDF(inv.InvoicePDF)
-	if err != nil {
-		h.log.With(
-			slog.Any("error", err),
-		).Error("failed to fetch PDF")
-		return
-	}
-	h.log.With(
-		slog.Int("size_bytes", len(pdfBuf)),
-	).Debug("PDF fetched successfully")
+	//h.log.With(
+	//	slog.String("url", inv.InvoicePDF),
+	//).Debug("fetching PDF")
+	//pdfBuf, err := fetchPDF(inv.InvoicePDF)
+	//if err != nil {
+	//	h.log.With(
+	//		slog.Any("error", err),
+	//	).Error("failed to fetch PDF")
+	//	return
+	//}
+	//h.log.With(
+	//	slog.Int("size_bytes", len(pdfBuf)),
+	//).Debug("PDF fetched successfully")
+	//
+	//h.log.With(
+	//	slog.String("invoice_id", invID),
+	//).Info("syncing invoice with wfirma")
 
-	h.log.With(
-		slog.String("invoice_id", invID),
-	).Info("syncing invoice with wfirma")
-	err = h.wfirma.SyncInvoice(ctx, inv, pdfBuf)
+	err = h.wfirma.SyncInvoice(ctx, inv, nil)
 	if err != nil {
 		h.log.With(
 			slog.Any("error", err),
