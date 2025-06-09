@@ -343,7 +343,7 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, pdf []byt
 		},
 	}
 
-	_, err = c.request(ctx, "payments", "add", payment)
+	payRes, err := c.request(ctx, "payments", "add", payment)
 	if err != nil {
 		c.log.Error("Failed to add payment",
 			slog.String("number", inv.Number),
@@ -351,37 +351,31 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, pdf []byt
 		return fmt.Errorf("add payment: %w", err)
 	}
 
-	//if len(pdf) == 0 {
-	//	c.log.Debug("No PDF to attach", slog.String("invoiceNumber", inv.Number))
-	//	return nil
-	//}
-	//
-	//c.log.Debug("Attaching PDF to invoice",
-	//	slog.String("invoiceNumber", inv.Number),
-	//	slog.Int("pdfSize", len(pdf)))
-	//
-	//attachPayload := map[string]interface{}{
-	//	"invoices": []map[string]interface{}{
-	//		{
-	//			"invoice": map[string]interface{}{
-	//				"id":         invID,
-	//				"attachment": base64.StdEncoding.EncodeToString(pdf),
-	//			},
-	//		},
-	//	},
-	//}
-	//
-	//if _, err := c.request(ctx, "invoices", "edit", attachPayload); err != nil {
-	//	c.log.Error("Failed to attach PDF to invoice",
-	//		slog.String("invoiceNumber", inv.Number),
-	//		slog.Int64("wfirmaInvoiceID", invID),
-	//		slog.String("error", err.Error()))
-	//	return fmt.Errorf("attach pdf: %w", err)
-	//}
-	//
-	//c.log.Info("PDF attached successfully",
-	//	slog.String("invoiceNumber", inv.Number),
-	//	slog.Int64("wfirmaInvoiceID", invID))
+	var payResp struct {
+		Payments struct {
+			Element0 struct {
+				Payment struct {
+					ID string `json:"id"`
+				} `json:"payment"`
+			} `json:"0"`
+		} `json:"payments"`
+		Status struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"status"`
+	}
+	if err = json.Unmarshal(payRes, &payResp); err != nil {
+		c.log.Error("Failed to parse payment creation response",
+			slog.String("number", inv.Number),
+			slog.String("error", err.Error()))
+		return err
+	}
+	if payResp.Status.Code == "ERROR" {
+		c.log.Error("Failed to add payment",
+			slog.String("number", inv.Number),
+			slog.String("error", payResp.Status.Message))
+		return fmt.Errorf("add payment: %w", fmt.Errorf(payResp.Status.Message))
+	}
 
 	return nil
 }
