@@ -374,7 +374,7 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, pdf []byt
 		c.log.Error("Failed to add payment",
 			slog.String("number", inv.Number),
 			slog.String("error", payResp.Status.Message))
-		return fmt.Errorf("add payment: %w", fmt.Errorf(payResp.Status.Message))
+		//return fmt.Errorf("add payment failed")
 	}
 
 	return nil
