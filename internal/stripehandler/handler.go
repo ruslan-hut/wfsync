@@ -38,7 +38,7 @@ func New(apiKey, whSecret string, wf *wfirma.Client, logger *slog.Logger) *Handl
 		sc:            sc,
 		webhookSecret: whSecret,
 		wfirma:        wf,
-		log:           logger.With(slog.String("pkg", "stripehandler")),
+		log:           logger.With(slog.String("pkg", "stripe")),
 	}
 }
 

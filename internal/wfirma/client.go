@@ -123,7 +123,6 @@ func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer
 	}
 
 	// If not found, create a new contractor.
-	c.log.Info("creating new contractor", slog.String("email", email), slog.String("name", name))
 	payload := map[string]interface{}{
 		"api": map[string]interface{}{
 			"contractors": []map[string]interface{}{
