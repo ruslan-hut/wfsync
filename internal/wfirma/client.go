@@ -48,7 +48,6 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 		slog.String("module", module),
 		slog.String("action", action),
 	)
-	log.Debug("preparing wFirma API request")
 
 	var err error
 	status := "ERROR"
@@ -70,7 +69,7 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 	q.Set("inputFormat", "json")
 	q.Set("outputFormat", "json")
 	endpoint := fmt.Sprintf("%s/%s/%s?%s", c.baseURL, module, action, q.Encode())
-	log.Debug("request endpoint prepared", slog.String("endpoint", endpoint))
+	log = log.With(slog.String("endpoint", endpoint))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
@@ -82,7 +81,6 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 	req.Header.Set("accessKey", c.accessKey)
 	req.Header.Set("secretKey", c.secretKey)
 
-	log.Debug("sending request to wFirma API")
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		log.Error("request failed", slog.String("error", err.Error()))
@@ -391,7 +389,6 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte)
 
 func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, lineItems []*stripe.LineItem) error {
 	log := c.log.With(slog.String("session_id", sess.ID), slog.String("customer_email", sess.CustomerEmail))
-	log.Info("starting session synchronization")
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error("panic recovered in SyncSession", slog.Any("panic", r))
@@ -413,6 +410,7 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, 
 			return fmt.Errorf("create contractor: %w", err)
 		}
 	}
+	log = log.With(slog.String("contractor_id", contractorID))
 
 	contractor := map[string]interface{}{
 		"id": contractorID,
@@ -432,11 +430,6 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, 
 
 	iso := func(ts int64) string { return time.Unix(ts, 0).Format("2006-01-02") }
 	total := float64(sess.AmountTotal) / 100.0
-
-	log.With(
-		slog.String("currency", string(sess.Currency)),
-		slog.Float64("total", total),
-	).Debug("preparing invoice payload")
 
 	addPayload := map[string]interface{}{
 		"api": map[string]interface{}{
@@ -458,7 +451,6 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, 
 		},
 	}
 
-	log.Info("creating invoice in wFirma")
 	addRes, err := c.request(ctx, "invoices", "add", addPayload)
 	if err != nil {
 		log.Error("add invoice",
