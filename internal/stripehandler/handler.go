@@ -162,13 +162,30 @@ func (h *Handler) handleCheckoutCompleted(ctx context.Context, evt *stripe.Event
 		).Error("get session from stripe")
 		return
 	}
-	log.With(
-		//slog.String("customer_email", sess.CustomerEmail),
-		//slog.Int64("amount", sess.AmountTotal),
-		slog.Any("session", sess),
-	).Debug("session fetched successfully")
+	log = log.With(
+		slog.String("customer_email", sess.CustomerEmail),
+		slog.Int64("amount", sess.AmountTotal),
+		slog.String("currency", string(sess.Currency)),
+	)
 
-	err = h.wfirma.SyncSession(ctx, sess)
+	itemsIter := h.sc.CheckoutSessions.ListLineItems(&stripe.CheckoutSessionListLineItemsParams{
+		Session: stripe.String(invID),
+	})
+	if itemsIter == nil {
+		log.Error("items iterator is nil")
+		return
+	}
+	lineItems := make([]*stripe.LineItem, 0)
+	for itemsIter.Next() {
+		lineItem := itemsIter.LineItem()
+		lineItems = append(lineItems, lineItem)
+	}
+	if len(lineItems) == 0 {
+		log.Error("no line items found")
+		return
+	}
+
+	err = h.wfirma.SyncSession(ctx, sess, lineItems)
 	if err != nil {
 		log.With(
 			slog.Any("error", err),

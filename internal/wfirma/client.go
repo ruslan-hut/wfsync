@@ -389,7 +389,7 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte)
 	return nil
 }
 
-func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession) error {
+func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, lineItems []*stripe.LineItem) error {
 	log := c.log.With(slog.String("session_id", sess.ID), slog.String("customer_email", sess.CustomerEmail))
 	log.Info("starting session synchronization")
 	defer func() {
@@ -397,12 +397,6 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession) 
 			log.Error("panic recovered in SyncSession", slog.Any("panic", r))
 		}
 	}()
-
-	items := sess.LineItems
-	if items == nil {
-		log.Warn("no line items found")
-		return nil
-	}
 
 	contractorID, err := c.getContractor(ctx, sess.CustomerEmail)
 	if err != nil {
@@ -424,13 +418,8 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession) 
 		"id": contractorID,
 	}
 
-	// Build contents from invoice lines.
-	log.With(
-		slog.Int("line_count", len(sess.LineItems.Data)),
-	).Debug("building invoice contents")
-
 	var contents []map[string]interface{}
-	for _, line := range sess.LineItems.Data {
+	for _, line := range lineItems {
 		contents = append(contents, map[string]interface{}{
 			"invoicecontent": map[string]interface{}{
 				"name":  line.Description,
