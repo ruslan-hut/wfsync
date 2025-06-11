@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -56,52 +57,40 @@ func (h *Handler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "read", http.StatusBadRequest)
 		return
 	}
-	h.log.With(
-		slog.Int("size_bytes", len(payload)),
-	).Debug("read webhook payload")
 
 	sig := r.Header.Get("Stripe-Signature")
-	h.log.Debug("verifying webhook signature")
 	if !h.verifySignature(payload, sig, tolerance) {
 		h.log.Error("invalid webhook signature")
 		http.Error(w, "signature", http.StatusBadRequest)
 		return
 	}
-	h.log.Debug("webhook signature verified")
 
 	var evt stripe.Event
 	if err := json.Unmarshal(payload, &evt); err != nil {
 		h.log.With(
 			slog.Any("error", err),
-		).Error("failed to unmarshal event")
+		).Error("unmarshal event")
 		http.Error(w, "json", http.StatusBadRequest)
 		return
 	}
-	h.log.With(
+
+	log := h.log.With(
 		slog.String("event_id", evt.ID),
 		slog.Any("type", evt.Type),
-	).Debug("parsed webhook event")
+	)
 
 	switch evt.Type {
 	case eventCheckoutCompleted:
-		h.log.With(
-			slog.String("event_id", evt.ID),
-			slog.Any("type", evt.Type),
-		).Info("handling event")
+		log.Info("handling checkout")
 		h.handleCheckoutCompleted(context.Background(), &evt)
 	case eventInvoiceFinalized:
-		h.log.With(
-			slog.String("event_id", evt.ID),
-			slog.Any("type", evt.Type),
-		).Info("handling event")
+		log.Info("handling invoice")
 		h.handleInvoiceFinalized(context.Background(), &evt)
 	default:
-		h.log.With(
-			slog.Any("type", evt.Type),
-		).Info("ignored event")
+		log.Info("ignored event")
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) verifySignature(payload []byte, header string, tolerance time.Duration) bool {
@@ -158,7 +147,13 @@ func (h *Handler) handleCheckoutCompleted(ctx context.Context, evt *stripe.Event
 	log := h.log.With(
 		slog.String("session_id", invID),
 	)
-	log.Debug("fetching session from stripe")
+	t1 := time.Now()
+	defer func() {
+		t2 := time.Now()
+		log.With(
+			slog.String("duration", fmt.Sprintf("%.3fms", float64(t2.Sub(t1))/float64(time.Millisecond))),
+		).Debug("session sync completed")
+	}()
 
 	sess, err := h.sc.CheckoutSessions.Get(invID, nil)
 	if err != nil {
@@ -177,8 +172,6 @@ func (h *Handler) handleCheckoutCompleted(ctx context.Context, evt *stripe.Event
 		log.With(
 			slog.Any("error", err),
 		).Error("sync with wfirma")
-	} else {
-		log.Info("session synced successfully with wfirma")
 	}
 }
 
