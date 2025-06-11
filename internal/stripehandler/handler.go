@@ -155,30 +155,30 @@ func (h *Handler) verifySignature(payload []byte, header string, tolerance time.
 
 func (h *Handler) handleCheckoutCompleted(ctx context.Context, evt *stripe.Event) {
 	invID := evt.GetObjectValue("id")
-	h.log.With(
+	log := h.log.With(
 		slog.String("session_id", invID),
-	).Debug("fetching session from stripe")
+	)
+	log.Debug("fetching session from stripe")
+
 	sess, err := h.sc.CheckoutSessions.Get(invID, nil)
 	if err != nil {
-		h.log.With(
+		log.With(
 			slog.Any("error", err),
-		).Error("failed to get session from stripe")
+		).Error("get session from stripe")
 		return
 	}
-	h.log.With(
-		slog.String("session_id", invID),
+	log.With(
 		slog.String("customer_email", sess.CustomerEmail),
 		slog.Int64("amount", sess.AmountTotal),
 	).Info("session fetched successfully")
+
 	err = h.wfirma.SyncSession(ctx, sess)
 	if err != nil {
-		h.log.With(
+		log.With(
 			slog.Any("error", err),
-		).Error("failed to sync with wfirma")
+		).Error("sync with wfirma")
 	} else {
-		h.log.With(
-			slog.String("invoice_id", invID),
-		).Info("session synced successfully with wfirma")
+		log.Info("session synced successfully with wfirma")
 	}
 }
 

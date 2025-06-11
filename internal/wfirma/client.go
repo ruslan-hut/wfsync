@@ -126,7 +126,7 @@ func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer
 	}
 
 	// If not found, create a new contractor.
-	c.log.Info("Creating new contractor", slog.String("email", email), slog.String("name", name))
+	c.log.Info("creating new contractor", slog.String("email", email), slog.String("name", name))
 	payload := map[string]interface{}{
 		"api": map[string]interface{}{
 			"contractors": []map[string]interface{}{
@@ -144,7 +144,7 @@ func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer
 	}
 	createRes, err := c.request(ctx, "contractors", "add", payload)
 	if err != nil {
-		c.log.Error("Failed to create contractor",
+		c.log.Error("create contractor",
 			slog.String("email", email),
 			slog.String("error", err.Error()))
 		return 0, err
@@ -159,15 +159,15 @@ func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer
 		} `json:"contractors"`
 	}
 	if err = json.Unmarshal(createRes, &addResp); err != nil {
-		c.log.Error("Failed to parse contractor creation response", slog.String("error", err.Error()))
+		c.log.Error("parse contractor creation response", slog.String("error", err.Error()))
 		return 0, err
 	}
 	if addResp.Contractors.Element0.Contractor.ID == "" {
-		c.log.Error("No contractor ID returned from wFirma", slog.String("email", email))
+		c.log.Error("no contractor ID returned from wFirma", slog.String("email", email))
 		return 0, fmt.Errorf("no contractor id returned")
 	}
 	contractorID, _ := strconv.ParseInt(addResp.Contractors.Element0.Contractor.ID, 10, 64)
-	c.log.Info("Successfully created new contractor",
+	c.log.Info("successfully created new contractor",
 		slog.String("email", email),
 		slog.String("name", name),
 		slog.Int64("contractorID", contractorID))
