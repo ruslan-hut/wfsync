@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -104,7 +103,7 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 }
 
 // getOrCreateContractor returns contractor ID in wFirma for the invoice customer.
-func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer, email string) (int64, error) {
+func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer, email string) (string, error) {
 	name := ""
 	zip := ""
 	city := ""
@@ -147,7 +146,7 @@ func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer
 		c.log.Error("create contractor",
 			slog.String("email", email),
 			slog.String("error", err.Error()))
-		return 0, err
+		return "", err
 	}
 	var addResp struct {
 		Contractors struct {
@@ -160,23 +159,23 @@ func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer
 	}
 	if err = json.Unmarshal(createRes, &addResp); err != nil {
 		c.log.Error("parse contractor creation response", slog.String("error", err.Error()))
-		return 0, err
+		return "", err
 	}
 	if addResp.Contractors.Element0.Contractor.ID == "" {
 		c.log.Error("no contractor ID returned from wFirma", slog.String("email", email))
-		return 0, fmt.Errorf("no contractor id returned")
+		return "", fmt.Errorf("no contractor id returned")
 	}
-	contractorID, _ := strconv.ParseInt(addResp.Contractors.Element0.Contractor.ID, 10, 64)
+	contractorID := addResp.Contractors.Element0.Contractor.ID
 	c.log.Info("successfully created new contractor",
 		slog.String("email", email),
 		slog.String("name", name),
-		slog.Int64("contractorID", contractorID))
+		slog.String("contractorID", contractorID))
 	return contractorID, nil
 }
 
-func (c *Client) getContractor(ctx context.Context, email string) (int64, error) {
+func (c *Client) getContractor(ctx context.Context, email string) (string, error) {
 	if email == "" {
-		return 0, nil
+		return "", nil
 	}
 	c.log.Debug("looking up contractor by email", slog.String("email", email))
 
@@ -212,10 +211,10 @@ func (c *Client) getContractor(ctx context.Context, email string) (int64, error)
 		}
 		_ = json.Unmarshal(res, &findResp)
 		if findResp.Contractors.Element0.Contractor.ID != "" {
-			contractorID, _ := strconv.ParseInt(findResp.Contractors.Element0.Contractor.ID, 10, 64)
+			contractorID := findResp.Contractors.Element0.Contractor.ID
 			c.log.Info("found existing contractor",
 				slog.String("email", email),
-				slog.Int64("contractor_id", contractorID))
+				slog.String("contractor_id", contractorID))
 			return contractorID, nil
 		}
 	} else {
@@ -224,7 +223,7 @@ func (c *Client) getContractor(ctx context.Context, email string) (int64, error)
 			slog.String("error", err.Error()))
 	}
 
-	return 0, nil
+	return "", nil
 }
 
 // SyncInvoice creates/updates invoice in wFirma and attaches PDF.
@@ -237,7 +236,7 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte)
 	if err != nil {
 		return fmt.Errorf("contractor: %w", err)
 	}
-	if contractorID == 0 {
+	if contractorID == "" {
 		email := inv.CustomerEmail
 		if email == "" {
 			email = fmt.Sprintf("%s@example.com", inv.Number)
@@ -403,7 +402,7 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession) 
 	if err != nil {
 		return fmt.Errorf("contractor: %w", err)
 	}
-	if contractorID == 0 {
+	if contractorID == "" {
 		log.Debug("no contractor found")
 		email := sess.CustomerEmail
 		if email == "" {
