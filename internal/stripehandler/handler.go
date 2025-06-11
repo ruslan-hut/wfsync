@@ -185,6 +185,8 @@ func (h *Handler) handleCheckoutCompleted(ctx context.Context, evt *stripe.Event
 		return
 	}
 
+	h.checkCustomer(sess)
+
 	err = h.wfirma.SyncSession(ctx, sess, lineItems)
 	if err != nil {
 		log.With(
@@ -247,4 +249,20 @@ func fetchPDF(url string) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 	return io.ReadAll(resp.Body)
+}
+
+func (h *Handler) checkCustomer(sess *stripe.CheckoutSession) {
+	if sess.Customer != nil {
+		return
+	}
+	customer := &stripe.Customer{
+		Email: sess.CustomerEmail,
+	}
+	if sess.Metadata != nil {
+		h.log.With(
+			slog.Any("metadata", sess.Metadata),
+		).Debug("adding metadata to customer")
+		customer.Name = sess.Metadata["name"]
+	}
+	sess.Customer = customer
 }

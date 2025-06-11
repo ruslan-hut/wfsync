@@ -116,10 +116,10 @@ func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer
 		name = "Kontrahent " + email
 	}
 	if zip == "" {
-		zip = "10-100"
+		zip = "01-249"
 	}
 	if city == "" {
-		city = "Wrocław"
+		city = "Warszawa"
 	}
 
 	// If not found, create a new contractor.
