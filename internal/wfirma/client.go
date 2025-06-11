@@ -393,6 +393,11 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte)
 func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession) error {
 	log := c.log.With(slog.String("session_id", sess.ID), slog.String("customer_email", sess.CustomerEmail))
 	log.Info("starting session synchronization")
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("panic recovered in SyncSession", slog.Any("panic", r))
+		}
+	}()
 
 	contractorID, err := c.getContractor(ctx, sess.CustomerEmail)
 	if err != nil {
