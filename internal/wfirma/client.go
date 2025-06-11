@@ -45,13 +45,25 @@ func NewClient(cfg Config, logger *slog.Logger) *Client {
 
 // request sends a signed POST to wFirma API using Access/Secret key headers.
 func (c *Client) request(ctx context.Context, module, action string, payload interface{}) ([]byte, error) {
-	c.log.Debug("Preparing wFirma API request",
+	log := c.log.With(
 		slog.String("module", module),
-		slog.String("action", action))
+		slog.String("action", action),
+	)
+	log.Debug("preparing wFirma API request")
+
+	var err error
+	status := "ERROR"
+	t1 := time.Now()
+	defer func() {
+		t2 := time.Now()
+		log.Debug("wFirma API request completed",
+			slog.String("duration", fmt.Sprintf("%.3fms", float64(t2.Sub(t1))/float64(time.Millisecond))),
+			slog.String("status", status))
+	}()
 
 	data, err := json.Marshal(payload)
 	if err != nil {
-		c.log.Error("Failed to marshal payload", slog.String("error", err.Error()))
+		log.Error("marshal payload", slog.String("error", err.Error()))
 		return nil, err
 	}
 
@@ -59,11 +71,11 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 	q.Set("inputFormat", "json")
 	q.Set("outputFormat", "json")
 	endpoint := fmt.Sprintf("%s/%s/%s?%s", c.baseURL, module, action, q.Encode())
-	c.log.Debug("Request endpoint prepared", slog.String("endpoint", endpoint))
+	log.Debug("request endpoint prepared", slog.String("endpoint", endpoint))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
-		c.log.Error("Failed to create request", slog.String("error", err.Error()))
+		log.Error("create request", slog.String("error", err.Error()))
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -71,44 +83,40 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 	req.Header.Set("accessKey", c.accessKey)
 	req.Header.Set("secretKey", c.secretKey)
 
-	c.log.Debug("Sending request to wFirma API")
+	log.Debug("sending request to wFirma API")
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		c.log.Error("Request failed", slog.String("error", err.Error()))
+		log.Error("request failed", slog.String("error", err.Error()))
 		return nil, err
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 
+	status = resp.Status
 	if resp.StatusCode >= 300 {
-		c.log.Error("wFirma API returned error",
+		log.Error("wFirma API returned error",
 			slog.String("status", resp.Status),
 			slog.String("body", string(body)))
 		return nil, fmt.Errorf("wfirma %s: %s", resp.Status, body)
 	}
 
-	c.log.Debug("Request completed successfully",
-		slog.String("status", resp.Status),
-		slog.Int("bodySize", len(body)))
 	return body, nil
 }
 
 // getOrCreateContractor returns contractor ID in wFirma for the invoice customer.
-func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer, suffix string) (int64, error) {
-	email := fmt.Sprintf("%s@example.com", suffix)
+func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer, email string) (int64, error) {
 	name := ""
 	zip := ""
 	city := ""
 	if customer != nil {
 		name = customer.Name
-		email = customer.Email
 		if customer.Address != nil {
 			zip = customer.Address.PostalCode
 			city = customer.Address.City
 		}
 	}
 	if name == "" {
-		name = "Kontrahent " + suffix
+		name = "Kontrahent " + email
 	}
 	if zip == "" {
 		zip = "10-100"
@@ -230,8 +238,12 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte)
 		return fmt.Errorf("contractor: %w", err)
 	}
 	if contractorID == 0 {
+		email := inv.CustomerEmail
+		if email == "" {
+			email = fmt.Sprintf("%s@example.com", inv.Number)
+		}
 		c.log.Debug("No contractor found", slog.String("invoiceNumber", inv.Number))
-		contractorID, err = c.createContractor(ctx, inv.Customer, inv.Number)
+		contractorID, err = c.createContractor(ctx, inv.Customer, email)
 		if err != nil {
 			return fmt.Errorf("create contractor: %w", err)
 		}
@@ -388,7 +400,11 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession) 
 	}
 	if contractorID == 0 {
 		log.Debug("no contractor found")
-		contractorID, err = c.createContractor(ctx, sess.Customer, uuid.New().String())
+		email := sess.CustomerEmail
+		if email == "" {
+			email = fmt.Sprintf("%s@example.com", uuid.New().String())
+		}
+		contractorID, err = c.createContractor(ctx, sess.Customer, email)
 		if err != nil {
 			return fmt.Errorf("create contractor: %w", err)
 		}
