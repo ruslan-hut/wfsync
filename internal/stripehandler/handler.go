@@ -163,9 +163,10 @@ func (h *Handler) handleCheckoutCompleted(ctx context.Context, evt *stripe.Event
 		return
 	}
 	log.With(
-		slog.String("customer_email", sess.CustomerEmail),
-		slog.Int64("amount", sess.AmountTotal),
-	).Info("session fetched successfully")
+		//slog.String("customer_email", sess.CustomerEmail),
+		//slog.Int64("amount", sess.AmountTotal),
+		slog.Any("session", sess),
+	).Debug("session fetched successfully")
 
 	err = h.wfirma.SyncSession(ctx, sess)
 	if err != nil {

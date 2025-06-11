@@ -398,6 +398,12 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession) 
 		}
 	}()
 
+	items := sess.LineItems
+	if items == nil {
+		log.Warn("no line items found")
+		return nil
+	}
+
 	contractorID, err := c.getContractor(ctx, sess.CustomerEmail)
 	if err != nil {
 		return fmt.Errorf("contractor: %w", err)
