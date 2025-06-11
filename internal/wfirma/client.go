@@ -225,9 +225,12 @@ func (c *Client) getContractor(ctx context.Context, email string) (string, error
 
 // SyncInvoice creates/updates invoice in wFirma and attaches PDF.
 func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte) error {
-	c.log.Info("Starting invoice synchronization",
-		slog.String("invoiceNumber", inv.Number),
-		slog.String("customerEmail", inv.CustomerEmail))
+	log := c.log.With(slog.String("invoice_number", inv.Number), slog.String("customer_email", inv.CustomerEmail))
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("panic recovered in SyncInvoice", slog.Any("panic", r))
+		}
+	}()
 
 	contractorID, err := c.getContractor(ctx, inv.CustomerEmail)
 	if err != nil {
@@ -238,7 +241,6 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte)
 		if email == "" {
 			email = fmt.Sprintf("%s@example.com", inv.Number)
 		}
-		c.log.Debug("No contractor found", slog.String("invoiceNumber", inv.Number))
 		contractorID, err = c.createContractor(ctx, inv.Customer, email)
 		if err != nil {
 			return fmt.Errorf("create contractor: %w", err)
@@ -250,10 +252,6 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte)
 	}
 
 	// Build contents from invoice lines.
-	c.log.Debug("Building invoice contents",
-		slog.String("invoiceNumber", inv.Number),
-		slog.Int("lineCount", len(inv.Lines.Data)))
-
 	var contents []map[string]interface{}
 	for _, line := range inv.Lines.Data {
 		contents = append(contents, map[string]interface{}{
@@ -273,12 +271,6 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte)
 	//}
 
 	total := float64(inv.Total) / 100.0
-
-	c.log.Debug("Preparing invoice payload",
-		slog.String("number", inv.Number),
-		slog.String("currency", string(inv.Currency)),
-		slog.Float64("total", total),
-	)
 
 	addPayload := map[string]interface{}{
 		"api": map[string]interface{}{
@@ -300,11 +292,9 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte)
 		},
 	}
 
-	c.log.Info("Creating invoice in wFirma", slog.String("number", inv.Number))
 	addRes, err := c.request(ctx, "invoices", "add", addPayload)
 	if err != nil {
-		c.log.Error("Failed to add invoice",
-			slog.String("number", inv.Number),
+		log.Error("add invoice",
 			slog.String("error", err.Error()))
 		return fmt.Errorf("add invoice: %w", err)
 	}
@@ -319,20 +309,22 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte)
 		} `json:"invoices"`
 	}
 	if err = json.Unmarshal(addRes, &addResp); err != nil {
-		c.log.Error("Failed to parse invoice creation response",
-			slog.String("number", inv.Number),
+		log.Error("parse invoice creation response",
 			slog.String("error", err.Error()))
 		return err
 	}
 
 	invID := addResp.Invoices.Element0.Invoice.ID
 	if invID == "" {
-		c.log.Error("No invoice ID returned from wFirma", slog.String("number", inv.Number))
+		log.Error("no invoice ID returned from wFirma")
 		return fmt.Errorf("no invoice id returned")
 	}
-	c.log.Info("Invoice created successfully",
-		slog.String("number", inv.Number),
-		slog.String("wfirmaInvoiceID", invID))
+	log.Info("invoice created successfully",
+		slog.String("wfirma_id", invID))
+
+	if !inv.Paid {
+		return nil
+	}
 
 	payment := map[string]interface{}{
 		"api": map[string]interface{}{
@@ -351,8 +343,7 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte)
 
 	payRes, err := c.request(ctx, "payments", "add", payment)
 	if err != nil {
-		c.log.Error("Failed to add payment",
-			slog.String("number", inv.Number),
+		log.Error("add payment",
 			slog.String("error", err.Error()))
 		return fmt.Errorf("add payment: %w", err)
 	}
@@ -371,14 +362,12 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte)
 		} `json:"status"`
 	}
 	if err = json.Unmarshal(payRes, &payResp); err != nil {
-		c.log.Error("Failed to parse payment creation response",
-			slog.String("number", inv.Number),
+		log.Error("parse payment creation response",
 			slog.String("error", err.Error()))
 		return err
 	}
 	if payResp.Status.Code == "ERROR" {
-		c.log.Error("Failed to add payment",
-			slog.String("number", inv.Number),
+		log.Error("add payment",
 			slog.String("error", payResp.Status.Message))
 		//return fmt.Errorf("add payment failed")
 	}
