@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"wfsync/lib/sl"
 
 	"github.com/stripe/stripe-go/v76"
 )
@@ -38,7 +39,7 @@ func NewClient(cfg Config, logger *slog.Logger) *Client {
 		accessKey: cfg.AccessKey,
 		secretKey: cfg.SecretKey,
 		appID:     cfg.AppID,
-		log:       logger.With(slog.String("pkg", "wfirma")),
+		log:       logger.With(sl.Module("wfirma")),
 	}
 }
 
