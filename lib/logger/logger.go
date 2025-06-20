@@ -35,11 +35,11 @@ func SetupLogger(env, path string) *slog.Logger {
 		)
 	case envDev:
 		logger = slog.New(
-			slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: slog.LevelDebug}),
+			slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: slog.LevelDebug}),
 		)
 	case envProd:
 		logger = slog.New(
-			slog.NewJSONHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo}),
+			slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo}),
 		)
 	default:
 		log.Fatal("invalid environment: ", env)
