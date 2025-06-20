@@ -12,13 +12,6 @@ import (
 	"wfsync/lib/sl"
 )
 
-const (
-	envLocal    = "local"
-	envDev      = "dev"
-	envProd     = "prod"
-	logFileName = "wfsync.log"
-)
-
 func main() {
 	configPath := flag.String("conf", "config.yml", "path to config file")
 	logPath := flag.String("log", "/var/log/", "path to log file directory")
