@@ -5,9 +5,19 @@ listen:
   bind_ip: 0.0.0.0
   port: 8080
 stripe:
+  test_mode: true
   api_key: your-stripe-api-key
+  test_key: your-test-api-key
   webhook_secret: your-stripe-webhook-secret
 wfirma:
   access_key: your-wfirma-access-key
   secret_key: your-wfirma-secret-key
   app_id: your-wfirma-app-id
+mongo:
+  enabled: false
+  host: 127.0.0.1
+  port: 27017
+  user: admin
+  password: pass
+  database: evsys
+  save_url: mongodb://admin:pass@

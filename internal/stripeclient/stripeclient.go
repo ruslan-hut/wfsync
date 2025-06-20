@@ -16,10 +16,15 @@ import (
 	"wfsync/lib/sl"
 )
 
+type Database interface {
+	Save(key string, value interface{}) error
+}
+
 type StripeClient struct {
 	sc            *client.API
 	webhookSecret string
 	wfirma        *wfirma.Client
+	db            Database
 	log           *slog.Logger
 }
 
@@ -31,6 +36,23 @@ func New(apiKey, whSecret string, wf *wfirma.Client, logger *slog.Logger) *Strip
 		webhookSecret: whSecret,
 		wfirma:        wf,
 		log:           logger.With(sl.Module("stripe")),
+	}
+}
+
+func (s *StripeClient) SetDatabase(db Database) {
+	s.db = db
+}
+
+func (s *StripeClient) saveData(key string, value interface{}) {
+	if s.db == nil {
+		return
+	}
+	err := s.db.Save(key, value)
+	if err != nil {
+		s.log.With(
+			slog.String("key", key),
+			sl.Err(err),
+		).Error("failed to save data")
 	}
 }
 
@@ -91,9 +113,11 @@ func (s *StripeClient) HandleEvent(ctx context.Context, evt *stripe.Event) {
 	switch evt.Type {
 	case stripe.EventTypeCheckoutSessionCompleted:
 		log.Info("handling checkout")
+		s.saveData("checkout_session_completed", evt)
 		s.handleCheckoutCompleted(ctx, evt)
 	case stripe.EventTypeInvoiceFinalized:
 		log.Info("handling invoice")
+		s.saveData("invoice_finalized", evt)
 		s.handleInvoiceFinalized(ctx, evt)
 	default:
 		s.log.Debug("ignored event")
@@ -144,6 +168,7 @@ func (s *StripeClient) handleCheckoutCompleted(ctx context.Context, evt *stripe.
 	}
 
 	s.checkCustomer(sess)
+	s.saveData("checkout_session", sess)
 
 	err = s.wfirma.SyncSession(ctx, sess, lineItems)
 	if err != nil {
@@ -169,6 +194,8 @@ func (s *StripeClient) handleInvoiceFinalized(ctx context.Context, evt *stripe.E
 		slog.String("invoice_id", invID),
 		slog.Int64("amount", inv.AmountPaid),
 	).Info("invoice fetched successfully")
+
+	s.saveData("invoice", inv)
 
 	//h.log.With(
 	//	slog.String("url", inv.InvoicePDF),

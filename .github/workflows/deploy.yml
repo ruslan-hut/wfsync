@@ -17,17 +17,29 @@ jobs:
       - name: Prepare configuration file
         run: |
           sed -i 's|${STRIPE_API_KEY}|'"$STRIPE_API_KEY"'|g' wfsync.yml
+          sed -i 's|${STRIPE_TEST_KEY}|'"$STRIPE_TEST_KEY"'|g' wfsync.yml
           sed -i 's|${STRIPE_WH_SECRET}|'"$STRIPE_WH_SECRET"'|g' wfsync.yml
           sed -i 's|${WF_ACCESS_KEY}|'"$WF_ACCESS_KEY"'|g' wfsync.yml
           sed -i 's|${WF_SECRET_KEY}|'"$WF_SECRET_KEY"'|g' wfsync.yml
           sed -i 's|${WF_APP_ID}|'"$WF_APP_ID"'|g' wfsync.yml
+          sed -i 's|${MONGO_HOST}|'"$MONGO_HOST"'|g' wfsync.yml
+          sed -i 's|${MONGO_PORT}|'"$MONGO_PORT"'|g' wfsync.yml
+          sed -i 's|${MONGO_USER}|'"$MONGO_USER"'|g' wfsync.yml
+          sed -i 's|${MONGO_PASSWORD}|'"$MONGO_PASSWORD"'|g' wfsync.yml
+          sed -i 's|${MONGO_DATABASE}|'"$MONGO_DATABASE"'|g' wfsync.yml
 
         env:
           STRIPE_API_KEY: ${{ secrets.STRIPE_API_KEY }}
+          STRIPE_TEST_KEY: ${{ secrets.STRIPE_TEST_KEY }}
           STRIPE_WH_SECRET: ${{ secrets.STRIPE_WH_SECRET }}
           WF_ACCESS_KEY: ${{ secrets.WF_ACCESS_KEY }}
           WF_SECRET_KEY: ${{ secrets.WF_SECRET_KEY }}
           WF_APP_ID: ${{ secrets.WF_APP_ID }}
+          MONGO_HOST: ${{ secrets.MONGO_HOST }}
+          MONGO_PORT: ${{ secrets.MONGO_PORT }}
+          MONGO_USER: ${{ secrets.MONGO_USER }}
+          MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
+          MONGO_DATABASE: ${{ secrets.MONGO_DATABASE }}
 
       - name: Copy Configuration to Server
         uses: appleboy/scp-action@master

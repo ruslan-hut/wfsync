@@ -5,9 +5,18 @@ listen:
   bind_ip: 127.0.0.1
   port: 9090
 stripe:
+  test_mode: false
   api_key: ${STRIPE_API_KEY}
+  test_key: ${STRIPE_TEST_KEY}
   webhook_secret: ${STRIPE_WH_SECRET}
 wfirma:
   access_key: ${WF_ACCESS_KEY}
   secret_key: ${WF_SECRET_KEY}
   app_id: ${WF_APP_ID}
+mongo:
+  enabled: true
+  host: ${MONGO_HOST}
+  port: ${MONGO_PORT}
+  user: ${MONGO_USER}
+  password: ${MONGO_PASSWORD}
+  database: ${MONGO_DATABASE}
