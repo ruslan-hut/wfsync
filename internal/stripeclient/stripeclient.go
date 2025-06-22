@@ -121,7 +121,7 @@ func (s *StripeClient) HandleEvent(ctx context.Context, evt *stripe.Event) {
 		//s.saveData("invoice_finalized", evt)
 		s.handleInvoiceFinalized(ctx, evt)
 	default:
-		s.log.Debug("ignored event")
+		log.Debug("ignored event")
 	}
 }
 
