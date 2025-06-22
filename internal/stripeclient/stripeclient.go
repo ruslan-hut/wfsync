@@ -110,14 +110,15 @@ func (s *StripeClient) HandleEvent(ctx context.Context, evt *stripe.Event) {
 		slog.String("event_id", evt.ID),
 		slog.Any("type", evt.Type),
 	)
+	s.saveData(string(evt.Type), evt)
 	switch evt.Type {
 	case stripe.EventTypeCheckoutSessionCompleted:
-		log.Info("handling checkout")
-		s.saveData("checkout_session_completed", evt)
+		log.Info("handling event")
+		//s.saveData("checkout_session_completed", evt)
 		s.handleCheckoutCompleted(ctx, evt)
 	case stripe.EventTypeInvoiceFinalized:
-		log.Info("handling invoice")
-		s.saveData("invoice_finalized", evt)
+		log.Info("handling event")
+		//s.saveData("invoice_finalized", evt)
 		s.handleInvoiceFinalized(ctx, evt)
 	default:
 		s.log.Debug("ignored event")
