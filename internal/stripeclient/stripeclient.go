@@ -167,7 +167,11 @@ func (s *StripeClient) handleCheckoutCompleted(ctx context.Context, evt *stripe.
 		log.Error("no line items found")
 		return
 	}
-
+	if sess.LineItems == nil {
+		sess.LineItems = &stripe.LineItemList{
+			Data: lineItems,
+		}
+	}
 	s.checkCustomer(sess)
 	s.saveData("checkout_session", sess)
 
