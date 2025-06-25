@@ -104,13 +104,17 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 // getOrCreateContractor returns contractor ID in wFirma for the invoice customer.
 func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer, email string) (string, error) {
 	name := ""
+	country := ""
 	zip := ""
 	city := ""
+	street := ""
 	if customer != nil {
 		name = customer.Name
 		if customer.Address != nil {
+			country = customer.Address.Country
 			zip = customer.Address.PostalCode
 			city = customer.Address.City
+			street = customer.Address.Line1
 		}
 	}
 	if name == "" {
@@ -131,8 +135,10 @@ func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer
 					"contractor": map[string]interface{}{
 						"name":        name,
 						"email":       email,
+						"country":     country,
 						"zip":         zip,
 						"city":        city,
+						"street":      street,
 						"tax_id_type": "other",
 					},
 				},

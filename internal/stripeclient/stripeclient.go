@@ -238,17 +238,23 @@ func (s *StripeClient) handleInvoiceFinalized(ctx context.Context, evt *stripe.E
 //}
 
 func (s *StripeClient) checkCustomer(sess *stripe.CheckoutSession) {
-	if sess.Customer != nil {
-		return
+	customer := sess.Customer
+	if customer == nil {
+		customer = &stripe.Customer{
+			Email: sess.CustomerEmail,
+		}
 	}
-	customer := &stripe.Customer{
-		Email: sess.CustomerEmail,
+	if sess.CustomerDetails != nil {
+		customer.Name = sess.CustomerDetails.Name
+		customer.Email = sess.CustomerDetails.Email
+		customer.Phone = sess.CustomerDetails.Phone
+		customer.Address = sess.CustomerDetails.Address
 	}
-	if sess.Metadata != nil {
-		s.log.With(
-			slog.Any("metadata", sess.Metadata),
-		).Debug("adding metadata to customer")
-		customer.Name = sess.Metadata["name"]
-	}
+	//if sess.Metadata != nil {
+	//	s.log.With(
+	//		slog.Any("metadata", sess.Metadata),
+	//	).Debug("adding metadata to customer")
+	//	customer.Name = sess.Metadata["name"]
+	//}
 	sess.Customer = customer
 }
