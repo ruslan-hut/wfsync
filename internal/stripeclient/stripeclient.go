@@ -253,6 +253,9 @@ func (s *StripeClient) checkCustomer(sess *stripe.CheckoutSession) {
 		customer.Email = sess.CustomerDetails.Email
 		customer.Phone = sess.CustomerDetails.Phone
 		customer.Address = sess.CustomerDetails.Address
+		if sess.CustomerEmail == "" {
+			sess.CustomerEmail = sess.CustomerDetails.Email
+		}
 	}
 	//if sess.Metadata != nil {
 	//	s.log.With(

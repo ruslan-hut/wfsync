@@ -476,6 +476,10 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, 
 	log.Info("invoice created successfully",
 		slog.String("wfirma_id", invID))
 
+	if sess.PaymentStatus != stripe.CheckoutSessionPaymentStatusPaid {
+		return nil
+	}
+
 	payment := map[string]interface{}{
 		"api": map[string]interface{}{
 			"payments": []map[string]interface{}{
