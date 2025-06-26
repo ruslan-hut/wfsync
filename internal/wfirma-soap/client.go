@@ -2,6 +2,7 @@ package wfirma_soap
 
 import (
 	"context"
+	"fmt"
 	"github.com/tiaguinho/gosoap"
 	"log/slog"
 	"net/http"
@@ -25,7 +26,7 @@ type Config struct {
 func NewClient(conf Config, logger *slog.Logger) *Client {
 	return &Client{
 		hc:       &http.Client{Timeout: 10 * time.Second},
-		baseURL:  "http://api.wfirma.pl/soap.php?wsdl",
+		baseURL:  "http://api.wfirma.pl/",
 		username: conf.Username,
 		password: conf.Password,
 		log:      logger.With(sl.Module("wf-soap")),
@@ -39,7 +40,7 @@ func (c *Client) Download(_ context.Context, invoiceID string) (string, error) {
 		c.log.Error("failed to create SOAP client",
 			sl.Err(err),
 		)
-		return "", err
+		return "", fmt.Errorf("api client init failed")
 	}
 	//loginRes := struct {
 	//	SID string `xml:"sid"`
@@ -52,7 +53,7 @@ func (c *Client) Download(_ context.Context, invoiceID string) (string, error) {
 		c.log.Error("failed to login",
 			sl.Err(err),
 		)
-		return "", err
+		return "", fmt.Errorf("login failed")
 	}
 	c.log.With(
 		slog.Any("loginRes", loginRes),
