@@ -20,7 +20,7 @@ type Core interface {
 func Download(logger *slog.Logger, handler Core) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		mod := sl.Module("http.handlers.order")
-		invoiceId := chi.URLParam(r, "invoiceId")
+		invoiceId := chi.URLParam(r, "id")
 
 		log := logger.With(
 			mod,
