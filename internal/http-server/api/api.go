@@ -12,6 +12,8 @@ import (
 	"wfsync/internal/config"
 	"wfsync/internal/http-server/handlers/errors"
 	"wfsync/internal/http-server/handlers/stripehandler"
+	"wfsync/internal/http-server/handlers/wfinvoice"
+
 	"wfsync/internal/http-server/middleware/authenticate"
 	"wfsync/internal/http-server/middleware/timeout"
 	"wfsync/lib/sl"
@@ -26,6 +28,7 @@ type Server struct {
 type Handler interface {
 	authenticate.Authenticate
 	stripehandler.Core
+	wfinvoice.Core
 }
 
 func New(conf *config.Config, log *slog.Logger, handler Handler) error {
@@ -46,8 +49,12 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) error {
 
 	router.Route("/api", func(rootApi chi.Router) {
 		rootApi.Use(authenticate.New(log, handler))
-		rootApi.Route("/v1", func(r chi.Router) {
-			//r.Get("/{batchUid}", batch.Result(log, handler))
+		rootApi.Route("/v1", func(v1 chi.Router) {
+			v1.Route("/wf", func(wf chi.Router) {
+				wf.Route("/invoice", func(inv chi.Router) {
+					inv.Get("/download/{id}", wfinvoice.Download(log, handler))
+				})
+			})
 		})
 	})
 	router.Route("/webhook", func(rootWH chi.Router) {

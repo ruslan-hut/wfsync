@@ -9,6 +9,7 @@ import (
 	"wfsync/internal/http-server/api"
 	"wfsync/internal/stripeclient"
 	"wfsync/internal/wfirma"
+	wfirma_soap "wfsync/internal/wfirma-soap"
 	"wfsync/lib/logger"
 	"wfsync/lib/sl"
 )
@@ -32,6 +33,9 @@ func main() {
 	stripeClient.SetDatabase(mongo)
 
 	handler := core.New(stripeClient, log)
+
+	wfSoap := wfirma_soap.NewClient(wfirma_soap.Config(conf.WFirmaSoap), log)
+	handler.SetInvoiceService(wfSoap)
 
 	// *** blocking start with http server ***
 	err := api.New(conf, log, handler)

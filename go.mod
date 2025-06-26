@@ -9,6 +9,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/ilyakaznacheev/cleanenv v1.5.0
 	github.com/stripe/stripe-go/v76 v76.25.0
+	github.com/tiaguinho/gosoap v1.4.4
 	go.mongodb.org/mongo-driver v1.17.4
 )
 

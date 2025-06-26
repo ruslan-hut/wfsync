@@ -11,8 +11,13 @@ import (
 	"wfsync/lib/sl"
 )
 
+type InvoiceService interface {
+	Download(ctx context.Context, invoiceID string) (string, error)
+}
+
 type Core struct {
 	sc  *stripeclient.StripeClient
+	inv InvoiceService
 	log *slog.Logger
 }
 
@@ -26,6 +31,10 @@ func New(sc *stripeclient.StripeClient, log *slog.Logger) Core {
 	}
 }
 
+func (c Core) SetInvoiceService(inv InvoiceService) {
+	c.inv = inv
+}
+
 func (c Core) AuthenticateByToken(token string) (*entity.User, error) {
 	return nil, fmt.Errorf("not implemented")
 }
@@ -36,4 +45,11 @@ func (c Core) StripeVerifySignature(payload []byte, header string, tolerance tim
 
 func (c Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 	c.sc.HandleEvent(ctx, evt)
+}
+
+func (c Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (string, error) {
+	if c.inv == nil {
+		return "", fmt.Errorf("invoice service not connected")
+	}
+	return c.inv.Download(ctx, invoiceID)
 }

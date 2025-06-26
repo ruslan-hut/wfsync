@@ -13,6 +13,9 @@ wfirma:
   access_key: your-wfirma-access-key
   secret_key: your-wfirma-secret-key
   app_id: your-wfirma-app-id
+wfirma_soap:
+  username: your-wfirma-username
+  password: your-wfirma-password
 mongo:
   enabled: false
   host: 127.0.0.1

@@ -25,6 +25,11 @@ type WfirmaConfig struct {
 	AppID     string `yaml:"app_id" env-default:""`
 }
 
+type WfirmaSoapConfig struct {
+	Username string `yaml:"username" env-default:""`
+	Password string `yaml:"password" env-default:""`
+}
+
 type Mongo struct {
 	Enabled  bool   `yaml:"enabled" env-default:"false"`
 	Host     string `yaml:"host" env-default:"127.0.0.1"`
@@ -36,11 +41,12 @@ type Mongo struct {
 }
 
 type Config struct {
-	Stripe StripeConfig `yaml:"stripe"`
-	WFirma WfirmaConfig `yaml:"wfirma"`
-	Listen Listen       `yaml:"listen"`
-	Mongo  Mongo        `yaml:"mongo"`
-	Env    string       `yaml:"env" env-default:"local"`
+	Stripe     StripeConfig     `yaml:"stripe"`
+	WFirma     WfirmaConfig     `yaml:"wfirma"`
+	WFirmaSoap WfirmaSoapConfig `yaml:"wfirma_soap"`
+	Listen     Listen           `yaml:"listen"`
+	Mongo      Mongo            `yaml:"mongo"`
+	Env        string           `yaml:"env" env-default:"local"`
 }
 
 var instance *Config

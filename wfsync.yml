@@ -13,6 +13,9 @@ wfirma:
   access_key: ${WF_ACCESS_KEY}
   secret_key: ${WF_SECRET_KEY}
   app_id: ${WF_APP_ID}
+wfirma_soap:
+  username: ${WF_USER}
+  password: ${WF_PASS}
 mongo:
   enabled: true
   host: ${MONGO_HOST}
