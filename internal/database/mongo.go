@@ -6,7 +6,12 @@ import (
 	"fmt"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"wfsync/entity"
 	"wfsync/internal/config"
+)
+
+const (
+	collectionUsers = "users"
 )
 
 type MongoDB struct {
@@ -65,4 +70,17 @@ func (m *MongoDB) Save(key string, value interface{}) error {
 	collection := connection.Database(m.database).Collection(key)
 	_, err = collection.InsertOne(m.ctx, value)
 	return err
+}
+
+func (m *MongoDB) GetUser(token string) (*entity.User, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionUsers)
+	var user entity.User
+	err = collection.FindOne(m.ctx, entity.User{Token: token}).Decode(&user)
+	return &user, m.findError(err)
 }

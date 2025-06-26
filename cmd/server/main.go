@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"log/slog"
+	"wfsync/impl/auth"
 	"wfsync/impl/core"
 	"wfsync/internal/config"
 	"wfsync/internal/database"
@@ -36,6 +37,9 @@ func main() {
 
 	wfSoap := wfirma_soap.NewClient(wfirma_soap.Config(conf.WFirmaSoap), log)
 	handler.SetInvoiceService(wfSoap)
+
+	authenticate := auth.New(mongo)
+	handler.SetAuthService(authenticate)
 
 	// *** blocking start with http server ***
 	err := api.New(conf, log, handler)
