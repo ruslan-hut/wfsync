@@ -36,30 +36,30 @@ func New(sc *stripeclient.StripeClient, log *slog.Logger) Core {
 	}
 }
 
-func (c Core) SetInvoiceService(inv InvoiceService) {
+func (c *Core) SetInvoiceService(inv InvoiceService) {
 	c.inv = inv
 }
 
-func (c Core) SetAuthService(auth AuthService) {
+func (c *Core) SetAuthService(auth AuthService) {
 	c.auth = auth
 }
 
-func (c Core) AuthenticateByToken(token string) (*entity.User, error) {
+func (c *Core) AuthenticateByToken(token string) (*entity.User, error) {
 	if c.auth == nil {
 		return nil, fmt.Errorf("auth service not connected")
 	}
 	return c.auth.UserByToken(token)
 }
 
-func (c Core) StripeVerifySignature(payload []byte, header string, tolerance time.Duration) bool {
+func (c *Core) StripeVerifySignature(payload []byte, header string, tolerance time.Duration) bool {
 	return c.sc.VerifySignature(payload, header, tolerance)
 }
 
-func (c Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
+func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 	c.sc.HandleEvent(ctx, evt)
 }
 
-func (c Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (string, error) {
+func (c *Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (string, error) {
 	if c.inv == nil {
 		return "", fmt.Errorf("invoice service not connected")
 	}

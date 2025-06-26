@@ -16,7 +16,7 @@ func New(db Database) *Auth {
 	return &Auth{db: db}
 }
 
-func (a Auth) UserByToken(token string) (*entity.User, error) {
+func (a *Auth) UserByToken(token string) (*entity.User, error) {
 	if a.db == nil {
 		return nil, fmt.Errorf("database not connected")
 	}

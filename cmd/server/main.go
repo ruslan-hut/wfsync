@@ -42,7 +42,7 @@ func main() {
 	handler.SetAuthService(authenticate)
 
 	// *** blocking start with http server ***
-	err := api.New(conf, log, handler)
+	err := api.New(conf, log, &handler)
 	if err != nil {
 		log.Error("server start", sl.Err(err))
 		return
