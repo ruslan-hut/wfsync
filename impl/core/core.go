@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/stripe/stripe-go/v76"
+	"io"
 	"log/slog"
 	"time"
 	"wfsync/entity"
@@ -16,7 +17,7 @@ type AuthService interface {
 }
 
 type InvoiceService interface {
-	Download(ctx context.Context, invoiceID string) (string, error)
+	DownloadInvoice(ctx context.Context, invoiceID string) (io.ReadCloser, *entity.FileMeta, error)
 }
 
 type Core struct {
@@ -59,9 +60,9 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 	c.sc.HandleEvent(ctx, evt)
 }
 
-func (c *Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (string, error) {
+func (c *Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (io.ReadCloser, *entity.FileMeta, error) {
 	if c.inv == nil {
-		return "", fmt.Errorf("invoice service not connected")
+		return nil, nil, fmt.Errorf("invoice service not connected")
 	}
-	return c.inv.Download(ctx, invoiceID)
+	return c.inv.DownloadInvoice(ctx, invoiceID)
 }

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"wfsync/entity"
 	"wfsync/lib/sl"
 
 	"github.com/stripe/stripe-go/v76"
@@ -527,4 +528,74 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, 
 	}
 
 	return nil
+}
+
+func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (io.ReadCloser, *entity.FileMeta, error) {
+	log := c.log.With(slog.String("invoice_id", invoiceID))
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("panic recovered in DownloadInvoice", slog.Any("panic", r))
+		}
+	}()
+
+	payload := map[string]interface{}{
+		"api": map[string]interface{}{
+			"invoices": map[string]interface{}{
+				"parameters": []map[string]interface{}{
+					{
+						"parameter": map[string]interface{}{
+							"name":  "page",
+							"value": "all",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	q := url.Values{}
+	q.Set("inputFormat", "json")
+	endpoint := fmt.Sprintf("%s/invoices/download/%s?%s", c.baseURL, invoiceID, q.Encode())
+
+	data, err := json.Marshal(payload)
+	if err != nil {
+		log.Error("marshal payload", sl.Err(err))
+		return nil, nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
+	if err != nil {
+		log.Error("create request", sl.Err(err))
+		return nil, nil, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("appKey", c.appID)
+	req.Header.Set("accessKey", c.accessKey)
+	req.Header.Set("secretKey", c.secretKey)
+
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		log.Error("request failed", sl.Err(err))
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		log.Error("wFirma API returned error",
+			slog.String("status", resp.Status),
+			slog.String("body", string(body)))
+		return nil, nil, fmt.Errorf("wfirma %s: %s", resp.Status, body)
+	}
+	meta := &entity.FileMeta{
+		ContentType:   resp.Header.Get("Content-Type"),
+		ContentLength: resp.ContentLength,
+	}
+	log.With(
+		slog.String("content_type", meta.ContentType),
+		slog.Int64("content_length", meta.ContentLength),
+	).Debug("download invoice response")
+
+	return resp.Body, meta, nil
 }

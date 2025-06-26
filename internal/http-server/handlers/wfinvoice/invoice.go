@@ -6,15 +6,17 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/render"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
+	"wfsync/entity"
 	"wfsync/lib/api/response"
 	"wfsync/lib/sl"
 )
 
 type Core interface {
-	WFirmaInvoiceDownload(ctx context.Context, invID string) (string, error)
+	WFirmaInvoiceDownload(ctx context.Context, invID string) (io.ReadCloser, *entity.FileMeta, error)
 }
 
 func Download(logger *slog.Logger, handler Core) http.HandlerFunc {
@@ -42,16 +44,23 @@ func Download(logger *slog.Logger, handler Core) http.HandlerFunc {
 			return
 		}
 
-		link, err := handler.WFirmaInvoiceDownload(context.Background(), invoiceId)
+		fileStream, meta, err := handler.WFirmaInvoiceDownload(context.Background(), invoiceId)
 		if err != nil {
 			log.Error("invoice download", sl.Err(err))
 			render.JSON(w, r, response.Error(fmt.Sprintf("Request failed: %v", err)))
 			return
 		}
-		log.With(
-			slog.String("link", link),
-		).Debug("invoice id download")
+		defer fileStream.Close()
 
-		render.JSON(w, r, response.Ok(link))
+		w.Header().Set("Content-Type", meta.ContentType)
+		if meta.ContentLength >= 0 {
+			w.Header().Set("Content-Length", strconv.FormatInt(meta.ContentLength, 10))
+		}
+
+		log.Debug("invoice id download")
+
+		if _, err = io.Copy(w, fileStream); err != nil {
+			log.Error("failed to copy file", sl.Err(err))
+		}
 	}
 }
