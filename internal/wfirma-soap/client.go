@@ -26,7 +26,7 @@ type Config struct {
 func NewClient(conf Config, logger *slog.Logger) *Client {
 	return &Client{
 		hc:       &http.Client{Timeout: 10 * time.Second},
-		baseURL:  "http://api.wfirma.pl/",
+		baseURL:  "http://api.wfirma.pl",
 		username: conf.Username,
 		password: conf.Password,
 		log:      logger.With(sl.Module("wf-soap")),
