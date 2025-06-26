@@ -579,14 +579,11 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (io.Read
 		log.Error("request failed", sl.Err(err))
 		return nil, nil, err
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		log.Error("wFirma API returned error",
-			slog.String("status", resp.Status),
-			slog.String("body", string(body)))
-		return nil, nil, fmt.Errorf("wfirma %s: %s", resp.Status, body)
+		resp.Body.Close()
+		log.Error("wFirma API returned error", slog.String("status", resp.Status))
+		return nil, nil, fmt.Errorf("wfirma status: %s", resp.Status)
 	}
 	meta := &entity.FileMeta{
 		ContentType:   resp.Header.Get("Content-Type"),
