@@ -49,17 +49,15 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) error {
 	router.NotFound(errors.NotFound(log))
 	router.MethodNotAllowed(errors.NotAllowed(log))
 
-	router.Route("/api", func(rootApi chi.Router) {
+	router.Route("/v1", func(rootApi chi.Router) {
 		rootApi.Use(authenticate.New(log, handler))
-		rootApi.Route("/v1", func(v1 chi.Router) {
-			v1.Route("/wf", func(wf chi.Router) {
-				wf.Route("/invoice", func(inv chi.Router) {
-					inv.Get("/download/{id}", wfinvoice.Download(log, handler))
-				})
+		rootApi.Route("/wf", func(wf chi.Router) {
+			wf.Route("/invoice", func(inv chi.Router) {
+				inv.Get("/download/{id}", wfinvoice.Download(log, handler))
 			})
-			v1.Route("/st", func(st chi.Router) {
-				st.Get("/hold/{sum}", payment.Hold(log, handler))
-			})
+		})
+		rootApi.Route("/st", func(st chi.Router) {
+			st.Get("/hold/{sum}", payment.Hold(log, handler))
 		})
 	})
 	router.Route("/webhook", func(rootWH chi.Router) {
