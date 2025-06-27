@@ -272,6 +272,16 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte)
 		})
 	}
 
+	if inv.ShippingCost != nil && inv.ShippingCost.AmountTotal > 0 {
+		contents = append(contents, map[string]interface{}{
+			"invoicecontent": map[string]interface{}{
+				"name":  "Zwrot kosztów transportu towarów",
+				"count": 1,
+				"price": float64(inv.ShippingCost.AmountTotal) / 100.0,
+			},
+		})
+	}
+
 	iso := func(ts int64) string { return time.Unix(ts, 0).Format("2006-01-02") }
 	//attach := ""
 	//if len(pdf) > 0 {
