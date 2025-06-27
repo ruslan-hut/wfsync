@@ -289,6 +289,10 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte)
 	//}
 
 	total := float64(inv.Total) / 100.0
+	orderId := inv.Number
+	if inv.Metadata != nil {
+		orderId = inv.Metadata["order_id"]
+	}
 
 	addPayload := map[string]interface{}{
 		"api": map[string]interface{}{
@@ -300,7 +304,7 @@ func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte)
 						"price_type":      "brutto",
 						"total":           total,
 						"id_external":     inv.Number,
-						"description":     "Stripe #" + inv.Number,
+						"description":     orderId,
 						"date":            iso(inv.PeriodStart),
 						"currency":        strings.ToUpper(string(inv.Currency)),
 						"invoicecontents": contents,
