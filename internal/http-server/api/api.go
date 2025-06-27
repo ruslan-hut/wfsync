@@ -11,6 +11,7 @@ import (
 	"time"
 	"wfsync/internal/config"
 	"wfsync/internal/http-server/handlers/errors"
+	"wfsync/internal/http-server/handlers/payment"
 	"wfsync/internal/http-server/handlers/stripehandler"
 	"wfsync/internal/http-server/handlers/wfinvoice"
 
@@ -29,6 +30,7 @@ type Handler interface {
 	authenticate.Authenticate
 	stripehandler.Core
 	wfinvoice.Core
+	payment.Core
 }
 
 func New(conf *config.Config, log *slog.Logger, handler Handler) error {
@@ -55,10 +57,14 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) error {
 					inv.Get("/download/{id}", wfinvoice.Download(log, handler))
 				})
 			})
+			v1.Route("/st", func(st chi.Router) {
+				st.Get("/hold/{sum}", payment.Hold(log, handler))
+			})
 		})
 	})
 	router.Route("/webhook", func(rootWH chi.Router) {
 		rootWH.Post("/stripe", stripehandler.Event(log, handler))
+		rootWH.Post("/event", stripehandler.Event(log, handler))
 	})
 
 	httpLog := slog.NewLogLogger(log.Handler(), slog.LevelError)
