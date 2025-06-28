@@ -22,13 +22,16 @@ jobs:
           sed -i 's|${WF_ACCESS_KEY}|'"$WF_ACCESS_KEY"'|g' wfsync.yml
           sed -i 's|${WF_SECRET_KEY}|'"$WF_SECRET_KEY"'|g' wfsync.yml
           sed -i 's|${WF_APP_ID}|'"$WF_APP_ID"'|g' wfsync.yml
-          sed -i 's|${WF_USER}|'"$WF_USER"'|g' wfsync.yml
-          sed -i 's|${WF_PASS}|'"$WF_PASS"'|g' wfsync.yml
           sed -i 's|${MONGO_HOST}|'"$MONGO_HOST"'|g' wfsync.yml
           sed -i 's|${MONGO_PORT}|'"$MONGO_PORT"'|g' wfsync.yml
           sed -i 's|${MONGO_USER}|'"$MONGO_USER"'|g' wfsync.yml
           sed -i 's|${MONGO_PASSWORD}|'"$MONGO_PASSWORD"'|g' wfsync.yml
           sed -i 's|${MONGO_DATABASE}|'"$MONGO_DATABASE"'|g' wfsync.yml
+          sed -i 's|${SQL_USERNAME}|'"$SQL_USERNAME"'|g' wfsync.yml
+          sed -i 's|${SQL_PASSWORD}|'"$SQL_PASSWORD"'|g' wfsync.yml
+          sed -i 's|${SQL_DATABASE}|'"$SQL_DATABASE"'|g' wfsync.yml
+          sed -i 's|${FILE_PATH}|'"$FILE_PATH"'|g' wfsync.yml
+          sed -i 's|${TELEGRAM_API_KEY}|'"$TELEGRAM_API_KEY"'|g' wfsync.yml
 
         env:
           STRIPE_API_KEY: ${{ secrets.STRIPE_API_KEY }}
@@ -37,13 +40,16 @@ jobs:
           WF_ACCESS_KEY: ${{ secrets.WF_ACCESS_KEY }}
           WF_SECRET_KEY: ${{ secrets.WF_SECRET_KEY }}
           WF_APP_ID: ${{ secrets.WF_APP_ID }}
-          WF_USER: ${{ secrets.WF_USER }}
-          WF_PASS: ${{ secrets.WF_PASS }}
           MONGO_HOST: ${{ secrets.MONGO_HOST }}
           MONGO_PORT: ${{ secrets.MONGO_PORT }}
           MONGO_USER: ${{ secrets.MONGO_USER }}
           MONGO_PASSWORD: ${{ secrets.MONGO_PASSWORD }}
           MONGO_DATABASE: ${{ secrets.MONGO_DATABASE }}
+          SQL_USERNAME: ${{ secrets.SQL_USERNAME }}
+          SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
+          SQL_DATABASE: ${{ secrets.SQL_DATABASE }}
+          FILE_PATH: ${{ secrets.FILE_PATH }}
+          TELEGRAM_API_KEY: ${{ secrets.TELEGRAM_API_KEY }}
 
       - name: Copy Configuration to Server
         uses: appleboy/scp-action@master

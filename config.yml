@@ -13,9 +13,6 @@ wfirma:
   access_key: your-wfirma-access-key
   secret_key: your-wfirma-secret-key
   app_id: your-wfirma-app-id
-wfirma_soap:
-  username: your-wfirma-username
-  password: your-wfirma-password
 mongo:
   enabled: false
   host: 127.0.0.1
@@ -24,3 +21,16 @@ mongo:
   password: pass
   database: evsys
   save_url: mongodb://admin:pass@
+opencart:
+  enabled: false
+  driver: mysql
+  hostname: localhost
+  username: user
+  password: pass
+  database: oc
+  port: 3306
+  prefix: oc_
+  file_path: /local/file/path
+telegram:
+  enabled: true
+  api_key: ${TELEGRAM_API_KEY}

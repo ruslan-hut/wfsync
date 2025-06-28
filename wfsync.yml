@@ -13,9 +13,6 @@ wfirma:
   access_key: ${WF_ACCESS_KEY}
   secret_key: ${WF_SECRET_KEY}
   app_id: ${WF_APP_ID}
-wfirma_soap:
-  username: ${WF_USER}
-  password: ${WF_PASS}
 mongo:
   enabled: true
   host: ${MONGO_HOST}
@@ -23,3 +20,16 @@ mongo:
   user: ${MONGO_USER}
   password: ${MONGO_PASSWORD}
   database: ${MONGO_DATABASE}
+opencart:
+  enabled: true
+  driver: mysql
+  hostname: localhost
+  username: ${SQL_USERNAME}
+  password: ${SQL_PASSWORD}
+  database: ${SQL_DATABASE}
+  port: 3306
+  prefix: oc_
+  file_path: ${FILE_PATH}
+telegram:
+  enabled: true
+  api_key: ${TELEGRAM_API_KEY}

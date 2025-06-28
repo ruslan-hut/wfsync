@@ -25,11 +25,6 @@ type WfirmaConfig struct {
 	AppID     string `yaml:"app_id" env-default:""`
 }
 
-type WfirmaSoapConfig struct {
-	Username string `yaml:"username" env-default:""`
-	Password string `yaml:"password" env-default:""`
-}
-
 type Mongo struct {
 	Enabled  bool   `yaml:"enabled" env-default:"false"`
 	Host     string `yaml:"host" env-default:"127.0.0.1"`
@@ -40,13 +35,31 @@ type Mongo struct {
 	SaveUrl  string `yaml:"save_url" env-default:""`
 }
 
+type OpenCart struct {
+	Enabled  bool   `yaml:"enabled" env-default:"false"`
+	Driver   string `yaml:"driver" env-default:"mysql"`
+	HostName string `yaml:"hostname" env-default:"localhost"`
+	UserName string `yaml:"username" env-default:"root"`
+	Password string `yaml:"password" env-default:""`
+	Database string `yaml:"database" env-default:""`
+	Port     string `yaml:"port" env-default:"3306"`
+	Prefix   string `yaml:"prefix" env-default:""`
+	FilePath string `yaml:"file_path" env-default:""`
+}
+
+type Telegram struct {
+	Enabled bool   `yaml:"enabled" env-default:"false"`
+	ApiKey  string `yaml:"api_key" env-default:""`
+}
+
 type Config struct {
-	Stripe     StripeConfig     `yaml:"stripe"`
-	WFirma     WfirmaConfig     `yaml:"wfirma"`
-	WFirmaSoap WfirmaSoapConfig `yaml:"wfirma_soap"`
-	Listen     Listen           `yaml:"listen"`
-	Mongo      Mongo            `yaml:"mongo"`
-	Env        string           `yaml:"env" env-default:"local"`
+	Stripe   StripeConfig `yaml:"stripe"`
+	WFirma   WfirmaConfig `yaml:"wfirma"`
+	Listen   Listen       `yaml:"listen"`
+	Mongo    Mongo        `yaml:"mongo"`
+	OpenCart OpenCart     `yaml:"opencart"`
+	Telegram Telegram     `yaml:"telegram"`
+	Env      string       `yaml:"env" env-default:"local"`
 }
 
 var instance *Config
