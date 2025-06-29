@@ -559,7 +559,7 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (io.Read
 					{
 						"parameter": map[string]interface{}{
 							"name":  "page",
-							"value": "all",
+							"value": "invoice",
 						},
 					},
 				},

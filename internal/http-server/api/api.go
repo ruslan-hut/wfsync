@@ -55,9 +55,9 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) error {
 			wf.Get("/invoice/{id}", wfinvoice.Download(log, handler))
 		})
 		rootApi.Route("/st", func(st chi.Router) {
-			st.Get("/hold/{sum}", payment.Hold(log, handler))
-			st.Get("/capture/{sum}", payment.Hold(log, handler))
-			st.Get("/cancel/{sum}", payment.Hold(log, handler))
+			st.Post("/hold", payment.Hold(log, handler))
+			st.Post("/capture", payment.Capture(log, handler))
+			st.Post("/cancel", payment.Cancel(log, handler))
 		})
 	})
 	router.Route("/webhook", func(rootWH chi.Router) {

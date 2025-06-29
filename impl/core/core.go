@@ -67,6 +67,10 @@ func (c *Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (io.
 	return c.inv.DownloadInvoice(ctx, invoiceID)
 }
 
-func (c *Core) StripePaymentLink(amount int64) (string, error) {
-	return fmt.Sprintf("link request: %d", amount), nil
+func (c *Core) StripePaymentLink(params *entity.CheckoutParams) (*entity.Payment, error) {
+	return &entity.Payment{
+		Amount: params.Total,
+		Id:     "payment_id",
+		Link:   "https://example.com",
+	}, nil
 }
