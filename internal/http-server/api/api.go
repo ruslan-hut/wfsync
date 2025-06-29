@@ -52,9 +52,7 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) error {
 	router.Route("/v1", func(rootApi chi.Router) {
 		rootApi.Use(authenticate.New(log, handler))
 		rootApi.Route("/wf", func(wf chi.Router) {
-			wf.Route("/invoice", func(inv chi.Router) {
-				inv.Get("/download/{id}", wfinvoice.Download(log, handler))
-			})
+			wf.Get("/invoice/{id}", wfinvoice.Download(log, handler))
 		})
 		rootApi.Route("/st", func(st chi.Router) {
 			st.Get("/hold/{sum}", payment.Hold(log, handler))
@@ -63,7 +61,6 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) error {
 		})
 	})
 	router.Route("/webhook", func(rootWH chi.Router) {
-		rootWH.Post("/stripe", stripehandler.Event(log, handler))
 		rootWH.Post("/event", stripehandler.Event(log, handler))
 	})
 
