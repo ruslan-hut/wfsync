@@ -6,7 +6,7 @@ import (
 )
 
 type CheckoutParams struct {
-	LineItems []LineItem `json:"line_items" validate:"required,dive,min=1"`
+	LineItems []LineItem `json:"line_items" validate:"required,min=1,dive"`
 	Total     int64      `json:"total" validate:"required,min=1"`
 }
 
