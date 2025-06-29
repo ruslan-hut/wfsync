@@ -82,5 +82,5 @@ func (m *MongoDB) GetUser(token string) (*entity.User, error) {
 	collection := connection.Database(m.database).Collection(collectionUsers)
 	var user entity.User
 	err = collection.FindOne(m.ctx, entity.User{Token: token}).Decode(&user)
-	return &user, m.findError(err)
+	return &user, err
 }
