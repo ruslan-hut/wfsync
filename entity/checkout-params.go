@@ -1,6 +1,9 @@
 package entity
 
-import "net/http"
+import (
+	"net/http"
+	"wfsync/lib/validate"
+)
 
 type CheckoutParams struct {
 	LineItems []*LineItem `json:"line_items" validate:"required,dive"`
@@ -8,7 +11,7 @@ type CheckoutParams struct {
 }
 
 func (c *CheckoutParams) Bind(_ *http.Request) error {
-	return nil
+	return validate.Struct(c)
 }
 
 type LineItem struct {

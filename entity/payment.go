@@ -1,6 +1,9 @@
 package entity
 
-import "net/http"
+import (
+	"net/http"
+	"wfsync/lib/validate"
+)
 
 type Payment struct {
 	Amount int64  `json:"amount"`
@@ -9,5 +12,5 @@ type Payment struct {
 }
 
 func (p *Payment) Bind(_ *http.Request) error {
-	return nil
+	return validate.Struct(p)
 }
