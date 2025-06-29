@@ -35,6 +35,7 @@ func Hold(log *slog.Logger, handler Core) http.HandlerFunc {
 			logger.Error("bind request", sl.Err(err))
 			render.Status(r, 400)
 			render.JSON(w, r, response.Error("Invalid request"))
+			return
 		}
 		logger = logger.With(
 			slog.Int("items_count", len(checkoutParams.LineItems)),
@@ -74,6 +75,7 @@ func Capture(log *slog.Logger, handler Core) http.HandlerFunc {
 			logger.Error("bind request", sl.Err(err))
 			render.Status(r, 400)
 			render.JSON(w, r, response.Error("Invalid request"))
+			return
 		}
 		logger = logger.With(
 			slog.String("id", payment.Id),
@@ -113,6 +115,7 @@ func Cancel(log *slog.Logger, handler Core) http.HandlerFunc {
 			logger.Error("bind request", sl.Err(err))
 			render.Status(r, 400)
 			render.JSON(w, r, response.Error("Invalid request"))
+			return
 		}
 		logger = logger.With(
 			slog.String("id", payment.Id),
