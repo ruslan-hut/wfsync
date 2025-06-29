@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"wfsync/entity"
@@ -80,7 +81,8 @@ func (m *MongoDB) GetUser(token string) (*entity.User, error) {
 	defer m.disconnect(connection)
 
 	collection := connection.Database(m.database).Collection(collectionUsers)
+	filter := bson.D{{"token", token}}
 	var user entity.User
-	err = collection.FindOne(m.ctx, entity.User{Token: token}).Decode(&user)
+	err = collection.FindOne(m.ctx, filter).Decode(&user)
 	return &user, err
 }
