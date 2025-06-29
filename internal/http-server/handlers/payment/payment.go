@@ -34,7 +34,7 @@ func Hold(log *slog.Logger, handler Core) http.HandlerFunc {
 		if err := render.Bind(r, &checkoutParams); err != nil {
 			logger.Error("bind request", sl.Err(err))
 			render.Status(r, 400)
-			render.JSON(w, r, response.Error("Invalid request"))
+			render.JSON(w, r, response.Error(fmt.Sprintf("Invalid request: %v", err)))
 			return
 		}
 		logger = logger.With(
@@ -74,7 +74,7 @@ func Capture(log *slog.Logger, handler Core) http.HandlerFunc {
 		if err := render.Bind(r, &payment); err != nil {
 			logger.Error("bind request", sl.Err(err))
 			render.Status(r, 400)
-			render.JSON(w, r, response.Error("Invalid request"))
+			render.JSON(w, r, response.Error(fmt.Sprintf("Invalid request: %v", err)))
 			return
 		}
 		logger = logger.With(
@@ -114,7 +114,7 @@ func Cancel(log *slog.Logger, handler Core) http.HandlerFunc {
 		if err := render.Bind(r, &payment); err != nil {
 			logger.Error("bind request", sl.Err(err))
 			render.Status(r, 400)
-			render.JSON(w, r, response.Error("Invalid request"))
+			render.JSON(w, r, response.Error(fmt.Sprintf("Invalid request: %v", err)))
 			return
 		}
 		logger = logger.With(
