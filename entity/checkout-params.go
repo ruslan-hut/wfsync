@@ -6,8 +6,8 @@ import (
 )
 
 type CheckoutParams struct {
-	LineItems []*LineItem `json:"line_items" validate:"required,dive,min=1"`
-	Total     int64       `json:"total" validate:"required,min=1"`
+	LineItems []LineItem `json:"line_items" validate:"required,dive,min=1"`
+	Total     int64      `json:"total" validate:"required,min=1"`
 }
 
 func (c *CheckoutParams) Bind(_ *http.Request) error {
