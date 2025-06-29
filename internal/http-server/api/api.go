@@ -56,8 +56,8 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) error {
 		})
 		rootApi.Route("/st", func(st chi.Router) {
 			st.Post("/hold", payment.Hold(log, handler))
-			st.Post("/capture", payment.Capture(log, handler))
-			st.Post("/cancel", payment.Cancel(log, handler))
+			st.Post("/capture/{id}", payment.Capture(log, handler))
+			st.Post("/cancel/{id}", payment.Cancel(log, handler))
 		})
 	})
 	router.Route("/webhook", func(rootWH chi.Router) {
