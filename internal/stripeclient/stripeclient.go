@@ -301,6 +301,7 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 
 	cs, err := s.sc.CheckoutSessions.New(csParams)
 	if err != nil {
+		err = s.parseErr(err)
 		s.log.With(
 			sl.Err(err),
 		).Error("create checkout session")
