@@ -12,6 +12,7 @@ type CheckoutParams struct {
 	Total         int64          `json:"total" validate:"required,min=1"`
 	Currency      string         `json:"currency" validate:"required,oneof=PLN EUR"`
 	OrderId       string         `json:"order_id" validate:"required,min=1,max=32"`
+	SuccessUrl    string         `json:"success_url" validate:"required,url"`
 	Created       time.Time      `json:"created"`
 	Closed        time.Time      `json:"closed,omitempty"`
 	Status        string         `json:"status"`

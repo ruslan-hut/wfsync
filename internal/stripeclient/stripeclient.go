@@ -295,7 +295,7 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 			},
 		},
 		Metadata:      map[string]string{"order_id": params.OrderId},
-		SuccessURL:    stripe.String("https://darkbyrior.com/"),
+		SuccessURL:    stripe.String(params.SuccessUrl),
 		CustomerEmail: stripe.String(params.ClientDetails.Email),
 	}
 
