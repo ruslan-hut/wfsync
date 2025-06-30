@@ -10,6 +10,7 @@ type CheckoutParams struct {
 	LineItems     []*LineItem    `json:"line_items" validate:"required,min=1,dive"`
 	Total         int64          `json:"total" validate:"required,min=1"`
 	Currency      string         `json:"currency" validate:"required,oneof=PLN EUR"`
+	OrderId       string         `json:"order_id" validate:"required,min=1,max=32"`
 }
 
 func (c *CheckoutParams) Bind(_ *http.Request) error {
