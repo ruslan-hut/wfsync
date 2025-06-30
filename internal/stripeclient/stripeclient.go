@@ -271,11 +271,15 @@ func (s *StripeClient) checkCustomer(sess *stripe.CheckoutSession) {
 }
 
 func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
-	s.log.With(
+	log := s.log.With(
 		slog.Int64("total", params.Total),
 		slog.String("currency", params.Currency),
 		slog.String("order_id", params.OrderId),
-	).Debug("creating payment link")
+	)
+	defer func() {
+		_ = s.db.SaveCheckoutParams(params)
+		log.Debug("hold amount completed")
+	}()
 
 	csParams := &stripe.CheckoutSessionParams{
 		Mode: stripe.String(string(stripe.CheckoutSessionModePayment)),
@@ -302,29 +306,22 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 	cs, err := s.sc.CheckoutSessions.New(csParams)
 	if err != nil {
 		err = s.parseErr(err)
-		s.log.With(
+		log.With(
 			sl.Err(err),
 		).Error("create checkout session")
 		return nil, fmt.Errorf("create checkout session: %w", err)
 	}
+	log = log.With(slog.String("session_id", cs.ID))
 
 	err = s.db.Save("checkout_session_hold", cs)
 	if err != nil {
-		s.log.With(
-			slog.String("session_id", cs.ID),
+		log.With(
 			sl.Err(err),
 		).Error("save checkout session to database")
 	}
 
 	params.SessionId = cs.ID
 	params.Status = string(cs.Status)
-	err = s.db.SaveCheckoutParams(params)
-	if err != nil {
-		s.log.With(
-			slog.String("session_id", cs.ID),
-			sl.Err(err),
-		).Error("save checkout params to database")
-	}
 
 	payment := &entity.Payment{
 		Id:     cs.ID,
