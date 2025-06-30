@@ -68,9 +68,5 @@ func (c *Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (io.
 }
 
 func (c *Core) StripePaymentLink(params *entity.CheckoutParams) (*entity.Payment, error) {
-	return &entity.Payment{
-		Amount: params.Total,
-		Id:     "payment_id",
-		Link:   "https://example.com",
-	}, nil
+	return c.sc.HoldAmount(params)
 }
