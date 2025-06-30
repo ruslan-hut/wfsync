@@ -294,7 +294,8 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 				Quantity: stripe.Int64(1),
 			},
 		},
-		Metadata: map[string]string{"order_id": params.OrderId},
+		Metadata:   map[string]string{"order_id": params.OrderId},
+		SuccessURL: stripe.String("https://darkbyrior.com/"),
 	}
 
 	cs, err := s.sc.CheckoutSessions.New(csParams)
