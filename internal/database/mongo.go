@@ -12,7 +12,8 @@ import (
 )
 
 const (
-	collectionUsers = "users"
+	collectionUsers          = "users"
+	collectionCheckoutParams = "checkout_params"
 )
 
 type MongoDB struct {
@@ -85,4 +86,19 @@ func (m *MongoDB) GetUser(token string) (*entity.User, error) {
 	var user entity.User
 	err = collection.FindOne(m.ctx, filter).Decode(&user)
 	return &user, err
+}
+
+func (m *MongoDB) SaveCheckoutParams(params *entity.CheckoutParams) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
+	filter := bson.D{{"order_id", params.OrderId}}
+	update := bson.D{{"$set", params}}
+	opts := options.Update().SetUpsert(true)
+	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	return err
 }

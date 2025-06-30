@@ -29,7 +29,12 @@ func main() {
 	}
 
 	wfirmaClient := wfirma.NewClient(wfirma.Config(conf.WFirma), log)
-	stripeClient := stripeclient.New(conf.Stripe.APIKey, conf.Stripe.WebhookSecret, wfirmaClient, log)
+	stripeKey := conf.Stripe.APIKey
+	if conf.Stripe.TestMode {
+		stripeKey = conf.Stripe.TestKey
+		log.Info("using test mode for stripe", slog.String("key", stripeKey))
+	}
+	stripeClient := stripeclient.New(stripeKey, conf.Stripe.WebhookSecret, wfirmaClient, log)
 	stripeClient.SetDatabase(mongo)
 
 	handler := core.New(stripeClient, log)

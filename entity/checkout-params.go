@@ -2,6 +2,7 @@ package entity
 
 import (
 	"net/http"
+	"time"
 	"wfsync/lib/validate"
 )
 
@@ -11,9 +12,14 @@ type CheckoutParams struct {
 	Total         int64          `json:"total" validate:"required,min=1"`
 	Currency      string         `json:"currency" validate:"required,oneof=PLN EUR"`
 	OrderId       string         `json:"order_id" validate:"required,min=1,max=32"`
+	Created       time.Time      `json:"created"`
+	Closed        time.Time      `json:"closed,omitempty"`
+	Status        string         `json:"status"`
+	SessionId     string         `json:"session_id,omitempty"`
 }
 
 func (c *CheckoutParams) Bind(_ *http.Request) error {
+	c.Created = time.Now()
 	return validate.Struct(c)
 }
 

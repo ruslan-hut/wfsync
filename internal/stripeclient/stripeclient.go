@@ -11,13 +11,16 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"wfsync/entity"
 	"wfsync/internal/wfirma"
 	"wfsync/lib/sl"
 )
 
 type Database interface {
 	Save(key string, value interface{}) error
+	SaveCheckoutParams(params *entity.CheckoutParams) error
 }
 
 type StripeClient struct {
@@ -26,6 +29,7 @@ type StripeClient struct {
 	wfirma        *wfirma.Client
 	db            Database
 	log           *slog.Logger
+	mutex         sync.Mutex
 }
 
 func New(apiKey, whSecret string, wf *wfirma.Client, logger *slog.Logger) *StripeClient {
@@ -264,4 +268,66 @@ func (s *StripeClient) checkCustomer(sess *stripe.CheckoutSession) {
 	//	customer.Name = sess.Metadata["name"]
 	//}
 	sess.Customer = customer
+}
+
+func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
+	s.log.With(
+		slog.Int64("total", params.Total),
+		slog.String("currency", params.Currency),
+		slog.String("order_id", params.OrderId),
+	).Debug("creating payment link")
+
+	csParams := &stripe.CheckoutSessionParams{
+		Mode: stripe.String(string(stripe.CheckoutSessionModePayment)),
+		PaymentIntentData: &stripe.CheckoutSessionPaymentIntentDataParams{
+			CaptureMethod: stripe.String("manual"),
+		},
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			{
+				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+					Currency: stripe.String(params.Currency),
+					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+						Name: stripe.String("Order " + params.OrderId),
+					},
+					UnitAmount: stripe.Int64(params.Total),
+				},
+				Quantity: stripe.Int64(1),
+			},
+		},
+		Metadata: map[string]string{"order_id": params.OrderId},
+	}
+
+	cs, err := s.sc.CheckoutSessions.New(csParams)
+	if err != nil {
+		s.log.With(
+			sl.Err(err),
+		).Error("create checkout session")
+		return nil, fmt.Errorf("create checkout session: %w", err)
+	}
+
+	err = s.db.Save("checkout_session_hold", cs)
+	if err != nil {
+		s.log.With(
+			slog.String("session_id", cs.ID),
+			sl.Err(err),
+		).Error("save checkout session to database")
+	}
+
+	params.SessionId = cs.ID
+	params.Status = string(cs.Status)
+	err = s.db.SaveCheckoutParams(params)
+	if err != nil {
+		s.log.With(
+			slog.String("session_id", cs.ID),
+			sl.Err(err),
+		).Error("save checkout params to database")
+	}
+
+	payment := &entity.Payment{
+		Id:     cs.ID,
+		Amount: params.Total,
+		Link:   cs.URL,
+	}
+
+	return payment, nil
 }
