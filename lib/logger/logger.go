@@ -4,6 +4,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"wfsync/bot"
 )
 
 const (
@@ -43,4 +44,20 @@ func SetupLogger(env, logPath string) *slog.Logger {
 	}
 
 	return logger
+}
+
+// SetupTelegramHandler adds a Telegram handler to the logger
+func SetupTelegramHandler(logger *slog.Logger, tgBot *bot.TgBot, minLevel slog.Level) *slog.Logger {
+	if tgBot == nil {
+		return logger
+	}
+
+	// Get the existing handler from the logger
+	existingHandler := logger.Handler()
+
+	// Create a new Telegram handler that wraps the existing handler
+	tgHandler := NewTelegramHandler(existingHandler, tgBot, minLevel)
+
+	// Create a new logger with the Telegram handler
+	return slog.New(tgHandler)
 }

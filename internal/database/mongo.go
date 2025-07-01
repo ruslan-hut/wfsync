@@ -88,6 +88,45 @@ func (m *MongoDB) GetUser(token string) (*entity.User, error) {
 	return &user, err
 }
 
+func (m *MongoDB) GetTelegramUsers() ([]*entity.User, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionUsers)
+	filter := bson.D{{"telegram_id", bson.D{{"$gt", 0}}}, {"telegram_enabled", true}}
+	cursor, err := collection.Find(m.ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(m.ctx)
+
+	var users []*entity.User
+	err = cursor.All(m.ctx, &users)
+	if err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+func (m *MongoDB) SetTelegramEnabled(id int64, isActive bool, logLevel int) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+	collection := connection.Database(m.database).Collection(collectionUsers)
+	filter := bson.D{{"telegram_id", id}}
+	update := bson.D{{"$set", bson.D{
+		{"telegram_enabled", isActive},
+		{"log_level", logLevel},
+	}}}
+	_, err = collection.UpdateOne(m.ctx, filter, update)
+	return err
+}
+
 func (m *MongoDB) SaveCheckoutParams(params *entity.CheckoutParams) error {
 	connection, err := m.connect()
 	if err != nil {

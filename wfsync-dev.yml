@@ -33,5 +33,5 @@ opencart:
   prefix: oc_
   file_path: ${FILE_PATH}
 telegram:
-  enabled: true
+  enabled: false
   api_key: ${TELEGRAM_API_KEY}

@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"log/slog"
+	"wfsync/bot"
 	"wfsync/impl/auth"
 	"wfsync/impl/core"
 	"wfsync/internal/config"
@@ -33,6 +34,27 @@ func main() {
 	mongo := database.NewMongoClient(conf)
 	if mongo != nil {
 		log.Info("connected to mongo")
+	}
+
+	// Initialize Telegram bot if enabled
+	var tgBot *bot.TgBot
+	if conf.Telegram.Enabled {
+		var err error
+		tgBot, err = bot.NewTgBot(conf.Telegram.ApiKey, mongo, log)
+		if err != nil {
+			log.Error("initialize telegram bot", sl.Err(err))
+		} else {
+			// Set up Telegram handler for the logger
+			log = logger.SetupTelegramHandler(log, tgBot, slog.LevelDebug)
+			log.Info("telegram bot initialized")
+
+			// Start the bot in a goroutine
+			go func() {
+				if err = tgBot.Start(); err != nil {
+					log.Error("telegram bot", sl.Err(err))
+				}
+			}()
+		}
 	}
 
 	wfirmaClient := wfirma.NewClient(wfirma.Config(conf.WFirma), log)

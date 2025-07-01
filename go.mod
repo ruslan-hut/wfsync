@@ -3,13 +3,13 @@ module wfsync
 go 1.24
 
 require (
+	github.com/PaulSonOfLars/gotgbot/v2 v2.0.0-rc.32
 	github.com/go-chi/chi/v5 v5.2.2
 	github.com/go-chi/render v1.0.3
 	github.com/go-playground/validator/v10 v10.26.0
 	github.com/google/uuid v1.6.0
 	github.com/ilyakaznacheev/cleanenv v1.5.0
 	github.com/stripe/stripe-go/v76 v76.25.0
-	github.com/tiaguinho/gosoap v1.4.4
 	go.mongodb.org/mongo-driver v1.17.4
 )
 
