@@ -440,6 +440,13 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, 
 
 	iso := func(ts int64) string { return time.Unix(ts, 0).Format("2006-01-02") }
 	total := float64(sess.AmountTotal) / 100.0
+	orderId := sess.ID
+	if sess.Metadata != nil {
+		id, ok := sess.Metadata["order_id"]
+		if ok {
+			orderId = id
+		}
+	}
 
 	addPayload := map[string]interface{}{
 		"api": map[string]interface{}{
@@ -450,8 +457,8 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, 
 						"type":            "normal",
 						"price_type":      "brutto",
 						"total":           total,
-						"id_external":     sess.ID,
-						"description":     "Stripe ID:" + sess.ID,
+						"id_external":     orderId,
+						"description":     "ID: " + orderId,
 						"date":            iso(sess.Created),
 						"currency":        strings.ToUpper(string(sess.Currency)),
 						"invoicecontents": contents,
