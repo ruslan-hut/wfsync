@@ -1,0 +1,52 @@
+## API Endpoints
+
+### Authentication Required Endpoints
+
+All endpoints under `/v1` require authentication. To authenticate, send a Bearer token in the Authorization header.
+
+Example of an authenticated request:
+
+```bash
+curl -X GET 'https://api.example.com/v1/wf/invoice/123' \
+-H 'Authorization: Bearer your-token-here'
+```
+
+#### Wfirma Endpoints
+
+- `GET /v1/wf/invoice/{id}` - Download an invoice from Wfirma by ID
+
+#### Stripe Endpoints
+
+- `POST /v1/st/hold` - Create a payment hold in Stripe
+- `POST /v1/st/capture/{id}` - Capture a previously held payment
+- `POST /v1/st/cancel/{id}` - Cancel a payment
+
+### Public Endpoints
+
+- `POST /webhook/event` - Webhook endpoint for Stripe events
+
+## Usage Examples
+
+### Creating a Payment Hold
+Body payload example, all fields are obligatory
+```json
+{
+  "client_details": {
+    "name": "Contractor",
+    "email": "test@example.com",
+    "phone": "0005544688",
+    "country": "PL",
+    "zip_code": "01-120",
+    "city": "Warszawa",
+    "street": ""
+  },
+  "line_items":[
+    {"name":"DARK Top Bez Wycierania, 30 ml","qty":1,"price":8500},
+    {"name":"DARK Scotch Base (ulepszona formuła), 15 ml","qty":1,"price":6500}
+  ],
+  "total":15000,
+  "currency":"PLN",
+  "order_id": "123456",
+  "success_url": "https://darkbyrior.com/success"
+}
+```
