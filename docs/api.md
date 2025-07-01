@@ -10,6 +10,19 @@ Example of an authenticated request:
 curl -X GET 'https://api.example.com/v1/wf/invoice/123' \
 -H 'Authorization: Bearer your-token-here'
 ```
+### Response structure
+
+API response always has the following structure
+
+```json
+{
+    "success": true,
+    "data": {"response":  "payload"},
+    "status_message": "Success",
+    "timestamp": "2025-07-01T09:27:19Z"
+}
+```
+`data` section may differ depending on endpoint purpose or may be null
 
 #### Wfirma Endpoints
 
