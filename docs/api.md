@@ -36,7 +36,7 @@ API response always has the following structure
 
 ### Public Endpoints
 
-- `POST /webhook/event` - Webhook endpoint for Stripe events
+- `POST /webhook/event` - Webhook endpoint for Stripe events, requests authorized via Stripe authorization headers as described in the documentation
 
 ## Usage Examples
 
