@@ -20,7 +20,7 @@ func main() {
 	flag.Parse()
 
 	conf := config.MustLoad(*configPath)
-	if logPath == nil {
+	if *logPath == "" {
 		logPath = &conf.Log
 	}
 	log := logger.SetupLogger(conf.Env, *logPath)
