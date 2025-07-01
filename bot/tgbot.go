@@ -56,7 +56,7 @@ func (t *TgBot) Start() error {
 	updater := ext.NewUpdater(dispatcher, nil)
 
 	dispatcher.AddHandler(handlers.NewCommand("start", t.start))
-	dispatcher.AddHandler(handlers.NewCommand("stop", t.start))
+	dispatcher.AddHandler(handlers.NewCommand("stop", t.stop))
 	dispatcher.AddHandler(handlers.NewCommand("level", t.level))
 
 	// Start receiving updates.
@@ -90,9 +90,17 @@ func (t *TgBot) loadUsers() {
 		return
 	}
 	t.users = make(map[int64]*entity.User)
+	active := 0
 	for _, user := range users {
 		t.users[user.TelegramId] = user
+		if user.TelegramEnabled {
+			active++
+		}
 	}
+	t.log.With(
+		slog.Int("count", len(t.users)),
+		slog.Int("active", active),
+	).Debug("loaded users")
 }
 
 func (t *TgBot) findUser(id int64) *entity.User {
