@@ -16,12 +16,19 @@ import (
 
 func main() {
 	configPath := flag.String("conf", "config.yml", "path to config file")
-	logPath := flag.String("log", "/var/log/", "path to log file directory")
+	logPath := flag.String("log", "", "path to log file directory")
 	flag.Parse()
 
 	conf := config.MustLoad(*configPath)
+	if logPath == nil {
+		logPath = &conf.Log
+	}
 	log := logger.SetupLogger(conf.Env, *logPath)
-	log.Info("starting wfsync", slog.String("config", *configPath), slog.String("env", conf.Env))
+	log.With(
+		slog.String("config", *configPath),
+		slog.String("env", conf.Env),
+		slog.String("log", *logPath),
+	).Info("starting")
 
 	mongo := database.NewMongoClient(conf)
 	if mongo != nil {

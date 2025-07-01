@@ -1,12 +1,12 @@
 ---
 
 env: dev
-log: /var/log/wfsync.log
+log: /var/log/wfsyncd.log
 listen:
   bind_ip: 127.0.0.1
-  port: 9090
+  port: 9190
 stripe:
-  test_mode: false
+  test_mode: true
   api_key: ${STRIPE_API_KEY}
   test_key: ${STRIPE_TEST_KEY}
   webhook_secret: ${STRIPE_WH_SECRET}

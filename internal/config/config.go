@@ -60,6 +60,7 @@ type Config struct {
 	OpenCart OpenCart     `yaml:"opencart"`
 	Telegram Telegram     `yaml:"telegram"`
 	Env      string       `yaml:"env" env-default:"local"`
+	Log      string       `yaml:"log"`
 }
 
 var instance *Config
