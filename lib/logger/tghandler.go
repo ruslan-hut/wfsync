@@ -59,7 +59,11 @@ func (h *TelegramHandler) Handle(ctx context.Context, record slog.Record) error 
 
 		// Add attributes from .With() calls
 		for _, attr := range h.attrs {
-			msg += fmt.Sprintf("\n%s: %v", attr.Key, attr.Value)
+			if attr.Key == "error" {
+				msg += fmt.Sprintf("\n%s: ```%v```", attr.Key, attr.Value)
+			} else {
+				msg += fmt.Sprintf("\n%s: %v", attr.Key, attr.Value)
+			}
 		}
 
 		// Add attributes from the record
