@@ -45,7 +45,6 @@ func Hold(log *slog.Logger, handler Core) http.HandlerFunc {
 
 		pm, err := handler.StripePaymentLink(&checkoutParams)
 		if err != nil {
-			logger.Error("get payment link", sl.Err(err))
 			render.Status(r, 400)
 			render.JSON(w, r, response.Error(fmt.Sprintf("Get link: %v", err)))
 			return

@@ -282,8 +282,12 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 		slog.String("order_id", params.OrderId),
 	)
 	defer func() {
-		_ = s.db.SaveCheckoutParams(params)
-		log.Debug("hold amount completed")
+		err := s.db.SaveCheckoutParams(params)
+		if err != nil {
+			s.log.With(
+				sl.Err(err),
+			).Error("save checkout params to database")
+		}
 	}()
 
 	successUrl := params.SuccessUrl
