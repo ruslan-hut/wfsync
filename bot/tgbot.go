@@ -105,7 +105,7 @@ func (t *TgBot) loadUsers() {
 
 func (t *TgBot) findUser(id int64) *entity.User {
 	user, ok := t.users[id]
-	if !ok {
+	if ok {
 		return user
 	}
 	return nil
