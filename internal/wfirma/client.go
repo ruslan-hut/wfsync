@@ -486,7 +486,7 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, 
 	}
 	if err = json.Unmarshal(addRes, &addResp); err != nil {
 		log.Error("parse invoice creation response",
-			slog.String("error", err.Error()))
+			sl.Err(err))
 		return err
 	}
 
@@ -520,7 +520,7 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, 
 	payRes, err := c.request(ctx, "payments", "add", payment)
 	if err != nil {
 		log.Error("add payment",
-			slog.String("error", err.Error()))
+			sl.Err(err))
 		return fmt.Errorf("add payment: %w", err)
 	}
 
@@ -539,7 +539,7 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, 
 	}
 	if err = json.Unmarshal(payRes, &payResp); err != nil {
 		log.Error("parse payment creation response",
-			slog.String("error", err.Error()))
+			sl.Err(err))
 		return err
 	}
 	if payResp.Status.Code == "ERROR" {

@@ -186,9 +186,7 @@ func (s *StripeClient) handleCheckoutCompleted(ctx context.Context, evt *stripe.
 
 	err = s.wfirma.SyncSession(ctx, sess, lineItems)
 	if err != nil {
-		log.With(
-			slog.Any("error", err),
-		).Error("sync with wfirma")
+		log = log.With(sl.Err(err))
 	}
 }
 
