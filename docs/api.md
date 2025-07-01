@@ -41,7 +41,7 @@ API response always has the following structure
 ## Usage Examples
 
 ### Creating a Payment Hold
-Body payload example, all fields are obligatory
+Body payload example, all fields with values in the example are mandatory
 ```json
 {
   "client_details": {
@@ -60,6 +60,6 @@ Body payload example, all fields are obligatory
   "total":15000,
   "currency":"PLN",
   "order_id": "123456",
-  "success_url": "https://darkbyrior.com/success"
+  "success_url": ""
 }
 ```

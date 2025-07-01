@@ -17,6 +17,7 @@ type StripeConfig struct {
 	APIKey        string `yaml:"api_key" env-default:""`
 	WebhookSecret string `yaml:"webhook_secret" env-default:""`
 	TestKey       string `yaml:"test_key" env-default:""`
+	SuccessURL    string `yaml:"success_url" env-default:""`
 }
 
 type WfirmaConfig struct {

@@ -19,6 +19,7 @@ jobs:
           sed -i 's|${STRIPE_API_KEY}|'"$STRIPE_API_KEY"'|g' wfsync.yml
           sed -i 's|${STRIPE_TEST_KEY}|'"$STRIPE_TEST_KEY"'|g' wfsync.yml
           sed -i 's|${STRIPE_WH_SECRET}|'"$STRIPE_WH_SECRET"'|g' wfsync.yml
+          sed -i 's|${STRIPE_SUCCESS_URL}|'"$STRIPE_SUCCESS_URL"'|g' wfsync.yml
           sed -i 's|${WF_ACCESS_KEY}|'"$WF_ACCESS_KEY"'|g' wfsync.yml
           sed -i 's|${WF_SECRET_KEY}|'"$WF_SECRET_KEY"'|g' wfsync.yml
           sed -i 's|${WF_APP_ID}|'"$WF_APP_ID"'|g' wfsync.yml
@@ -37,6 +38,7 @@ jobs:
           STRIPE_API_KEY: ${{ secrets.STRIPE_API_KEY }}
           STRIPE_TEST_KEY: ${{ secrets.STRIPE_TEST_KEY }}
           STRIPE_WH_SECRET: ${{ secrets.STRIPE_WH_SECRET }}
+          STRIPE_SUCCESS_URL: ${{ secrets.STRIPE_SUCCESS_URL }}
           WF_ACCESS_KEY: ${{ secrets.WF_ACCESS_KEY }}
           WF_SECRET_KEY: ${{ secrets.WF_SECRET_KEY }}
           WF_APP_ID: ${{ secrets.WF_APP_ID }}

@@ -26,6 +26,7 @@ type Database interface {
 type StripeClient struct {
 	sc            *client.API
 	webhookSecret string
+	successUrl    string
 	wfirma        *wfirma.Client
 	db            Database
 	log           *slog.Logger
@@ -45,6 +46,10 @@ func New(apiKey, whSecret string, wf *wfirma.Client, logger *slog.Logger) *Strip
 
 func (s *StripeClient) SetDatabase(db Database) {
 	s.db = db
+}
+
+func (s *StripeClient) SetSuccessUrl(url string) {
+	s.successUrl = url
 }
 
 func (s *StripeClient) saveData(key string, value interface{}) {
@@ -281,6 +286,14 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 		log.Debug("hold amount completed")
 	}()
 
+	successUrl := params.SuccessUrl
+	if successUrl == "" {
+		successUrl = s.successUrl
+	}
+	if successUrl == "" {
+		return nil, fmt.Errorf("missing success url")
+	}
+
 	csParams := &stripe.CheckoutSessionParams{
 		Mode: stripe.String(string(stripe.CheckoutSessionModePayment)),
 		PaymentIntentData: &stripe.CheckoutSessionPaymentIntentDataParams{
@@ -299,7 +312,7 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 			},
 		},
 		Metadata:      map[string]string{"order_id": params.OrderId},
-		SuccessURL:    stripe.String(params.SuccessUrl),
+		SuccessURL:    stripe.String(successUrl),
 		CustomerEmail: stripe.String(params.ClientDetails.Email),
 	}
 

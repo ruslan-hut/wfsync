@@ -43,6 +43,7 @@ func main() {
 	}
 	stripeClient := stripeclient.New(stripeKey, conf.Stripe.WebhookSecret, wfirmaClient, log)
 	stripeClient.SetDatabase(mongo)
+	stripeClient.SetSuccessUrl(conf.Stripe.SuccessURL)
 
 	handler := core.New(stripeClient, log)
 
