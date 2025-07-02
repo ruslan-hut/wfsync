@@ -14,6 +14,7 @@ import (
 const (
 	collectionUsers          = "users"
 	collectionCheckoutParams = "checkout_params"
+	collectionInvoice        = "wfirma_invoice"
 )
 
 type MongoDB struct {
@@ -137,6 +138,21 @@ func (m *MongoDB) SaveCheckoutParams(params *entity.CheckoutParams) error {
 	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
 	filter := bson.D{{"order_id", params.OrderId}}
 	update := bson.D{{"$set", params}}
+	opts := options.Update().SetUpsert(true)
+	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	return err
+}
+
+func (m *MongoDB) SaveInvoice(id string, invoice interface{}) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionInvoice)
+	filter := bson.D{{"id", id}}
+	update := bson.D{{"$set", invoice}}
 	opts := options.Update().SetUpsert(true)
 	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
 	return err

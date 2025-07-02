@@ -19,6 +19,7 @@ import (
 )
 
 type Database interface {
+	SaveInvoice(id string, invoice interface{}) error
 }
 
 type Client struct {
@@ -427,18 +428,18 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, 
 	}
 	log = log.With(slog.String("contractor_id", contractorID))
 
-	contractor := map[string]interface{}{
-		"id": contractorID,
+	contractor := &Contractor{
+		Id: contractorID,
 	}
 
-	var contents []map[string]interface{}
+	var contents []*ContentLine
 	for _, line := range lineItems {
-		contents = append(contents, map[string]interface{}{
-			"invoicecontent": map[string]interface{}{
-				"name":  line.Description,
-				"count": line.Quantity,
-				"price": float64(line.AmountTotal) / 100.0,
-				"unit":  "szt.",
+		contents = append(contents, &ContentLine{
+			Content: &Content{
+				Name:  line.Description,
+				Count: line.Quantity,
+				Price: float64(line.AmountTotal) / 100.0,
+				Unit:  "szt.",
 			},
 		})
 	}
@@ -453,21 +454,23 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, 
 		}
 	}
 
+	invoice := &Invoice{
+		Contractor:  contractor,
+		Type:        "normal",
+		PriceType:   "brutto",
+		Total:       total,
+		IdExternal:  orderId,
+		Description: "ID: " + orderId,
+		Date:        iso(sess.Created),
+		Currency:    strings.ToUpper(string(sess.Currency)),
+		Contents:    contents,
+	}
+
 	addPayload := map[string]interface{}{
 		"api": map[string]interface{}{
 			"invoices": []map[string]interface{}{
 				{
-					"invoice": map[string]interface{}{
-						"contractor":      contractor,
-						"type":            "normal",
-						"price_type":      "brutto",
-						"total":           total,
-						"id_external":     orderId,
-						"description":     "ID: " + orderId,
-						"date":            iso(sess.Created),
-						"currency":        strings.ToUpper(string(sess.Currency)),
-						"invoicecontents": contents,
-					},
+					"invoice": invoice,
 				},
 			},
 		},
@@ -475,8 +478,7 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, 
 
 	addRes, err := c.request(ctx, "invoices", "add", addPayload)
 	if err != nil {
-		log.Error("add invoice",
-			slog.String("error", err.Error()))
+		log.Error("add invoice", sl.Err(err))
 		return fmt.Errorf("add invoice: %w", err)
 	}
 
@@ -500,6 +502,16 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, 
 		c.log.Error("no invoice ID returned from wFirma")
 		return fmt.Errorf("no invoice id returned")
 	}
+
+	invoice.Id = invID
+	if c.db != nil {
+		err = c.db.SaveInvoice(invID, invoice)
+		if err != nil {
+			c.log.Error("save invoice",
+				sl.Err(err))
+		}
+	}
+
 	log.Info("invoice created successfully",
 		slog.String("wfirma_id", invID))
 
