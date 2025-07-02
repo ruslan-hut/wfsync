@@ -29,11 +29,13 @@ func main() {
 		slog.String("config", *configPath),
 		slog.String("env", conf.Env),
 		slog.String("log", *logPath),
-	).Info("starting")
+	).Info("config loaded")
 
 	mongo := database.NewMongoClient(conf)
 	if mongo != nil {
-		log.Info("connected to mongo")
+		log.With(
+			sl.Secret("mongo_db", conf.Mongo.Database),
+		).Info("connected to mongo")
 	}
 
 	// Initialize Telegram bot if enabled
@@ -46,7 +48,6 @@ func main() {
 		} else {
 			// Set up Telegram handler for the logger
 			log = logger.SetupTelegramHandler(log, tgBot, slog.LevelDebug)
-			log.Info("telegram bot initialized")
 
 			// Start the bot in a goroutine
 			go func() {
@@ -57,7 +58,7 @@ func main() {
 		}
 	}
 
-	wfirmaClient := wfirma.NewClient(wfirma.Config(conf.WFirma), log)
+	wfirmaClient := wfirma.NewClient(wfirma.Config(conf.WFirma), mongo, log)
 	stripeKey := conf.Stripe.APIKey
 	if conf.Stripe.TestMode {
 		stripeKey = conf.Stripe.TestKey

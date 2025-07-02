@@ -18,8 +18,12 @@ import (
 	"github.com/stripe/stripe-go/v76"
 )
 
+type Database interface {
+}
+
 type Client struct {
 	hc        *http.Client
+	db        Database
 	baseURL   string
 	accessKey string
 	secretKey string
@@ -33,9 +37,10 @@ type Config struct {
 	AppID     string
 }
 
-func NewClient(cfg Config, logger *slog.Logger) *Client {
+func NewClient(cfg Config, db Database, logger *slog.Logger) *Client {
 	return &Client{
 		hc:        &http.Client{Timeout: 10 * time.Second},
+		db:        db,
 		baseURL:   "https://api2.wfirma.pl",
 		accessKey: cfg.AccessKey,
 		secretKey: cfg.SecretKey,

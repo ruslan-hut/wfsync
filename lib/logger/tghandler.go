@@ -52,9 +52,9 @@ func (h *TelegramHandler) Handle(ctx context.Context, record slog.Record) error 
 
 		// Add group prefix if present
 		if h.group != "" {
-			msg = fmt.Sprintf("[%s] %s.%s", record.Level.String(), h.group, record.Message)
+			msg = fmt.Sprintf("*%s* `%s.%s`", record.Level.String(), h.group, record.Message)
 		} else {
-			msg = fmt.Sprintf("[%s] %s", record.Level.String(), record.Message)
+			msg = fmt.Sprintf("*%s* `%s`", record.Level.String(), record.Message)
 		}
 
 		// Add attributes from .With() calls
