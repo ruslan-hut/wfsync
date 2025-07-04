@@ -243,7 +243,7 @@ func (t *TgBot) plainResponse(chatId int64, text string) {
 
 func Sanitize(input string) string {
 	// Define a list of reserved characters that need to be escaped
-	reservedChars := "\\_{}#+-.!|()[]="
+	reservedChars := "\\_{}#+-.!|()[]=*"
 
 	// Loop through each character in the input string
 	sanitized := ""
