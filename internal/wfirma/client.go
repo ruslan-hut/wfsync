@@ -444,6 +444,17 @@ func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, 
 		})
 	}
 
+	if sess.ShippingCost != nil && sess.ShippingCost.AmountTotal > 0 {
+		contents = append(contents, &ContentLine{
+			Content: &Content{
+				Name:  "Zwrot kosztów transportu towarów",
+				Count: 1,
+				Price: float64(sess.ShippingCost.AmountTotal) / 100.0,
+				Unit:  "szt.",
+			},
+		})
+	}
+
 	iso := func(ts int64) string { return time.Unix(ts, 0).Format("2006-01-02") }
 	total := float64(sess.AmountTotal) / 100.0
 	orderId := sess.ID
