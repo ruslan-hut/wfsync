@@ -79,7 +79,7 @@ func (s *MySql) OrderProducts(orderId int64) ([]*entity.LineItem, error) {
 	}
 	rows, err := stmt.Query(orderId)
 	if err != nil {
-		return nil, fmt.Errorf("query: %w", err)
+		return nil, err
 	}
 	defer rows.Close()
 
@@ -95,14 +95,14 @@ func (s *MySql) OrderProducts(orderId int64) ([]*entity.LineItem, error) {
 			&product.Qty,
 			&product.Sku,
 		); err != nil {
-			return nil, fmt.Errorf("scan: %w", err)
+			return nil, err
 		}
 		product.Price = int64((price + tax) * 100)
 		products = append(products, &product)
 	}
 
 	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("rows: %w", err)
+		return nil, err
 	}
 
 	return products, nil
