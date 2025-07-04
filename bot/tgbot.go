@@ -213,20 +213,21 @@ func (t *TgBot) SendMessageWithLevel(msg string, level slog.Level) {
 
 func (t *TgBot) plainResponse(chatId int64, text string) {
 
-	text = strings.ReplaceAll(text, "**", "*")
-	text = strings.ReplaceAll(text, "![", "[")
+	//text = strings.ReplaceAll(text, "**", "*")
+	//text = strings.ReplaceAll(text, "![", "[")
+	//
+	//sanitized := Sanitize(text)
 
-	sanitized := sanitize(text, false)
-
-	if sanitized != "" {
-		_, err := t.api.SendMessage(chatId, sanitized, &tgbotapi.SendMessageOpts{
+	if text != "" {
+		_, err := t.api.SendMessage(chatId, text, &tgbotapi.SendMessageOpts{
 			ParseMode: "MarkdownV2",
 		})
 		if err != nil {
 			t.log.With(
 				slog.Int64("id", chatId),
 			).Warn("sending message", sl.Err(err))
-			_, err = t.api.SendMessage(chatId, sanitized, &tgbotapi.SendMessageOpts{})
+			_, _ = t.api.SendMessage(chatId, err.Error(), &tgbotapi.SendMessageOpts{})
+			_, err = t.api.SendMessage(chatId, text, &tgbotapi.SendMessageOpts{})
 			if err != nil {
 				t.log.With(
 					slog.Int64("id", chatId),
@@ -240,12 +241,9 @@ func (t *TgBot) plainResponse(chatId int64, text string) {
 	}
 }
 
-func sanitize(input string, _ bool) string {
+func Sanitize(input string) string {
 	// Define a list of reserved characters that need to be escaped
-	reservedChars := "\\_{}#+-.!|()[]"
-	//if preserveLinks {
-	//	reservedChars = "\\`_{}#+-.!|"
-	//}
+	reservedChars := "\\_{}#+-.!|()[]="
 
 	// Loop through each character in the input string
 	sanitized := ""
