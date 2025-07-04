@@ -68,7 +68,7 @@ func (h *TelegramHandler) Handle(ctx context.Context, record slog.Record) error 
 
 		// Add attributes from the record
 		record.Attrs(func(attr slog.Attr) bool {
-			msg += fmt.Sprintf("\n%s: %v", attr.Key, attr.Value)
+			msg += bot.Sanitize(fmt.Sprintf("\n%s: %v", attr.Key, attr.Value))
 			return true
 		})
 
