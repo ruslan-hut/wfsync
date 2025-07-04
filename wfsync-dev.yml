@@ -23,7 +23,7 @@ mongo:
   password: ${MONGO_PASSWORD}
   database: ${MONGO_DATABASE}
 opencart:
-  enabled: true
+  enabled: false
   driver: mysql
   hostname: localhost
   username: ${SQL_USERNAME}
