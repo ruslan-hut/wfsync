@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+	"wfsync/lib/sl"
 )
 
 type Core interface {
@@ -26,7 +27,7 @@ func Event(logger *slog.Logger, handler Core) http.HandlerFunc {
 		payload, err := io.ReadAll(r.Body)
 		if err != nil {
 			log.With(
-				slog.Any("error", err),
+				sl.Err(err),
 			).Error("read request body")
 			http.Error(w, "read", http.StatusBadRequest)
 			return
@@ -42,7 +43,7 @@ func Event(logger *slog.Logger, handler Core) http.HandlerFunc {
 		var evt stripe.Event
 		if err = json.Unmarshal(payload, &evt); err != nil {
 			log.With(
-				slog.Any("error", err),
+				sl.Err(err),
 			).Error("unmarshal event")
 			http.Error(w, "json", http.StatusBadRequest)
 			return

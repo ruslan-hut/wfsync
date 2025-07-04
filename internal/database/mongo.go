@@ -7,6 +7,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"time"
 	"wfsync/entity"
 	"wfsync/internal/config"
 )
@@ -138,6 +139,24 @@ func (m *MongoDB) SaveCheckoutParams(params *entity.CheckoutParams) error {
 	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
 	filter := bson.D{{"order_id", params.OrderId}}
 	update := bson.D{{"$set", params}}
+	opts := options.Update().SetUpsert(true)
+	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	return err
+}
+
+func (m *MongoDB) UpdateCheckoutParams(params *entity.CheckoutParams) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
+	filter := bson.D{{"order_id", params.OrderId}}
+	update := bson.D{{"$set", bson.D{
+		{"invoice_id", params.InvoiceId},
+		{"closed", time.Now()},
+	}}}
 	opts := options.Update().SetUpsert(true)
 	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
 	return err

@@ -1,7 +1,6 @@
 package stripeclient
 
 import (
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -50,19 +49,6 @@ func (s *StripeClient) SetDatabase(db Database) {
 
 func (s *StripeClient) SetSuccessUrl(url string) {
 	s.successUrl = url
-}
-
-func (s *StripeClient) saveData(key string, value interface{}) {
-	if s.db == nil {
-		return
-	}
-	err := s.db.Save(key, value)
-	if err != nil {
-		s.log.With(
-			slog.String("key", key),
-			sl.Err(err),
-		).Error("failed to save data")
-	}
 }
 
 func (s *StripeClient) VerifySignature(payload []byte, header string, tolerance time.Duration) bool {
@@ -114,45 +100,30 @@ func (s *StripeClient) VerifySignature(payload []byte, header string, tolerance 
 	return isValid
 }
 
-func (s *StripeClient) HandleEvent(ctx context.Context, evt *stripe.Event) {
-	log := s.log.With(
-		slog.String("event_id", evt.ID),
-		slog.Any("type", evt.Type),
-	)
-	s.saveData(string(evt.Type), evt)
+func (s *StripeClient) HandleEvent(evt *stripe.Event) *entity.CheckoutParams {
 	switch evt.Type {
 	case stripe.EventTypeCheckoutSessionCompleted:
-		log.Info("handling event")
-		//s.saveData("checkout_session_completed", evt)
-		s.handleCheckoutCompleted(ctx, evt)
+		return s.handleCheckoutCompleted(evt)
 	case stripe.EventTypeInvoiceFinalized:
-		log.Info("handling event")
-		//s.saveData("invoice_finalized", evt)
-		s.handleInvoiceFinalized(ctx, evt)
+		return s.handleInvoiceFinalized(evt)
 	default:
-		log.Debug("ignored event")
+		return nil
 	}
 }
 
-func (s *StripeClient) handleCheckoutCompleted(ctx context.Context, evt *stripe.Event) {
+func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.CheckoutParams {
 	invID := evt.GetObjectValue("id")
 	log := s.log.With(
+		slog.Any("event_type", evt.Type),
 		slog.String("session_id", invID),
 	)
-	t1 := time.Now()
-	defer func() {
-		t2 := time.Now()
-		log.With(
-			slog.String("duration", fmt.Sprintf("%.3fms", float64(t2.Sub(t1))/float64(time.Millisecond))),
-		).Debug("session sync completed")
-	}()
 
 	sess, err := s.sc.CheckoutSessions.Get(invID, nil)
 	if err != nil {
 		log.With(
-			slog.Any("error", err),
+			sl.Err(err),
 		).Error("get session from stripe")
-		return
+		return nil
 	}
 	log = log.With(
 		slog.String("customer_email", sess.CustomerEmail),
@@ -165,7 +136,7 @@ func (s *StripeClient) handleCheckoutCompleted(ctx context.Context, evt *stripe.
 	})
 	if itemsIter == nil {
 		log.Error("items iterator is nil")
-		return
+		return nil
 	}
 	lineItems := make([]*stripe.LineItem, 0)
 	for itemsIter.Next() {
@@ -174,79 +145,33 @@ func (s *StripeClient) handleCheckoutCompleted(ctx context.Context, evt *stripe.
 	}
 	if len(lineItems) == 0 {
 		log.Error("no line items found")
-		return
+		return nil
 	}
-	if sess.LineItems == nil {
-		sess.LineItems = &stripe.LineItemList{
-			Data: lineItems,
-		}
+	sess.LineItems = &stripe.LineItemList{
+		Data: lineItems,
 	}
-	s.checkCustomer(sess)
-	s.saveData("checkout_session", sess)
 
-	err = s.wfirma.SyncSession(ctx, sess, lineItems)
-	if err != nil {
-		log = log.With(sl.Err(err))
-	}
+	s.checkCustomer(sess)
+
+	return entity.NewFromCheckoutSession(sess)
 }
 
-func (s *StripeClient) handleInvoiceFinalized(ctx context.Context, evt *stripe.Event) {
+func (s *StripeClient) handleInvoiceFinalized(evt *stripe.Event) *entity.CheckoutParams {
 	invID := evt.GetObjectValue("id")
 	s.log.With(
+		slog.Any("event_type", evt.Type),
 		slog.String("invoice_id", invID),
 	).Debug("fetching invoice from stripe")
+
 	inv, err := s.sc.Invoices.Get(invID, nil)
 	if err != nil {
 		s.log.With(
-			slog.Any("error", err),
-		).Error("failed to get invoice from stripe")
-		return
+			sl.Err(err),
+		).Error("get invoice from stripe")
+		return nil
 	}
-	s.log.With(
-		slog.String("invoice_id", invID),
-		slog.Int64("amount", inv.AmountPaid),
-	).Info("invoice fetched successfully")
-
-	s.saveData("invoice", inv)
-
-	//h.log.With(
-	//	slog.String("url", inv.InvoicePDF),
-	//).Debug("fetching PDF")
-	//pdfBuf, err := fetchPDF(inv.InvoicePDF)
-	//if err != nil {
-	//	h.log.With(
-	//		slog.Any("error", err),
-	//	).Error("failed to fetch PDF")
-	//	return
-	//}
-	//h.log.With(
-	//	slog.Int("size_bytes", len(pdfBuf)),
-	//).Debug("PDF fetched successfully")
-	//
-	//h.log.With(
-	//	slog.String("invoice_id", invID),
-	//).Info("syncing invoice with wfirma")
-
-	err = s.wfirma.SyncInvoice(ctx, inv, nil)
-	if err != nil {
-		s.log.With(
-			slog.Any("error", err),
-		).Error("failed to sync with wfirma")
-	} else {
-		s.log.With(
-			slog.String("invoice_id", invID),
-		).Info("invoice synced successfully with wfirma")
-	}
+	return entity.NewFromInvoice(inv)
 }
-
-//func fetchPDF(url string) ([]byte, error) {
-//	resp, err := http.Get(url)
-//	if err != nil {
-//		return nil, err
-//	}
-//	defer resp.Body.Close()
-//	return io.ReadAll(resp.Body)
-//}
 
 func (s *StripeClient) checkCustomer(sess *stripe.CheckoutSession) {
 	customer := sess.Customer
@@ -264,12 +189,6 @@ func (s *StripeClient) checkCustomer(sess *stripe.CheckoutSession) {
 			sess.CustomerEmail = sess.CustomerDetails.Email
 		}
 	}
-	//if sess.Metadata != nil {
-	//	s.log.With(
-	//		slog.Any("metadata", sess.Metadata),
-	//	).Debug("adding metadata to customer")
-	//	customer.Name = sess.Metadata["name"]
-	//}
 	sess.Customer = customer
 }
 
@@ -328,13 +247,7 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 	}
 	log = log.With(slog.String("session_id", cs.ID))
 
-	err = s.db.Save("checkout_session_hold", cs)
-	if err != nil {
-		log.With(
-			sl.Err(err),
-		).Error("save checkout session to database")
-	}
-
+	params.Payload = cs
 	params.SessionId = cs.ID
 	params.Status = string(cs.Status)
 

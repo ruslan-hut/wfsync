@@ -1,6 +1,8 @@
 package entity
 
 import (
+	"fmt"
+	"github.com/stripe/stripe-go/v76"
 	"net/http"
 	"time"
 	"wfsync/lib/validate"
@@ -17,6 +19,10 @@ type CheckoutParams struct {
 	Closed        time.Time      `json:"closed,omitempty" bson:"closed"`
 	Status        string         `json:"status" bson:"status"`
 	SessionId     string         `json:"session_id,omitempty" bson:"session_id"`
+	InvoiceId     string         `json:"invoice_id,omitempty" bson:"invoice_id"`
+	Paid          bool           `json:"paid,omitempty" bson:"paid"`
+	Source        string         `json:"source,omitempty" bson:"source"`
+	Payload       interface{}    `json:"payload,omitempty" bson:"payload"`
 }
 
 func (c *CheckoutParams) Bind(_ *http.Request) error {
@@ -38,4 +44,104 @@ type ClientDetails struct {
 	ZipCode string `json:"zip_code" bson:"zip_code"`
 	City    string `json:"city" bson:"city"`
 	Street  string `json:"street" bson:"street"`
+}
+
+func NewFromCheckoutSession(sess *stripe.CheckoutSession) *CheckoutParams {
+	params := &CheckoutParams{
+		SessionId: sess.ID,
+		Status:    string(sess.Status),
+		Created:   time.Now(),
+		Currency:  string(sess.Currency),
+		Total:     sess.AmountTotal,
+		Paid:      sess.PaymentStatus == stripe.CheckoutSessionPaymentStatusPaid,
+		Payload:   sess,
+	}
+	if sess.Customer != nil {
+		client := &ClientDetails{
+			Name:  sess.Customer.Name,
+			Email: sess.Customer.Email,
+			Phone: sess.Customer.Phone,
+		}
+		if sess.Customer.Address != nil {
+			client.Country = sess.Customer.Address.Country
+			client.ZipCode = sess.Customer.Address.PostalCode
+			client.City = sess.Customer.Address.City
+			client.Street = fmt.Sprintf("%s %s", sess.Customer.Address.Line1, sess.Customer.Address.Line2)
+		}
+		params.ClientDetails = client
+	}
+	if sess.LineItems != nil {
+		for _, item := range sess.LineItems.Data {
+			lineItem := &LineItem{
+				Name:  item.Description,
+				Qty:   item.Quantity,
+				Price: item.AmountTotal,
+			}
+			params.LineItems = append(params.LineItems, lineItem)
+		}
+	}
+	if sess.ShippingCost != nil && sess.ShippingCost.AmountTotal > 0 {
+		params.LineItems = append(params.LineItems, &LineItem{
+			Name:  "Zwrot kosztów transportu towarów",
+			Qty:   1,
+			Price: sess.ShippingCost.AmountTotal,
+		})
+	}
+	if sess.Metadata != nil {
+		id, ok := sess.Metadata["order_id"]
+		if ok {
+			params.OrderId = id
+		}
+	}
+	return params
+}
+
+func NewFromInvoice(inv *stripe.Invoice) *CheckoutParams {
+	params := &CheckoutParams{
+		SessionId: inv.ID,
+		Status:    string(inv.Status),
+		Created:   time.Now(),
+		Currency:  string(inv.Currency),
+		Total:     inv.Total,
+		Paid:      inv.Paid,
+		Payload:   inv,
+	}
+	if inv.Customer != nil {
+		client := &ClientDetails{
+			Name:  inv.Customer.Name,
+			Email: inv.Customer.Email,
+			Phone: inv.Customer.Phone,
+		}
+		if inv.Customer.Address != nil {
+			client.Country = inv.Customer.Address.Country
+			client.ZipCode = inv.Customer.Address.PostalCode
+			client.City = inv.Customer.Address.City
+			client.Street = fmt.Sprintf("%s %s", inv.Customer.Address.Line1, inv.Customer.Address.Line2)
+		}
+		params.ClientDetails = client
+	}
+	if inv.Lines != nil {
+		for _, item := range inv.Lines.Data {
+			lineItem := &LineItem{
+				Name:  item.Description,
+				Qty:   item.Quantity,
+				Price: item.Amount,
+			}
+			params.LineItems = append(params.LineItems, lineItem)
+		}
+	}
+	if inv.ShippingCost != nil && inv.ShippingCost.AmountTotal > 0 {
+		params.LineItems = append(params.LineItems, &LineItem{
+			Name:  "Zwrot kosztów transportu towarów",
+			Qty:   1,
+			Price: inv.ShippingCost.AmountTotal,
+		})
+	}
+	if inv.Metadata != nil {
+		id, ok := inv.Metadata["order_id"]
+		if ok {
+			params.OrderId = id
+		}
+	}
+	return params
 }

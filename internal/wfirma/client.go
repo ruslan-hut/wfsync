@@ -14,12 +14,12 @@ import (
 	"time"
 	"wfsync/entity"
 	"wfsync/lib/sl"
-
-	"github.com/stripe/stripe-go/v76"
 )
 
 type Database interface {
 	SaveInvoice(id string, invoice interface{}) error
+	SaveCheckoutParams(params *entity.CheckoutParams) error
+	UpdateCheckoutParams(params *entity.CheckoutParams) error
 }
 
 type Client struct {
@@ -106,29 +106,18 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 }
 
 // getOrCreateContractor returns contractor ID in wFirma for the invoice customer.
-func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer, email string) (string, error) {
-	name := ""
-	country := ""
-	zip := ""
-	city := ""
-	street := ""
-	if customer != nil {
-		name = customer.Name
-		if customer.Address != nil {
-			country = customer.Address.Country
-			zip = customer.Address.PostalCode
-			city = customer.Address.City
-			street = customer.Address.Line1
-		}
+func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDetails) (string, error) {
+	if customer == nil {
+		return "", fmt.Errorf("no customer")
 	}
-	if name == "" {
-		name = "Kontrahent " + email
+	if customer.Name == "" {
+		customer.Name = "Kontrahent " + customer.Email
 	}
-	if zip == "" {
-		zip = "01-249"
+	if customer.ZipCode == "" {
+		customer.ZipCode = "01-249"
 	}
-	if city == "" {
-		city = "Warszawa"
+	if customer.City == "" {
+		customer.City = "Warszawa"
 	}
 
 	// If not found, create a new contractor.
@@ -137,12 +126,12 @@ func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer
 			"contractors": []map[string]interface{}{
 				{
 					"contractor": map[string]interface{}{
-						"name":        name,
-						"email":       email,
-						"country":     country,
-						"zip":         zip,
-						"city":        city,
-						"street":      street,
+						"name":        customer.Name,
+						"email":       customer.Email,
+						"country":     customer.Country,
+						"zip":         customer.ZipCode,
+						"city":        customer.City,
+						"street":      customer.Street,
 						"tax_id_type": "other",
 					},
 				},
@@ -152,8 +141,8 @@ func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer
 	createRes, err := c.request(ctx, "contractors", "add", payload)
 	if err != nil {
 		c.log.Error("create contractor",
-			slog.String("email", email),
-			slog.String("error", err.Error()))
+			slog.String("email", customer.Email),
+			sl.Err(err))
 		return "", err
 	}
 	var addResp struct {
@@ -166,17 +155,17 @@ func (c *Client) createContractor(ctx context.Context, customer *stripe.Customer
 		} `json:"contractors"`
 	}
 	if err = json.Unmarshal(createRes, &addResp); err != nil {
-		c.log.Error("parse contractor creation response", slog.String("error", err.Error()))
+		c.log.Error("parse contractor creation response", sl.Err(err))
 		return "", err
 	}
 	if addResp.Contractors.Element0.Contractor.ID == "" {
-		c.log.Error("no contractor ID returned from wFirma", slog.String("email", email))
+		c.log.Error("no contractor ID returned from wFirma", slog.String("email", customer.Email))
 		return "", fmt.Errorf("no contractor id returned")
 	}
 	contractorID := addResp.Contractors.Element0.Contractor.ID
-	c.log.Info("successfully created new contractor",
-		slog.String("email", email),
-		slog.String("name", name),
+	c.log.Info("new contractor created",
+		slog.String("email", customer.Email),
+		slog.String("name", customer.Name),
 		slog.String("contractorID", contractorID))
 	return contractorID, nil
 }
@@ -232,348 +221,6 @@ func (c *Client) getContractor(ctx context.Context, email string) (string, error
 	}
 
 	return "", nil
-}
-
-// SyncInvoice creates/updates invoice in wFirma and attaches PDF.
-func (c *Client) SyncInvoice(ctx context.Context, inv *stripe.Invoice, _ []byte) error {
-	log := c.log.With(slog.String("invoice_number", inv.Number), slog.String("customer_email", inv.CustomerEmail))
-	defer func() {
-		if r := recover(); r != nil {
-			log.Error("panic recovered in SyncInvoice", slog.Any("panic", r))
-		}
-	}()
-
-	contractorID, err := c.getContractor(ctx, inv.CustomerEmail)
-	if err != nil {
-		return fmt.Errorf("contractor: %w", err)
-	}
-	if contractorID == "" {
-		email := inv.CustomerEmail
-		if email == "" {
-			email = fmt.Sprintf("%s@example.com", inv.Number)
-		}
-		contractorID, err = c.createContractor(ctx, inv.Customer, email)
-		if err != nil {
-			return fmt.Errorf("create contractor: %w", err)
-		}
-	}
-
-	contractor := map[string]interface{}{
-		"id": contractorID,
-	}
-
-	// Build contents from invoice lines.
-	var contents []map[string]interface{}
-	for _, line := range inv.Lines.Data {
-		contents = append(contents, map[string]interface{}{
-			"invoicecontent": map[string]interface{}{
-				"name":  line.Description,
-				"count": line.Quantity,
-				"price": float64(line.Amount) / 100.0,
-				"unit":  "szt.",
-			},
-		})
-	}
-
-	if inv.ShippingCost != nil && inv.ShippingCost.AmountTotal > 0 {
-		contents = append(contents, map[string]interface{}{
-			"invoicecontent": map[string]interface{}{
-				"name":  "Zwrot kosztów transportu towarów",
-				"count": 1,
-				"price": float64(inv.ShippingCost.AmountTotal) / 100.0,
-			},
-		})
-	}
-
-	iso := func(ts int64) string { return time.Unix(ts, 0).Format("2006-01-02") }
-	//attach := ""
-	//if len(pdf) > 0 {
-	//	attach = base64.StdEncoding.EncodeToString(pdf)
-	//}
-
-	total := float64(inv.Total) / 100.0
-	orderId := inv.Number
-	if inv.Metadata != nil {
-		orderId = inv.Metadata["order_id"]
-	}
-
-	addPayload := map[string]interface{}{
-		"api": map[string]interface{}{
-			"invoices": []map[string]interface{}{
-				{
-					"invoice": map[string]interface{}{
-						"contractor":      contractor,
-						"type":            "normal",
-						"price_type":      "brutto",
-						"total":           total,
-						"id_external":     inv.Number,
-						"description":     orderId,
-						"date":            iso(inv.PeriodStart),
-						"currency":        strings.ToUpper(string(inv.Currency)),
-						"invoicecontents": contents,
-					},
-				},
-			},
-		},
-	}
-
-	addRes, err := c.request(ctx, "invoices", "add", addPayload)
-	if err != nil {
-		log.Error("add invoice",
-			slog.String("error", err.Error()))
-		return fmt.Errorf("add invoice: %w", err)
-	}
-
-	var addResp struct {
-		Invoices struct {
-			Element0 struct {
-				Invoice struct {
-					ID string `json:"id"`
-				} `json:"invoice"`
-			} `json:"0"`
-		} `json:"invoices"`
-	}
-	if err = json.Unmarshal(addRes, &addResp); err != nil {
-		log.Error("parse invoice creation response",
-			slog.String("error", err.Error()))
-		return err
-	}
-
-	invID := addResp.Invoices.Element0.Invoice.ID
-	if invID == "" {
-		log.Error("no invoice ID returned from wFirma")
-		return fmt.Errorf("no invoice id returned")
-	}
-	log.Info("invoice created successfully",
-		slog.String("wfirma_id", invID))
-
-	if !inv.Paid {
-		return nil
-	}
-
-	payment := map[string]interface{}{
-		"api": map[string]interface{}{
-			"payments": []map[string]interface{}{
-				{
-					"payment": map[string]interface{}{
-						"object_name": "invoice",
-						"object_id":   invID,
-						"value":       float64(inv.AmountPaid) / 100.0,
-						"date":        iso(inv.PeriodStart),
-					},
-				},
-			},
-		},
-	}
-
-	payRes, err := c.request(ctx, "payments", "add", payment)
-	if err != nil {
-		log.Error("add payment",
-			slog.String("error", err.Error()))
-		return fmt.Errorf("add payment: %w", err)
-	}
-
-	var payResp struct {
-		Payments struct {
-			Element0 struct {
-				Payment struct {
-					ID string `json:"id"`
-				} `json:"payment"`
-			} `json:"0"`
-		} `json:"payments"`
-		Status struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"status"`
-	}
-	if err = json.Unmarshal(payRes, &payResp); err != nil {
-		log.Error("parse payment creation response",
-			slog.String("error", err.Error()))
-		return err
-	}
-	if payResp.Status.Code == "ERROR" {
-		log.Error("add payment",
-			slog.String("error", payResp.Status.Message))
-		//return fmt.Errorf("add payment failed")
-	}
-
-	return nil
-}
-
-func (c *Client) SyncSession(ctx context.Context, sess *stripe.CheckoutSession, lineItems []*stripe.LineItem) error {
-	log := c.log.With(slog.String("session_id", sess.ID), slog.String("customer_email", sess.CustomerEmail))
-	defer func() {
-		if r := recover(); r != nil {
-			log.Error("panic recovered in SyncSession", slog.Any("panic", r))
-		}
-	}()
-
-	contractorID, err := c.getContractor(ctx, sess.CustomerEmail)
-	if err != nil {
-		return fmt.Errorf("contractor: %w", err)
-	}
-	if contractorID == "" {
-		log.Debug("no contractor found")
-		email := sess.CustomerEmail
-		if email == "" {
-			email = fmt.Sprintf("%s@example.com", uuid.New().String())
-		}
-		contractorID, err = c.createContractor(ctx, sess.Customer, email)
-		if err != nil {
-			return fmt.Errorf("create contractor: %w", err)
-		}
-	}
-	log = log.With(slog.String("contractor_id", contractorID))
-
-	contractor := &Contractor{
-		Id: contractorID,
-	}
-
-	var contents []*ContentLine
-	for _, line := range lineItems {
-		contents = append(contents, &ContentLine{
-			Content: &Content{
-				Name:  line.Description,
-				Count: line.Quantity,
-				Price: float64(line.AmountTotal) / 100.0,
-				Unit:  "szt.",
-			},
-		})
-	}
-
-	if sess.ShippingCost != nil && sess.ShippingCost.AmountTotal > 0 {
-		contents = append(contents, &ContentLine{
-			Content: &Content{
-				Name:  "Zwrot kosztów transportu towarów",
-				Count: 1,
-				Price: float64(sess.ShippingCost.AmountTotal) / 100.0,
-				Unit:  "szt.",
-			},
-		})
-	}
-
-	iso := func(ts int64) string { return time.Unix(ts, 0).Format("2006-01-02") }
-	total := float64(sess.AmountTotal) / 100.0
-	orderId := sess.ID
-	if sess.Metadata != nil {
-		id, ok := sess.Metadata["order_id"]
-		if ok {
-			orderId = id
-		}
-	}
-
-	invoice := &Invoice{
-		Contractor:  contractor,
-		Type:        "normal",
-		PriceType:   "brutto",
-		Total:       total,
-		IdExternal:  orderId,
-		Description: "ID: " + orderId,
-		Date:        iso(sess.Created),
-		Currency:    strings.ToUpper(string(sess.Currency)),
-		Contents:    contents,
-	}
-
-	addPayload := map[string]interface{}{
-		"api": map[string]interface{}{
-			"invoices": []map[string]interface{}{
-				{
-					"invoice": invoice,
-				},
-			},
-		},
-	}
-
-	addRes, err := c.request(ctx, "invoices", "add", addPayload)
-	if err != nil {
-		log.Error("add invoice", sl.Err(err))
-		return fmt.Errorf("add invoice: %w", err)
-	}
-
-	var addResp struct {
-		Invoices struct {
-			Element0 struct {
-				Invoice struct {
-					ID string `json:"id"`
-				} `json:"invoice"`
-			} `json:"0"`
-		} `json:"invoices"`
-	}
-	if err = json.Unmarshal(addRes, &addResp); err != nil {
-		log.Error("parse invoice creation response",
-			sl.Err(err))
-		return err
-	}
-
-	invID := addResp.Invoices.Element0.Invoice.ID
-	if invID == "" {
-		c.log.Error("no invoice ID returned from wFirma")
-		return fmt.Errorf("no invoice id returned")
-	}
-
-	invoice.Id = invID
-	if c.db != nil {
-		err = c.db.SaveInvoice(invID, invoice)
-		if err != nil {
-			c.log.Error("save invoice",
-				sl.Err(err))
-		}
-	}
-
-	log.Info("invoice created successfully",
-		slog.String("wfirma_id", invID))
-
-	if sess.PaymentStatus != stripe.CheckoutSessionPaymentStatusPaid {
-		return nil
-	}
-
-	payment := map[string]interface{}{
-		"api": map[string]interface{}{
-			"payments": []map[string]interface{}{
-				{
-					"payment": map[string]interface{}{
-						"object_name": "invoice",
-						"object_id":   invID,
-						"value":       total,
-						"date":        iso(sess.Created),
-					},
-				},
-			},
-		},
-	}
-
-	payRes, err := c.request(ctx, "payments", "add", payment)
-	if err != nil {
-		log.Error("add payment",
-			sl.Err(err))
-		return fmt.Errorf("add payment: %w", err)
-	}
-
-	var payResp struct {
-		Payments struct {
-			Element0 struct {
-				Payment struct {
-					ID string `json:"id"`
-				} `json:"payment"`
-			} `json:"0"`
-		} `json:"payments"`
-		Status struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"status"`
-	}
-	if err = json.Unmarshal(payRes, &payResp); err != nil {
-		log.Error("parse payment creation response",
-			sl.Err(err))
-		return err
-	}
-	if payResp.Status.Code == "ERROR" {
-		log.Error("add payment response",
-			slog.String("error", payResp.Status.Message))
-		//return fmt.Errorf("add payment failed")
-	}
-
-	return nil
 }
 
 func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (io.ReadCloser, *entity.FileMeta, error) {
@@ -641,4 +288,181 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (io.Read
 	).Debug("download invoice response")
 
 	return resp.Body, meta, nil
+}
+
+func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutParams) error {
+	log := c.log.With(slog.String("session_id", params.SessionId), slog.String("order_id", params.OrderId))
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("panic recovered in RegisterInvoice", slog.Any("panic", r))
+		}
+	}()
+	if c.db != nil {
+		err := c.db.SaveCheckoutParams(params)
+		if err != nil {
+			log.Error("save checkout params", sl.Err(err))
+		}
+	}
+
+	if params.ClientDetails == nil {
+		return fmt.Errorf("client details not provided")
+	}
+	if len(params.LineItems) == 0 {
+		return fmt.Errorf("no line items provided")
+	}
+
+	contractorID, err := c.getContractor(ctx, params.ClientDetails.Email)
+	if err != nil {
+		return fmt.Errorf("contractor: %w", err)
+	}
+	if contractorID == "" {
+		log.Debug("no contractor found")
+		email := params.ClientDetails.Email
+		if email == "" {
+			email = fmt.Sprintf("%s@example.com", uuid.New().String())
+		}
+		contractorID, err = c.createContractor(ctx, params.ClientDetails)
+		if err != nil {
+			return fmt.Errorf("create contractor: %w", err)
+		}
+	}
+	log = log.With(slog.String("contractor_id", contractorID))
+
+	contractor := &Contractor{
+		Id: contractorID,
+	}
+
+	var contents []*ContentLine
+	for _, line := range params.LineItems {
+		contents = append(contents, &ContentLine{
+			Content: &Content{
+				Name:  line.Name,
+				Count: line.Qty,
+				Price: float64(line.Price) / 100.0,
+				Unit:  "szt.",
+			},
+		})
+	}
+
+	//iso := func(ts int64) string { return time.Unix(ts, 0).Format("2006-01-02") }
+	total := float64(params.Total) / 100.0
+
+	invoice := &Invoice{
+		Contractor:  contractor,
+		Type:        "normal",
+		PriceType:   "brutto",
+		Total:       total,
+		IdExternal:  params.OrderId,
+		Description: "Numer zamówienia: " + params.OrderId,
+		Date:        params.Created.Format("2006-01-02"),
+		Currency:    strings.ToUpper(params.Currency),
+		Contents:    contents,
+	}
+
+	addPayload := map[string]interface{}{
+		"api": map[string]interface{}{
+			"invoices": []map[string]interface{}{
+				{
+					"invoice": invoice,
+				},
+			},
+		},
+	}
+
+	addRes, err := c.request(ctx, "invoices", "add", addPayload)
+	if err != nil {
+		log.Error("add invoice", sl.Err(err))
+		return fmt.Errorf("add invoice: %w", err)
+	}
+
+	var addResp struct {
+		Invoices struct {
+			Element0 struct {
+				Invoice struct {
+					ID string `json:"id"`
+				} `json:"invoice"`
+			} `json:"0"`
+		} `json:"invoices"`
+	}
+	if err = json.Unmarshal(addRes, &addResp); err != nil {
+		log.Error("parse invoice creation response",
+			sl.Err(err))
+		return err
+	}
+
+	invID := addResp.Invoices.Element0.Invoice.ID
+	if invID == "" {
+		c.log.Error("no invoice ID returned from wFirma")
+		return fmt.Errorf("no invoice id returned")
+	}
+
+	invoice.Id = invID
+	if c.db != nil {
+		err = c.db.SaveInvoice(invID, invoice)
+		if err != nil {
+			c.log.Error("save invoice",
+				sl.Err(err))
+		}
+		params.InvoiceId = invID
+		err = c.db.UpdateCheckoutParams(params)
+		if err != nil {
+			c.log.Error("update checkout params",
+				sl.Err(err))
+		}
+	}
+
+	log.Info("invoice created successfully",
+		slog.String("wfirma_id", invID))
+
+	if !params.Paid {
+		return nil
+	}
+
+	payment := map[string]interface{}{
+		"api": map[string]interface{}{
+			"payments": []map[string]interface{}{
+				{
+					"payment": map[string]interface{}{
+						"object_name": "invoice",
+						"object_id":   invID,
+						"value":       total,
+						"date":        params.Created.Format("2006-01-02"),
+					},
+				},
+			},
+		},
+	}
+
+	payRes, err := c.request(ctx, "payments", "add", payment)
+	if err != nil {
+		log.Error("add payment",
+			sl.Err(err))
+		return fmt.Errorf("add payment: %w", err)
+	}
+
+	var payResp struct {
+		Payments struct {
+			Element0 struct {
+				Payment struct {
+					ID string `json:"id"`
+				} `json:"payment"`
+			} `json:"0"`
+		} `json:"payments"`
+		Status struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"status"`
+	}
+	if err = json.Unmarshal(payRes, &payResp); err != nil {
+		log.Error("parse payment creation response",
+			sl.Err(err))
+		return err
+	}
+	if payResp.Status.Code == "ERROR" {
+		log.Error("add payment response",
+			slog.String("error", payResp.Status.Message))
+		//return fmt.Errorf("add payment failed")
+	}
+
+	return nil
 }

@@ -18,6 +18,7 @@ type AuthService interface {
 
 type InvoiceService interface {
 	DownloadInvoice(ctx context.Context, invoiceID string) (io.ReadCloser, *entity.FileMeta, error)
+	RegisterInvoice(ctx context.Context, params *entity.CheckoutParams) error
 }
 
 type Core struct {
@@ -57,7 +58,17 @@ func (c *Core) StripeVerifySignature(payload []byte, header string, tolerance ti
 }
 
 func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
-	c.sc.HandleEvent(ctx, evt)
+	params := c.sc.HandleEvent(evt)
+	if params == nil {
+		return
+	}
+	params.Source = "stripe"
+	err := c.inv.RegisterInvoice(ctx, params)
+	if err != nil {
+		c.log.With(
+			sl.Err(err),
+		).Error("register invoice")
+	}
 }
 
 func (c *Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (io.ReadCloser, *entity.FileMeta, error) {
@@ -68,5 +79,6 @@ func (c *Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (io.
 }
 
 func (c *Core) StripePaymentLink(params *entity.CheckoutParams) (*entity.Payment, error) {
+	params.Source = "api"
 	return c.sc.HoldAmount(params)
 }
