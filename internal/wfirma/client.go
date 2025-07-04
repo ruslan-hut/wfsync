@@ -69,7 +69,6 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 
 	data, err := json.Marshal(payload)
 	if err != nil {
-		log.Error("marshal payload", slog.String("error", err.Error()))
 		return nil, err
 	}
 
@@ -77,7 +76,6 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 	q.Set("inputFormat", "json")
 	q.Set("outputFormat", "json")
 	endpoint := fmt.Sprintf("%s/%s/%s?%s", c.baseURL, module, action, q.Encode())
-	log = log.With(slog.String("endpoint", endpoint))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
@@ -91,7 +89,6 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		log.Error("request failed", slog.String("error", err.Error()))
 		return nil, err
 	}
 	defer resp.Body.Close()
