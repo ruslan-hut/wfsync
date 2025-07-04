@@ -86,14 +86,16 @@ func (s *MySql) OrderProducts(orderId int64) ([]*entity.LineItem, error) {
 	var products []*entity.LineItem
 	for rows.Next() {
 		var product entity.LineItem
+		var price float64
 		if err = rows.Scan(
 			&product.Name,
-			&product.Price,
+			&price,
 			&product.Qty,
 			&product.Sku,
 		); err != nil {
 			return nil, fmt.Errorf("scan: %w", err)
 		}
+		product.Price = int64(price)
 		products = append(products, &product)
 	}
 
