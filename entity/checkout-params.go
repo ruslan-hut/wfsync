@@ -49,6 +49,7 @@ type LineItem struct {
 	Name  string `json:"name" validate:"required"`
 	Qty   int64  `json:"qty" validate:"required,min=1"`
 	Price int64  `json:"price" validate:"required,min=1"`
+	Sku   string `json:"sku,omitempty" bson:"sku"`
 }
 
 type ClientDetails struct {
@@ -88,10 +89,13 @@ func NewFromCheckoutSession(sess *stripe.CheckoutSession) *CheckoutParams {
 	}
 	if sess.LineItems != nil {
 		for _, item := range sess.LineItems.Data {
+			if item.Quantity == 0 {
+				continue
+			}
 			lineItem := &LineItem{
 				Name:  item.Description,
 				Qty:   item.Quantity,
-				Price: item.AmountTotal,
+				Price: item.AmountTotal / item.Quantity,
 			}
 			params.LineItems = append(params.LineItems, lineItem)
 		}
@@ -135,10 +139,13 @@ func NewFromInvoice(inv *stripe.Invoice) *CheckoutParams {
 	}
 	if inv.Lines != nil {
 		for _, item := range inv.Lines.Data {
+			if item.Quantity == 0 {
+				continue
+			}
 			lineItem := &LineItem{
 				Name:  item.Description,
 				Qty:   item.Quantity,
-				Price: item.Amount,
+				Price: item.Amount / item.Quantity,
 			}
 			params.LineItems = append(params.LineItems, lineItem)
 		}

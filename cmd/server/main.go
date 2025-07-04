@@ -13,6 +13,7 @@ import (
 	"wfsync/internal/wfirma"
 	"wfsync/lib/logger"
 	"wfsync/lib/sl"
+	occlient "wfsync/opencart/oc-client"
 )
 
 func main() {
@@ -58,6 +59,11 @@ func main() {
 		}
 	}
 
+	oc, err := occlient.New(conf)
+	if err != nil {
+		log.Error("opencart client", sl.Err(err))
+	}
+
 	wfirmaClient := wfirma.NewClient(wfirma.Config(conf.WFirma), mongo, log)
 	stripeKey := conf.Stripe.APIKey
 	if conf.Stripe.TestMode {
@@ -72,12 +78,13 @@ func main() {
 
 	//wfSoap := wfirma_soap.NewClient(wfirma_soap.Config(conf.WFirmaSoap), log)
 	handler.SetInvoiceService(wfirmaClient)
+	handler.SetOpencart(oc)
 
 	authenticate := auth.New(mongo)
 	handler.SetAuthService(authenticate)
 
 	// *** blocking start with http server ***
-	err := api.New(conf, log, &handler)
+	err = api.New(conf, log, &handler)
 	if err != nil {
 		log.Error("server start", sl.Err(err))
 		return

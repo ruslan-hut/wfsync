@@ -3,9 +3,9 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
+	"wfsync/entity"
 	"wfsync/internal/config"
 )
 
@@ -15,10 +15,9 @@ type MySql struct {
 	structure  map[string]map[string]Column
 	statements map[string]*sql.Stmt
 	mu         sync.Mutex
-	log        *slog.Logger
 }
 
-func NewSQLClient(conf *config.Config, log *slog.Logger) (*MySql, error) {
+func NewSQLClient(conf *config.Config) (*MySql, error) {
 	if !conf.OpenCart.Enabled {
 		return nil, fmt.Errorf("opencart client is disabled in configuration")
 	}
@@ -29,7 +28,7 @@ func NewSQLClient(conf *config.Config, log *slog.Logger) (*MySql, error) {
 		return nil, fmt.Errorf("sql connect: %w", err)
 	}
 
-	// try ping three times with 30 seconds interval; wait for database to start
+	// try to ping three times with a 30-second interval; wait for a database to start
 	for i := 0; i < 3; i++ {
 		if err = db.Ping(); err == nil {
 			break
@@ -49,10 +48,12 @@ func NewSQLClient(conf *config.Config, log *slog.Logger) (*MySql, error) {
 		prefix:     conf.OpenCart.Prefix,
 		structure:  make(map[string]map[string]Column),
 		statements: make(map[string]*sql.Stmt),
-		log:        log,
 	}
 
-	if err = sdb.addColumnIfNotExists("order", "wf_id", "VARCHAR(64) NOT NULL DEFAULT ''"); err != nil {
+	if err = sdb.addColumnIfNotExists("order", "wf_proforma", "VARCHAR(64) NOT NULL DEFAULT ''"); err != nil {
+		return nil, err
+	}
+	if err = sdb.addColumnIfNotExists("order", "wf_invoice", "VARCHAR(64) NOT NULL DEFAULT ''"); err != nil {
 		return nil, err
 	}
 	if err = sdb.addColumnIfNotExists("order", "wf_file_proforma", "VARCHAR(64) NOT NULL DEFAULT ''"); err != nil {
@@ -68,4 +69,36 @@ func NewSQLClient(conf *config.Config, log *slog.Logger) (*MySql, error) {
 func (s *MySql) Close() {
 	s.closeStmt()
 	_ = s.db.Close()
+}
+
+func (s *MySql) OrderProducts(orderId int64) ([]*entity.LineItem, error) {
+	stmt, err := s.stmtSelectOrderProducts()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := stmt.Query(orderId)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+
+	var products []*entity.LineItem
+	for rows.Next() {
+		var product entity.LineItem
+		if err = rows.Scan(
+			&product.Name,
+			&product.Price,
+			&product.Qty,
+			&product.Sku,
+		); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		products = append(products, &product)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows: %w", err)
+	}
+
+	return products, nil
 }
