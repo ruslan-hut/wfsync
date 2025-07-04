@@ -8,6 +8,13 @@ import (
 	"wfsync/lib/validate"
 )
 
+type Source string
+
+const (
+	SourceApi    Source = "api"
+	SourceStripe Source = "stripe"
+)
+
 type CheckoutParams struct {
 	ClientDetails *ClientDetails `json:"client_details" bson:"client_details" validate:"required"`
 	LineItems     []*LineItem    `json:"line_items" bson:"line_items" validate:"required,min=1,dive"`
@@ -21,13 +28,21 @@ type CheckoutParams struct {
 	SessionId     string         `json:"session_id,omitempty" bson:"session_id"`
 	InvoiceId     string         `json:"invoice_id,omitempty" bson:"invoice_id"`
 	Paid          bool           `json:"paid,omitempty" bson:"paid"`
-	Source        string         `json:"source,omitempty" bson:"source"`
+	Source        Source         `json:"source,omitempty" bson:"source"`
 	Payload       interface{}    `json:"payload,omitempty" bson:"payload"`
 }
 
 func (c *CheckoutParams) Bind(_ *http.Request) error {
 	c.Created = time.Now()
 	return validate.Struct(c)
+}
+
+func (c *CheckoutParams) AddShipping(amount int64) {
+	c.LineItems = append(c.LineItems, &LineItem{
+		Name:  "Zwrot kosztów transportu towarów",
+		Qty:   1,
+		Price: amount,
+	})
 }
 
 type LineItem struct {
@@ -55,6 +70,7 @@ func NewFromCheckoutSession(sess *stripe.CheckoutSession) *CheckoutParams {
 		Total:     sess.AmountTotal,
 		Paid:      sess.PaymentStatus == stripe.CheckoutSessionPaymentStatusPaid,
 		Payload:   sess,
+		Source:    SourceStripe,
 	}
 	if sess.Customer != nil {
 		client := &ClientDetails{
@@ -81,11 +97,7 @@ func NewFromCheckoutSession(sess *stripe.CheckoutSession) *CheckoutParams {
 		}
 	}
 	if sess.ShippingCost != nil && sess.ShippingCost.AmountTotal > 0 {
-		params.LineItems = append(params.LineItems, &LineItem{
-			Name:  "Zwrot kosztów transportu towarów",
-			Qty:   1,
-			Price: sess.ShippingCost.AmountTotal,
-		})
+		params.AddShipping(sess.ShippingCost.AmountTotal)
 	}
 	if sess.Metadata != nil {
 		id, ok := sess.Metadata["order_id"]
@@ -105,6 +117,7 @@ func NewFromInvoice(inv *stripe.Invoice) *CheckoutParams {
 		Total:     inv.Total,
 		Paid:      inv.Paid,
 		Payload:   inv,
+		Source:    SourceStripe,
 	}
 	if inv.Customer != nil {
 		client := &ClientDetails{
@@ -131,11 +144,7 @@ func NewFromInvoice(inv *stripe.Invoice) *CheckoutParams {
 		}
 	}
 	if inv.ShippingCost != nil && inv.ShippingCost.AmountTotal > 0 {
-		params.LineItems = append(params.LineItems, &LineItem{
-			Name:  "Zwrot kosztów transportu towarów",
-			Qty:   1,
-			Price: inv.ShippingCost.AmountTotal,
-		})
+		params.AddShipping(inv.ShippingCost.AmountTotal)
 	}
 	if inv.Metadata != nil {
 		id, ok := inv.Metadata["order_id"]

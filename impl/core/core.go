@@ -62,7 +62,6 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 	if params == nil {
 		return
 	}
-	params.Source = "stripe"
 	err := c.inv.RegisterInvoice(ctx, params)
 	if err != nil {
 		c.log.With(
@@ -79,6 +78,6 @@ func (c *Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (io.
 }
 
 func (c *Core) StripePaymentLink(params *entity.CheckoutParams) (*entity.Payment, error) {
-	params.Source = "api"
+	params.Source = entity.SourceApi
 	return c.sc.HoldAmount(params)
 }
