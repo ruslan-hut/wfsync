@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	_ "github.com/go-sql-driver/mysql" // MySQL driver
+	"math"
 	"sync"
 	"time"
 	"wfsync/entity"
@@ -97,7 +98,7 @@ func (s *MySql) OrderProducts(orderId int64) ([]*entity.LineItem, error) {
 		); err != nil {
 			return nil, err
 		}
-		product.Price = int64((price + tax) * 100)
+		product.Price = int64(math.Round((price + tax) * 100))
 		products = append(products, &product)
 	}
 
