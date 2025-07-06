@@ -57,16 +57,6 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 		slog.String("action", action),
 	)
 
-	var err error
-	status := "ERROR"
-	t1 := time.Now()
-	defer func() {
-		t2 := time.Now()
-		log.Debug("wFirma API request completed",
-			slog.String("duration", fmt.Sprintf("%.3fms", float64(t2.Sub(t1))/float64(time.Millisecond))),
-			slog.String("status", status))
-	}()
-
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -94,7 +84,6 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 
-	status = resp.Status
 	if resp.StatusCode >= 300 {
 		log.Error("wFirma API returned error",
 			slog.String("status", resp.Status),
@@ -163,7 +152,7 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 		return "", fmt.Errorf("no contractor id returned")
 	}
 	contractorID := addResp.Contractors.Element0.Contractor.ID
-	c.log.Info("new contractor created",
+	c.log.Debug("new contractor created",
 		slog.String("email", customer.Email),
 		slog.String("name", customer.Name),
 		slog.String("contractorID", contractorID))
@@ -209,7 +198,7 @@ func (c *Client) getContractor(ctx context.Context, email string) (string, error
 		_ = json.Unmarshal(res, &findResp)
 		if findResp.Contractors.Element0.Contractor.ID != "" {
 			contractorID := findResp.Contractors.Element0.Contractor.ID
-			c.log.Info("found existing contractor",
+			c.log.Debug("found existing contractor",
 				slog.String("email", email),
 				slog.String("contractor_id", contractorID))
 			return contractorID, nil
@@ -316,7 +305,6 @@ func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutPar
 		return fmt.Errorf("contractor: %w", err)
 	}
 	if contractorID == "" {
-		log.Debug("no contractor found")
 		email := params.ClientDetails.Email
 		if email == "" {
 			email = fmt.Sprintf("%s@example.com", uuid.New().String())
@@ -411,8 +399,14 @@ func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutPar
 		}
 	}
 
-	log.Info("invoice created successfully",
-		slog.String("wfirma_id", invID))
+	c.log.With(
+		slog.String("wfirma_id", invID),
+		slog.String("order_id", params.OrderId),
+		slog.String("total", fmt.Sprintf("%.2f", total)),
+		slog.String("customer_email", params.ClientDetails.Email),
+		slog.String("customer_name", params.ClientDetails.Name),
+		slog.String("currency", params.Currency),
+	).Info("invoice created")
 
 	if !params.Paid {
 		return nil
