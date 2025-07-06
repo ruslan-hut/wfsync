@@ -35,5 +35,13 @@ func (oc *Opencart) OrderLines(orderId string) ([]*entity.LineItem, error) {
 	if err != nil {
 		return nil, fmt.Errorf("database query: %w", err)
 	}
+	title, value, err := oc.db.OrderShipping(id)
+	if value > 0 {
+		items = append(items, &entity.LineItem{
+			Name:  fmt.Sprintf("Dostawa %s", title),
+			Price: value,
+			Qty:   1,
+		})
+	}
 	return items, nil
 }

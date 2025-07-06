@@ -108,3 +108,32 @@ func (s *MySql) OrderProducts(orderId int64) ([]*entity.LineItem, error) {
 
 	return products, nil
 }
+
+func (s *MySql) OrderShipping(orderId int64) (string, int64, error) {
+	stmt, err := s.stmtSelectOrderTotals()
+	if err != nil {
+		return "", 0, err
+	}
+	rows, err := stmt.Query(orderId)
+	if err != nil {
+		return "", 0, err
+	}
+	defer rows.Close()
+
+	var title string
+	var shipping float64
+	for rows.Next() {
+		if err = rows.Scan(
+			&title,
+			&shipping,
+		); err != nil {
+			return "", 0, err
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		return "", 0, err
+	}
+
+	return title, int64(math.Round(shipping * 100)), nil
+}

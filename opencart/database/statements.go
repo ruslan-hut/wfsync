@@ -60,3 +60,15 @@ func (s *MySql) stmtSelectOrderProducts() (*sql.Stmt, error) {
 	)
 	return s.prepareStmt("selectOrderProducts", query)
 }
+
+func (s *MySql) stmtSelectOrderTotals() (*sql.Stmt, error) {
+	query := fmt.Sprintf(
+		`SELECT
+			op.title,
+			op.value
+		 FROM %sorder_total op
+		 WHERE op.order_id = ? AND op.code='shipping'`,
+		s.prefix,
+	)
+	return s.prepareStmt("selectOrderTotals", query)
+}
