@@ -118,7 +118,12 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 		slog.String("session_id", invID),
 	)
 
-	sess, err := s.sc.CheckoutSessions.Get(invID, nil)
+	sess, err := s.sc.CheckoutSessions.Get(invID, &stripe.CheckoutSessionParams{
+		Expand: []*string{
+			stripe.String("line_items"),
+			stripe.String("shipping_cost"),
+		},
+	})
 	if err != nil {
 		log.With(
 			sl.Err(err),
@@ -131,25 +136,25 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 		slog.String("currency", string(sess.Currency)),
 	)
 
-	itemsIter := s.sc.CheckoutSessions.ListLineItems(&stripe.CheckoutSessionListLineItemsParams{
-		Session: stripe.String(invID),
-	})
-	if itemsIter == nil {
-		log.Error("items iterator is nil")
-		return nil
-	}
-	lineItems := make([]*stripe.LineItem, 0)
-	for itemsIter.Next() {
-		lineItem := itemsIter.LineItem()
-		lineItems = append(lineItems, lineItem)
-	}
-	if len(lineItems) == 0 {
-		log.Error("no line items found")
-		return nil
-	}
-	sess.LineItems = &stripe.LineItemList{
-		Data: lineItems,
-	}
+	//itemsIter := s.sc.CheckoutSessions.ListLineItems(&stripe.CheckoutSessionListLineItemsParams{
+	//	Session: stripe.String(invID),
+	//})
+	//if itemsIter == nil {
+	//	log.Error("items iterator is nil")
+	//	return nil
+	//}
+	//lineItems := make([]*stripe.LineItem, 0)
+	//for itemsIter.Next() {
+	//	lineItem := itemsIter.LineItem()
+	//	lineItems = append(lineItems, lineItem)
+	//}
+	//if len(lineItems) == 0 {
+	//	log.Error("no line items found")
+	//	return nil
+	//}
+	//sess.LineItems = &stripe.LineItemList{
+	//	Data: lineItems,
+	//}
 
 	s.checkCustomer(sess)
 
