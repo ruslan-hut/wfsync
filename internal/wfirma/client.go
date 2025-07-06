@@ -163,7 +163,7 @@ func (c *Client) getContractor(ctx context.Context, email string) (string, error
 	if email == "" {
 		return "", nil
 	}
-	c.log.Debug("looking up contractor by email", slog.String("email", email))
+	log := c.log.With(slog.String("email", email))
 
 	// Try to find by customer email first.
 	search := map[string]interface{}{
@@ -198,15 +198,12 @@ func (c *Client) getContractor(ctx context.Context, email string) (string, error
 		_ = json.Unmarshal(res, &findResp)
 		if findResp.Contractors.Element0.Contractor.ID != "" {
 			contractorID := findResp.Contractors.Element0.Contractor.ID
-			c.log.Debug("found existing contractor",
-				slog.String("email", email),
+			log.Debug("found existing contractor",
 				slog.String("contractor_id", contractorID))
 			return contractorID, nil
 		}
 	} else {
-		c.log.Warn("searching for contractor",
-			slog.String("email", email),
-			slog.String("error", err.Error()))
+		log.Warn("searching for contractor", sl.Err(err))
 	}
 
 	return "", nil
