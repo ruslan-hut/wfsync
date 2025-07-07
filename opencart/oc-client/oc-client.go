@@ -124,9 +124,10 @@ func (oc *Opencart) ProcessOrders() {
 			if err != nil {
 				oc.log.With(
 					slog.String("order_id", order.OrderId),
-					slog.Int("status", oc.statusUrlRequest),
+					slog.Int("status", oc.statusUrlResult),
 					sl.Err(err),
 				).Error("change order status")
+				continue
 			}
 			oc.log.With(
 				slog.String("order_id", order.OrderId),
