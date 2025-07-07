@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 	"wfsync/entity"
 	"wfsync/internal/config"
@@ -19,6 +20,7 @@ type Opencart struct {
 	statusUrlRequest int
 	statusUrlResult  int
 	handlerUrl       UrlRequestHandler
+	mutex            sync.Mutex
 }
 
 func New(conf *config.Config, log *slog.Logger) (*Opencart, error) {
@@ -75,6 +77,9 @@ func (oc *Opencart) OrderLines(orderId string) ([]*entity.LineItem, error) {
 }
 
 func (oc *Opencart) ProcessOrders() {
+	oc.mutex.Lock()
+	defer oc.mutex.Unlock()
+
 	if oc.statusUrlRequest > 0 && oc.handlerUrl != nil {
 		orders, err := oc.db.OrderSearchStatus(oc.statusUrlRequest)
 		if err != nil {
