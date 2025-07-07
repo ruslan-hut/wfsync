@@ -56,6 +56,7 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) error {
 		})
 		rootApi.Route("/st", func(st chi.Router) {
 			st.Post("/hold", payment.Hold(log, handler))
+			st.Post("/pay", payment.Pay(log, handler))
 			st.Post("/capture/{id}", payment.Capture(log, handler))
 			st.Post("/cancel/{id}", payment.Cancel(log, handler))
 		})

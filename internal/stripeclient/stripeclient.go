@@ -136,26 +136,6 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 		slog.String("currency", string(sess.Currency)),
 	)
 
-	//itemsIter := s.sc.CheckoutSessions.ListLineItems(&stripe.CheckoutSessionListLineItemsParams{
-	//	Session: stripe.String(invID),
-	//})
-	//if itemsIter == nil {
-	//	log.Error("items iterator is nil")
-	//	return nil
-	//}
-	//lineItems := make([]*stripe.LineItem, 0)
-	//for itemsIter.Next() {
-	//	lineItem := itemsIter.LineItem()
-	//	lineItems = append(lineItems, lineItem)
-	//}
-	//if len(lineItems) == 0 {
-	//	log.Error("no line items found")
-	//	return nil
-	//}
-	//sess.LineItems = &stripe.LineItemList{
-	//	Data: lineItems,
-	//}
-
 	s.checkCustomer(sess)
 
 	return entity.NewFromCheckoutSession(sess)
@@ -257,9 +237,76 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 	params.Status = string(cs.Status)
 
 	payment := &entity.Payment{
-		Id:     cs.ID,
-		Amount: params.Total,
-		Link:   cs.URL,
+		Id:      cs.ID,
+		OrderId: params.OrderId,
+		Amount:  params.Total,
+		Link:    cs.URL,
+	}
+
+	return payment, nil
+}
+
+func (s *StripeClient) PayAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
+	log := s.log.With(
+		slog.Int64("total", params.Total),
+		slog.String("currency", params.Currency),
+		slog.String("order_id", params.OrderId),
+	)
+	defer func() {
+		err := s.db.SaveCheckoutParams(params)
+		if err != nil {
+			s.log.With(
+				sl.Err(err),
+			).Error("save checkout params to database")
+		}
+	}()
+
+	successUrl := params.SuccessUrl
+	if successUrl == "" {
+		successUrl = s.successUrl
+	}
+	if successUrl == "" {
+		return nil, fmt.Errorf("missing success url")
+	}
+
+	csParams := &stripe.CheckoutSessionParams{
+		Mode: stripe.String(string(stripe.CheckoutSessionModePayment)),
+		LineItems: []*stripe.CheckoutSessionLineItemParams{
+			{
+				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+					Currency: stripe.String(params.Currency),
+					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+						Name: stripe.String("Order " + params.OrderId),
+					},
+					UnitAmount: stripe.Int64(params.Total),
+				},
+				Quantity: stripe.Int64(1),
+			},
+		},
+		Metadata:      map[string]string{"order_id": params.OrderId},
+		SuccessURL:    stripe.String(successUrl),
+		CustomerEmail: stripe.String(params.ClientDetails.Email),
+	}
+
+	cs, err := s.sc.CheckoutSessions.New(csParams)
+	if err != nil {
+		err = s.parseErr(err)
+		log.With(
+			sl.Err(err),
+		).Error("create checkout session")
+		return nil, fmt.Errorf("create checkout session: %w", err)
+	}
+	log = log.With(slog.String("session_id", cs.ID))
+
+	params.Payload = cs
+	params.SessionId = cs.ID
+	params.Status = string(cs.Status)
+
+	payment := &entity.Payment{
+		Id:      cs.ID,
+		OrderId: params.OrderId,
+		Amount:  params.Total,
+		Link:    cs.URL,
 	}
 
 	return payment, nil

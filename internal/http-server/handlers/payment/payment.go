@@ -13,7 +13,8 @@ import (
 )
 
 type Core interface {
-	StripePaymentLink(params *entity.CheckoutParams) (*entity.Payment, error)
+	StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment, error)
+	StripePayAmount(params *entity.CheckoutParams) (*entity.Payment, error)
 }
 
 func Hold(log *slog.Logger, handler Core) http.HandlerFunc {
@@ -43,7 +44,7 @@ func Hold(log *slog.Logger, handler Core) http.HandlerFunc {
 			slog.Int64("total", checkoutParams.Total),
 		)
 
-		pm, err := handler.StripePaymentLink(&checkoutParams)
+		pm, err := handler.StripeHoldAmount(&checkoutParams)
 		if err != nil {
 			render.Status(r, 400)
 			render.JSON(w, r, response.Error(fmt.Sprintf("Get link: %v", err)))
@@ -83,7 +84,7 @@ func Capture(log *slog.Logger, handler Core) http.HandlerFunc {
 			slog.Int64("total", checkoutParams.Total),
 		)
 
-		//pm, err := handler.StripePaymentLink(&checkoutParams)
+		//pm, err := handler.StripeHoldAmount(&checkoutParams)
 		//if err != nil {
 		//	logger.Error("get payment link", sl.Err(err))
 		//	render.Status(r, 400)
@@ -113,7 +114,7 @@ func Cancel(log *slog.Logger, handler Core) http.HandlerFunc {
 			return
 		}
 
-		//pm, err := handler.StripePaymentLink(&checkoutParams)
+		//pm, err := handler.StripeHoldAmount(&checkoutParams)
 		//if err != nil {
 		//	logger.Error("get payment link", sl.Err(err))
 		//	render.Status(r, 400)
@@ -123,5 +124,44 @@ func Cancel(log *slog.Logger, handler Core) http.HandlerFunc {
 		logger.Debug("payment canceled")
 
 		render.JSON(w, r, response.Ok(nil))
+	}
+}
+
+func Pay(log *slog.Logger, handler Core) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		mod := sl.Module("http.handlers.payment")
+
+		logger := log.With(
+			mod,
+			slog.String("request_id", middleware.GetReqID(r.Context())),
+		)
+
+		if handler == nil {
+			logger.Error("stripe service not available")
+			render.JSON(w, r, response.Error("Stripe service not available"))
+			return
+		}
+
+		var checkoutParams entity.CheckoutParams
+		if err := render.Bind(r, &checkoutParams); err != nil {
+			logger.Error("bind request", sl.Err(err))
+			render.Status(r, 400)
+			render.JSON(w, r, response.Error(fmt.Sprintf("Invalid request: %v", err)))
+			return
+		}
+		logger = logger.With(
+			slog.Int("items_count", len(checkoutParams.LineItems)),
+			slog.Int64("total", checkoutParams.Total),
+		)
+
+		pm, err := handler.StripePayAmount(&checkoutParams)
+		if err != nil {
+			render.Status(r, 400)
+			render.JSON(w, r, response.Error(fmt.Sprintf("Get link: %v", err)))
+			return
+		}
+		logger.Debug("payment link created")
+
+		render.JSON(w, r, response.Ok(pm))
 	}
 }
