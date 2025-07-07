@@ -66,3 +66,19 @@ Field `price` is in cents, so `8500` means `85.00`. Total amount for each line i
   "success_url": ""
 }
 ```
+
+### Response on Successful Payment Creation
+
+```json
+{
+    "data": {
+        "amount": 15000,
+        "id": "cs_test_b1ELPMpzH...CbEuE9ab",
+        "order_id": "123456",
+        "link": "https://checkout.stripe.com/c/pay/cs_...kZmBtamlhYHd2Jz9xd3BgeCUl"
+    },
+    "success": true,
+    "status_message": "Success",
+    "timestamp": "2025-07-07T11:41:40Z"
+}
+```
