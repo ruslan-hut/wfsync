@@ -114,8 +114,8 @@ func (oc *Opencart) ProcessOrders() {
 				).Error("invalid order id")
 				continue
 			}
-			//comment := fmt.Sprintf("Twój link do zapłaty za zamówienie: %s", payment.Link)
-			err = oc.db.ChangeOrderStatus(orderId, oc.statusUrlResult, payment.Link)
+			comment := fmt.Sprintf("<a href=\"%s\" target=\"_blank\">Stripe Pay Link</a>", payment.Link)
+			err = oc.db.ChangeOrderStatus(orderId, oc.statusUrlResult, comment)
 			if err != nil {
 				oc.log.With(
 					slog.String("order_id", order.OrderId),
