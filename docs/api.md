@@ -31,6 +31,7 @@ API response always has the following structure
 #### Stripe Endpoints
 
 - `POST /v1/st/hold` - Create a payment hold in Stripe
+- `POST /v1/st/pay` - Create a direct payment in Stripe
 - `POST /v1/st/capture/{id}` - Capture a previously held payment
 - `POST /v1/st/cancel/{id}` - Cancel a payment
 
@@ -40,8 +41,10 @@ API response always has the following structure
 
 ## Usage Examples
 
-### Creating a Payment Hold
-Body payload example, all fields with values in the example are mandatory
+### Creating a Payment Hold or Direct
+Body payload example, all fields with values in the example are mandatory.
+Field `price` is in cents, so `8500` means `85.00`. Total amount for each line item is calculated as `qty * price`.
+
 ```json
 {
   "client_details": {
