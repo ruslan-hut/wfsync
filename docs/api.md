@@ -73,7 +73,7 @@ Field `price` is in cents, so `8500` means `85.00`. Total amount for each line i
 {
     "data": {
         "amount": 15000,
-        "id": "cs_test_b1ELPMpzH...CbEuE9ab",
+        "id": "cs_...b1ELPMpzHCbEuE9ab",
         "order_id": "123456",
         "link": "https://checkout.stripe.com/c/pay/cs_...kZmBtamlhYHd2Jz9xd3BgeCUl"
     },
