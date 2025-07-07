@@ -84,6 +84,9 @@ func (oc *Opencart) ProcessOrders() {
 			).Error("get orders by status")
 			return
 		}
+		if len(orders) == 0 {
+			return
+		}
 		oc.log.With(
 			slog.Int("status", oc.statusUrlRequest),
 			slog.Int("count", len(orders)),
@@ -111,8 +114,8 @@ func (oc *Opencart) ProcessOrders() {
 				).Error("invalid order id")
 				continue
 			}
-			comment := fmt.Sprintf("Twój link do zapłaty za zamówienie: %s", payment.Link)
-			err = oc.db.ChangeOrderStatus(orderId, oc.statusUrlResult, comment)
+			//comment := fmt.Sprintf("Twój link do zapłaty za zamówienie: %s", payment.Link)
+			err = oc.db.ChangeOrderStatus(orderId, oc.statusUrlResult, payment.Link)
 			if err != nil {
 				oc.log.With(
 					slog.String("order_id", order.OrderId),
