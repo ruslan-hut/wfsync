@@ -39,6 +39,12 @@ func Hold(log *slog.Logger, handler Core) http.HandlerFunc {
 			render.JSON(w, r, response.Error(fmt.Sprintf("Invalid request: %v", err)))
 			return
 		}
+		if err := checkoutParams.ValidateTotal(); err != nil {
+			logger.Error("validate total", sl.Err(err))
+			render.Status(r, 400)
+			render.JSON(w, r, response.Error(fmt.Sprintf("Invalid total: %v", err)))
+			return
+		}
 		logger = logger.With(
 			slog.Int("items_count", len(checkoutParams.LineItems)),
 			slog.Int64("total", checkoutParams.Total),
@@ -147,6 +153,12 @@ func Pay(log *slog.Logger, handler Core) http.HandlerFunc {
 			logger.Error("bind request", sl.Err(err))
 			render.Status(r, 400)
 			render.JSON(w, r, response.Error(fmt.Sprintf("Invalid request: %v", err)))
+			return
+		}
+		if err := checkoutParams.ValidateTotal(); err != nil {
+			logger.Error("validate total", sl.Err(err))
+			render.Status(r, 400)
+			render.JSON(w, r, response.Error(fmt.Sprintf("Invalid total: %v", err)))
 			return
 		}
 		logger = logger.With(

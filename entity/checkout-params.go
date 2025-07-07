@@ -37,6 +37,17 @@ func (c *CheckoutParams) Bind(_ *http.Request) error {
 	return validate.Struct(c)
 }
 
+func (c *CheckoutParams) ValidateTotal() error {
+	var total int64
+	for _, item := range c.LineItems {
+		total += item.Qty * item.Price
+	}
+	if c.Total == total {
+		return nil
+	}
+	return fmt.Errorf("total amount %d does not match sum of line items %d", c.Total, total)
+}
+
 func (c *CheckoutParams) AddShipping(amount int64) {
 	c.LineItems = append(c.LineItems, &LineItem{
 		Name:  "Zwrot kosztów transportu towarów",
