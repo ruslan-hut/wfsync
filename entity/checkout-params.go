@@ -11,8 +11,9 @@ import (
 type Source string
 
 const (
-	SourceApi    Source = "api"
-	SourceStripe Source = "stripe"
+	SourceApi      Source = "api"
+	SourceStripe   Source = "stripe"
+	SourceOpenCart Source = "opencart"
 )
 
 type CheckoutParams struct {
@@ -48,12 +49,8 @@ func (c *CheckoutParams) ValidateTotal() error {
 	return fmt.Errorf("total amount %d does not match sum of line items %d", c.Total, total)
 }
 
-func (c *CheckoutParams) AddShipping(amount int64) {
-	c.LineItems = append(c.LineItems, &LineItem{
-		Name:  "Zwrot kosztów transportu towarów",
-		Qty:   1,
-		Price: amount,
-	})
+func (c *CheckoutParams) AddShipping(title string, amount int64) {
+	c.LineItems = append(c.LineItems, ShippingLineItem(title, amount))
 }
 
 type LineItem struct {
@@ -61,6 +58,19 @@ type LineItem struct {
 	Qty   int64  `json:"qty" validate:"required,min=1"`
 	Price int64  `json:"price" validate:"required,min=1"`
 	Sku   string `json:"sku,omitempty" bson:"sku"`
+}
+
+func ShippingLineItem(title string, amount int64) *LineItem {
+	if title == "" {
+		title = "Zwrot kosztów transportu towarów"
+	} else {
+		title = fmt.Sprintf("Zwrot kosztów transportu towarów (%s)", title)
+	}
+	return &LineItem{
+		Name:  title,
+		Qty:   1,
+		Price: amount,
+	}
 }
 
 type ClientDetails struct {
@@ -112,7 +122,7 @@ func NewFromCheckoutSession(sess *stripe.CheckoutSession) *CheckoutParams {
 		}
 	}
 	if sess.ShippingCost != nil && sess.ShippingCost.AmountTotal > 0 {
-		params.AddShipping(sess.ShippingCost.AmountTotal)
+		params.AddShipping("", sess.ShippingCost.AmountTotal)
 	}
 	if sess.Metadata != nil {
 		id, ok := sess.Metadata["order_id"]
@@ -162,7 +172,7 @@ func NewFromInvoice(inv *stripe.Invoice) *CheckoutParams {
 		}
 	}
 	if inv.ShippingCost != nil && inv.ShippingCost.AmountTotal > 0 {
-		params.AddShipping(inv.ShippingCost.AmountTotal)
+		params.AddShipping("", inv.ShippingCost.AmountTotal)
 	}
 	if inv.Metadata != nil {
 		id, ok := inv.Metadata["order_id"]

@@ -37,15 +37,17 @@ type Mongo struct {
 }
 
 type OpenCart struct {
-	Enabled  bool   `yaml:"enabled" env-default:"false"`
-	Driver   string `yaml:"driver" env-default:"mysql"`
-	HostName string `yaml:"hostname" env-default:"localhost"`
-	UserName string `yaml:"username" env-default:"root"`
-	Password string `yaml:"password" env-default:""`
-	Database string `yaml:"database" env-default:""`
-	Port     string `yaml:"port" env-default:"3306"`
-	Prefix   string `yaml:"prefix" env-default:""`
-	FilePath string `yaml:"file_path" env-default:""`
+	Enabled          bool   `yaml:"enabled" env-default:"false"`
+	Driver           string `yaml:"driver" env-default:"mysql"`
+	HostName         string `yaml:"hostname" env-default:"localhost"`
+	UserName         string `yaml:"username" env-default:"root"`
+	Password         string `yaml:"password" env-default:""`
+	Database         string `yaml:"database" env-default:""`
+	Port             string `yaml:"port" env-default:"3306"`
+	Prefix           string `yaml:"prefix" env-default:""`
+	FilePath         string `yaml:"file_path" env-default:""`
+	StatusUrlRequest string `yaml:"status_url_request" env-default:""`
+	StatusUrlResult  string `yaml:"status_url_result" env-default:""`
 }
 
 type Telegram struct {

@@ -32,6 +32,8 @@ opencart:
   port: 3306
   prefix: oc_
   file_path: ${FILE_PATH}
+  status_url_request: 0
+  status_url_result: 0
 telegram:
   enabled: true
   api_key: ${TELEGRAM_API_KEY}

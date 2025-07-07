@@ -72,3 +72,24 @@ func (s *MySql) stmtSelectOrderTotals() (*sql.Stmt, error) {
 	)
 	return s.prepareStmt("selectOrderTotals", query)
 }
+
+func (s *MySql) stmtSelectOrderStatus() (*sql.Stmt, error) {
+	query := fmt.Sprintf(
+		`SELECT
+			order_id,
+			firstname,
+			lastname,
+			email,
+			telephone,
+			shipping_country,
+			shipping_postcode,
+			shipping_city,
+			shipping_address_1,
+			currency_code
+		 FROM %sorder
+		 WHERE order_status_id = ?
+		 LIMIT 5`,
+		s.prefix,
+	)
+	return s.prepareStmt("selectOrderStatus", query)
+}

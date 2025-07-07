@@ -5,6 +5,7 @@ import (
 	"fmt"
 	_ "github.com/go-sql-driver/mysql" // MySQL driver
 	"math"
+	"strconv"
 	"sync"
 	"time"
 	"wfsync/entity"
@@ -136,4 +137,98 @@ func (s *MySql) OrderShipping(orderId int64) (string, int64, error) {
 	}
 
 	return title, int64(math.Round(shipping * 100)), nil
+}
+
+func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error) {
+	stmt, err := s.stmtSelectOrderStatus()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := stmt.Query(statusId)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+
+	var orders []*entity.CheckoutParams
+	for rows.Next() {
+		var order entity.CheckoutParams
+		var client entity.ClientDetails
+		var firstName, lastName string
+		if err = rows.Scan(
+			&order.OrderId,
+			&firstName,
+			&lastName,
+			&client.Email,
+			&client.Phone,
+			&client.Country,
+			&client.ZipCode,
+			&client.City,
+			&client.Street,
+			&order.Currency,
+		); err != nil {
+			return nil, err
+		}
+		client.Name = firstName + " " + lastName
+		order.ClientDetails = &client
+		order.Created = time.Now()
+		order.Source = entity.SourceOpenCart
+		orders = append(orders, &order)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// add line items and shipping costs to each order
+	for _, order := range orders {
+		id, err := strconv.ParseInt(order.OrderId, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid order id: %s", order.OrderId)
+		}
+		order.LineItems, err = s.OrderProducts(id)
+		if err != nil {
+			return nil, fmt.Errorf("get order products: %w", err)
+		}
+		title, value, err := s.OrderShipping(id)
+		if err != nil {
+			return nil, fmt.Errorf("get order shipping: %w", err)
+		}
+		if value > 0 {
+			order.AddShipping(title, value)
+		}
+		// calculate total
+		for _, item := range order.LineItems {
+			order.Total += item.Price * item.Qty
+		}
+	}
+
+	return orders, nil
+}
+
+func (s *MySql) ChangeOrderStatus(orderId int64, orderStatusId int, comment string) error {
+	stmt, err := s.stmtUpdateOrderStatus()
+	if err != nil {
+		return err
+	}
+
+	// add order history record
+	rec := map[string]interface{}{
+		"order_id":        orderId,
+		"order_status_id": orderStatusId,
+		"notify":          1, // notify customer
+		"comment":         comment,
+		"date_added":      time.Now(),
+	}
+	_, err = s.insert("order_history", rec)
+	if err != nil {
+		return fmt.Errorf("insert order history: %w", err)
+	}
+
+	dateModified := time.Now()
+	_, err = stmt.Exec(dateModified, orderStatusId, orderId)
+	if err != nil {
+		return err
+	}
+	return nil
 }

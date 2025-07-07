@@ -49,7 +49,11 @@ func (c *Core) SetAuthService(auth AuthService) {
 }
 
 func (c *Core) SetOpencart(oc *occlient.Opencart) {
-	c.oc = oc
+	if oc == nil {
+		c.log.Warn("opencart client is nil, some features may not work")
+		return
+	}
+	c.oc = oc.WithUrlHandler(c.StripePayAmount)
 }
 
 func (c *Core) AuthenticateByToken(token string) (*entity.User, error) {
@@ -96,11 +100,9 @@ func (c *Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (io.
 }
 
 func (c *Core) StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
-	params.Source = entity.SourceApi
 	return c.sc.HoldAmount(params)
 }
 
 func (c *Core) StripePayAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
-	params.Source = entity.SourceApi
 	return c.sc.PayAmount(params)
 }

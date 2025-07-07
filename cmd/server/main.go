@@ -59,7 +59,7 @@ func main() {
 		}
 	}
 
-	oc, err := occlient.New(conf)
+	oc, err := occlient.New(conf, log)
 	if err != nil {
 		log.Error("opencart client", sl.Err(err))
 	}

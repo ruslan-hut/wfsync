@@ -49,6 +49,7 @@ func Hold(log *slog.Logger, handler Core) http.HandlerFunc {
 			slog.Int("items_count", len(checkoutParams.LineItems)),
 			slog.Int64("total", checkoutParams.Total),
 		)
+		checkoutParams.Source = entity.SourceApi
 
 		pm, err := handler.StripeHoldAmount(&checkoutParams)
 		if err != nil {
@@ -165,6 +166,7 @@ func Pay(log *slog.Logger, handler Core) http.HandlerFunc {
 			slog.Int("items_count", len(checkoutParams.LineItems)),
 			slog.Int64("total", checkoutParams.Total),
 		)
+		checkoutParams.Source = entity.SourceApi
 
 		pm, err := handler.StripePayAmount(&checkoutParams)
 		if err != nil {
