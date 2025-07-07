@@ -200,26 +200,9 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 		return nil, fmt.Errorf("missing success url")
 	}
 
-	csParams := &stripe.CheckoutSessionParams{
-		Mode: stripe.String(string(stripe.CheckoutSessionModePayment)),
-		PaymentIntentData: &stripe.CheckoutSessionPaymentIntentDataParams{
-			CaptureMethod: stripe.String("manual"),
-		},
-		LineItems: []*stripe.CheckoutSessionLineItemParams{
-			{
-				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
-					Currency: stripe.String(params.Currency),
-					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
-						Name: stripe.String("Order " + params.OrderId),
-					},
-					UnitAmount: stripe.Int64(params.Total),
-				},
-				Quantity: stripe.Int64(1),
-			},
-		},
-		Metadata:      map[string]string{"order_id": params.OrderId},
-		SuccessURL:    stripe.String(successUrl),
-		CustomerEmail: stripe.String(params.ClientDetails.Email),
+	csParams := s.sessionParamsFromCheckout(params)
+	csParams.PaymentIntentData = &stripe.CheckoutSessionPaymentIntentDataParams{
+		CaptureMethod: stripe.String("manual"),
 	}
 
 	cs, err := s.sc.CheckoutSessions.New(csParams)
@@ -269,24 +252,7 @@ func (s *StripeClient) PayAmount(params *entity.CheckoutParams) (*entity.Payment
 		return nil, fmt.Errorf("missing success url")
 	}
 
-	csParams := &stripe.CheckoutSessionParams{
-		Mode: stripe.String(string(stripe.CheckoutSessionModePayment)),
-		LineItems: []*stripe.CheckoutSessionLineItemParams{
-			{
-				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
-					Currency: stripe.String(params.Currency),
-					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
-						Name: stripe.String("Order " + params.OrderId),
-					},
-					UnitAmount: stripe.Int64(params.Total),
-				},
-				Quantity: stripe.Int64(1),
-			},
-		},
-		Metadata:      map[string]string{"order_id": params.OrderId},
-		SuccessURL:    stripe.String(successUrl),
-		CustomerEmail: stripe.String(params.ClientDetails.Email),
-	}
+	csParams := s.sessionParamsFromCheckout(params)
 
 	cs, err := s.sc.CheckoutSessions.New(csParams)
 	if err != nil {
@@ -310,4 +276,27 @@ func (s *StripeClient) PayAmount(params *entity.CheckoutParams) (*entity.Payment
 	}
 
 	return payment, nil
+}
+
+func (s *StripeClient) sessionParamsFromCheckout(pm *entity.CheckoutParams) *stripe.CheckoutSessionParams {
+	var lineItems []*stripe.CheckoutSessionLineItemParams
+	for _, item := range pm.LineItems {
+		lineItems = append(lineItems, &stripe.CheckoutSessionLineItemParams{
+			PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+				Currency: stripe.String(pm.Currency),
+				ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+					Name: stripe.String(item.Name),
+				},
+				UnitAmount: stripe.Int64(item.Price),
+			},
+			Quantity: stripe.Int64(item.Qty),
+		})
+	}
+	return &stripe.CheckoutSessionParams{
+		Mode:          stripe.String(string(stripe.CheckoutSessionModePayment)),
+		LineItems:     lineItems,
+		Metadata:      map[string]string{"order_id": pm.OrderId},
+		SuccessURL:    stripe.String(s.successUrl),
+		CustomerEmail: stripe.String(pm.ClientDetails.Email),
+	}
 }
