@@ -64,6 +64,7 @@ type Config struct {
 	Telegram Telegram     `yaml:"telegram"`
 	Env      string       `yaml:"env" env-default:"local"`
 	Log      string       `yaml:"log"`
+	Location string       `yaml:"location" env-default:"UTC"`
 }
 
 var instance *Config

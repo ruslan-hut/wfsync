@@ -30,6 +30,7 @@ func main() {
 		slog.String("config", *configPath),
 		slog.String("env", conf.Env),
 		slog.String("log", *logPath),
+		slog.String("location", conf.Location),
 	).Info("config loaded")
 
 	mongo := database.NewMongoClient(conf)

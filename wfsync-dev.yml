@@ -2,6 +2,7 @@
 
 env: dev
 log: /var/log/wfsyncd.log
+location: Europe/Warsaw
 listen:
   bind_ip: 127.0.0.1
   port: 9190

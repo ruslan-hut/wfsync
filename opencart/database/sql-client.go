@@ -14,6 +14,7 @@ import (
 
 type MySql struct {
 	db         *sql.DB
+	loc        *time.Location
 	prefix     string
 	structure  map[string]map[string]Column
 	statements map[string]*sql.Stmt
@@ -65,6 +66,12 @@ func NewSQLClient(conf *config.Config) (*MySql, error) {
 	if err = sdb.addColumnIfNotExists("order", "wf_file_invoice", "VARCHAR(64) NOT NULL DEFAULT ''"); err != nil {
 		return nil, err
 	}
+
+	loc, err := time.LoadLocation(conf.Location)
+	if err != nil {
+		return nil, fmt.Errorf("load location: %w", err)
+	}
+	sdb.loc = loc
 
 	return sdb, nil
 }
@@ -171,7 +178,7 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 		}
 		client.Name = firstName + " " + lastName
 		order.ClientDetails = &client
-		order.Created = time.Now()
+		order.Created = time.Now().In(s.loc)
 		order.Source = entity.SourceOpenCart
 		orders = append(orders, &order)
 	}
@@ -211,6 +218,7 @@ func (s *MySql) ChangeOrderStatus(orderId int64, orderStatusId int, comment stri
 	if err != nil {
 		return err
 	}
+	dateModified := time.Now().In(s.loc)
 
 	// add order history record
 	rec := map[string]interface{}{
@@ -218,14 +226,13 @@ func (s *MySql) ChangeOrderStatus(orderId int64, orderStatusId int, comment stri
 		"order_status_id": orderStatusId,
 		"notify":          1, // notify customer
 		"comment":         comment,
-		"date_added":      time.Now(),
+		"date_added":      dateModified,
 	}
 	_, err = s.insert("order_history", rec)
 	if err != nil {
 		return fmt.Errorf("insert order history: %w", err)
 	}
 
-	dateModified := time.Now()
 	_, err = stmt.Exec(dateModified, orderStatusId, orderId)
 	if err != nil {
 		return err
