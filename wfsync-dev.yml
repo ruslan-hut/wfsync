@@ -24,7 +24,7 @@ mongo:
   password: ${MONGO_PASSWORD}
   database: ${MONGO_DATABASE}
 opencart:
-  enabled: true
+  enabled: false
   driver: mysql
   hostname: localhost
   username: ${SQL_USERNAME}
@@ -33,8 +33,8 @@ opencart:
   port: 3306
   prefix: oc_
   file_path: ${FILE_PATH}
-  status_url_request: 22
-  status_url_result: 23
+  status_url_request: 0
+  status_url_result: 0
 telegram:
   enabled: false
   api_key: ${TELEGRAM_API_KEY}
