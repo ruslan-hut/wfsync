@@ -2,6 +2,7 @@ package entity
 
 import (
 	"fmt"
+	"github.com/biter777/countries"
 	"github.com/stripe/stripe-go/v76"
 	"net/http"
 	"time"
@@ -104,47 +105,10 @@ func (c *ClientDetails) CountryCode() string {
 	if len(c.Country) == 2 {
 		return c.Country
 	}
-	switch c.Country {
-	case "Poland":
-		return "PL"
-	case "United States":
-		return "US"
-	case "United Kingdom":
-		return "GB"
-	case "Germany":
-		return "DE"
-	case "France":
-		return "FR"
-	case "Spain":
-		return "ES"
-	case "Italy":
-		return "IT"
-	case "Czech Republic":
-		return "CZ"
-	case "Austria":
-		return "AT"
-	case "Belgium":
-		return "BE"
-	case "Netherlands":
-		return "NL"
-	case "Sweden":
-		return "SE"
-	case "Denmark":
-		return "DK"
-	case "Finland":
-		return "FI"
-	case "Norway":
-		return "NO"
-	case "Switzerland":
-		return "CH"
-	case "Luxembourg":
-		return "LU"
-	case "Portugal":
-		return "PT"
-	case "Romania":
-		return "RO"
-	case "Ukraine":
-		return "UA"
+	country := countries.ByName(c.Country)
+	code := country.Alpha2()
+	if len(code) == 2 {
+		return code
 	}
 	return ""
 }

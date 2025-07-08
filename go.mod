@@ -4,6 +4,7 @@ go 1.24
 
 require (
 	github.com/PaulSonOfLars/gotgbot/v2 v2.0.0-rc.32
+	github.com/biter777/countries v1.7.5
 	github.com/go-chi/chi/v5 v5.2.2
 	github.com/go-chi/render v1.0.3
 	github.com/go-playground/validator/v10 v10.27.0
