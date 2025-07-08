@@ -48,14 +48,14 @@ func (s *MySql) stmtUpdateOrderStatus() (*sql.Stmt, error) {
 func (s *MySql) stmtSelectOrderProducts() (*sql.Stmt, error) {
 	query := fmt.Sprintf(
 		`SELECT
-			op.name,
+			pd.name,
 			op.price,
 			op.tax,
 			op.quantity,
 			op.sku
 		 FROM %sorder_product op
-		 JOIN %sproduct p ON op.product_id = p.product_id
-		 WHERE op.order_id = ?`,
+		 JOIN %sproduct_description pd ON op.product_id = pd.product_id 
+		 WHERE op.order_id = ? AND pd.language_id = 2`,
 		s.prefix, s.prefix,
 	)
 	return s.prepareStmt("selectOrderProducts", query)
