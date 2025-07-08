@@ -100,9 +100,17 @@ func (c *Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (io.
 }
 
 func (c *Core) StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
+	err := params.Validate()
+	if err != nil {
+		return nil, err
+	}
 	return c.sc.HoldAmount(params)
 }
 
 func (c *Core) StripePayAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
+	err := params.Validate()
+	if err != nil {
+		return nil, err
+	}
 	return c.sc.PayAmount(params)
 }

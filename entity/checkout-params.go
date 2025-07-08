@@ -49,6 +49,17 @@ func (c *CheckoutParams) ValidateTotal() error {
 	return fmt.Errorf("total amount %d does not match sum of line items %d", c.Total, total)
 }
 
+func (c *CheckoutParams) Validate() error {
+	if len(c.LineItems) == 0 {
+		return fmt.Errorf("no line items")
+	}
+	err := c.ValidateTotal()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (c *CheckoutParams) AddShipping(title string, amount int64) {
 	c.LineItems = append(c.LineItems, ShippingLineItem(title, amount))
 }
