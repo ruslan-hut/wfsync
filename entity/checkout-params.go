@@ -97,6 +97,58 @@ type ClientDetails struct {
 	Street  string `json:"street" bson:"street"`
 }
 
+func (c *ClientDetails) CountryCode() string {
+	if c.Country == "" {
+		return ""
+	}
+	if len(c.Country) == 2 {
+		return c.Country
+	}
+	switch c.Country {
+	case "Poland":
+		return "PL"
+	case "United States":
+		return "US"
+	case "United Kingdom":
+		return "GB"
+	case "Germany":
+		return "DE"
+	case "France":
+		return "FR"
+	case "Spain":
+		return "ES"
+	case "Italy":
+		return "IT"
+	case "Czech Republic":
+		return "CZ"
+	case "Austria":
+		return "AT"
+	case "Belgium":
+		return "BE"
+	case "Netherlands":
+		return "NL"
+	case "Sweden":
+		return "SE"
+	case "Denmark":
+		return "DK"
+	case "Finland":
+		return "FI"
+	case "Norway":
+		return "NO"
+	case "Switzerland":
+		return "CH"
+	case "Luxembourg":
+		return "LU"
+	case "Portugal":
+		return "PT"
+	case "Romania":
+		return "RO"
+	case "Ukraine":
+		return "UA"
+	}
+	return ""
+}
+
 func NewFromCheckoutSession(sess *stripe.CheckoutSession) *CheckoutParams {
 	params := &CheckoutParams{
 		SessionId: sess.ID,

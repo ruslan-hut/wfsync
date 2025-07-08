@@ -132,7 +132,7 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 					"contractor": map[string]interface{}{
 						"name":        customer.Name,
 						"email":       customer.Email,
-						"country":     customer.Country,
+						"country":     customer.CountryCode(),
 						"zip":         customer.ZipCode,
 						"city":        customer.City,
 						"street":      customer.Street,
@@ -149,15 +149,6 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 			sl.Err(err))
 		return "", err
 	}
-	//var addResp struct {
-	//	Contractors struct {
-	//		Element0 struct {
-	//			Contractor struct {
-	//				ID string `json:"id"`
-	//			} `json:"contractor"`
-	//		} `json:"0"`
-	//	} `json:"contractors"`
-	//}
 	var addResp Response
 	if err = json.Unmarshal(createRes, &addResp); err != nil {
 		c.log.Error("parse contractor creation response", sl.Err(err))
