@@ -164,7 +164,7 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 	}
 	if addResp.Contractors.Element0.Contractor.ID == "" {
 		//c.log.Error("no contractor ID returned from wFirma", slog.String("email", customer.Email))
-		c.log.Error("no contractor ID returned from wFirma", slog.Any("error", payload))
+		c.log.Error("no contractor ID returned from wFirma", slog.Any("error", createRes))
 		return "", fmt.Errorf("no contractor id returned")
 	}
 	contractorID := addResp.Contractors.Element0.Contractor.ID
