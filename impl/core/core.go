@@ -6,6 +6,8 @@ import (
 	"github.com/stripe/stripe-go/v76"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 	"wfsync/entity"
 	"wfsync/internal/config"
@@ -19,7 +21,7 @@ type AuthService interface {
 }
 
 type InvoiceService interface {
-	DownloadInvoice(ctx context.Context, invoiceID string) (io.ReadCloser, *entity.FileMeta, error)
+	DownloadInvoice(ctx context.Context, invoiceID string) (string, *entity.FileMeta, error)
 	RegisterInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 	RegisterProforma(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 }
@@ -102,7 +104,16 @@ func (c *Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (io.
 	if c.inv == nil {
 		return nil, nil, fmt.Errorf("invoice service not connected")
 	}
-	return c.inv.DownloadInvoice(ctx, invoiceID)
+	fileName, meta, err := c.inv.DownloadInvoice(ctx, invoiceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	filePath := filepath.Join(c.filePath, fileName)
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open file: %w", err)
+	}
+	return file, meta, nil
 }
 
 func (c *Core) WFirmaRegisterProforma(params *entity.CheckoutParams) (*entity.Payment, error) {

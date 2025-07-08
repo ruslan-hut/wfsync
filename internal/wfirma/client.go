@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"wfsync/entity"
@@ -222,7 +224,7 @@ func (c *Client) getContractor(ctx context.Context, email string) (string, error
 	return "", nil
 }
 
-func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (io.ReadCloser, *entity.FileMeta, error) {
+func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string, *entity.FileMeta, error) {
 	log := c.log.With(slog.String("invoice_id", invoiceID))
 	defer func() {
 		if r := recover(); r != nil {
@@ -252,13 +254,13 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (io.Read
 	data, err := json.Marshal(payload)
 	if err != nil {
 		log.Error("marshal payload", sl.Err(err))
-		return nil, nil, err
+		return "", nil, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(data))
 	if err != nil {
 		log.Error("create request", sl.Err(err))
-		return nil, nil, err
+		return "", nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -269,24 +271,47 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (io.Read
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		log.Error("request failed", sl.Err(err))
-		return nil, nil, err
+		return "", nil, err
 	}
 
 	if resp.StatusCode >= 300 {
 		resp.Body.Close()
-		log.Error("wFirma API returned error", slog.String("status", resp.Status))
-		return nil, nil, fmt.Errorf("wfirma status: %s", resp.Status)
+		log.Error("wfirma api", slog.String("status", resp.Status))
+		return "", nil, fmt.Errorf("wfirma status: %s", resp.Status)
 	}
 	meta := &entity.FileMeta{
 		ContentType:   resp.Header.Get("Content-Type"),
 		ContentLength: resp.ContentLength,
 	}
+
+	ext := ".pdf"
+	if !strings.Contains(meta.ContentType, "pdf") {
+		ext = ""
+	}
+	fileName := uuid.New().String() + ext
+	filePath := filepath.Join(c.filePath, fileName)
+
+	f, err := os.Create(filePath)
+	if err != nil {
+		resp.Body.Close()
+		return "", nil, fmt.Errorf("create file: %w", err)
+	}
+	if _, err = io.Copy(f, resp.Body); err != nil {
+		f.Close()
+		resp.Body.Close()
+		os.Remove(filePath)
+		return "", nil, fmt.Errorf("save file: %w", err)
+	}
+	f.Close()
+	resp.Body.Close()
+
 	log.With(
+		slog.String("file", fileName),
 		slog.String("content_type", meta.ContentType),
 		slog.Int64("content_length", meta.ContentLength),
-	).Debug("download invoice response")
+	).Info("invoice downloaded")
 
-	return resp.Body, meta, nil
+	return fileName, meta, nil
 }
 
 func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
