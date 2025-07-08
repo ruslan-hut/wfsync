@@ -149,30 +149,44 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 			sl.Err(err))
 		return "", err
 	}
-	var addResp struct {
-		Contractors struct {
-			Element0 struct {
-				Contractor struct {
-					ID string `json:"id"`
-				} `json:"contractor"`
-			} `json:"0"`
-		} `json:"contractors"`
-	}
+	//var addResp struct {
+	//	Contractors struct {
+	//		Element0 struct {
+	//			Contractor struct {
+	//				ID string `json:"id"`
+	//			} `json:"contractor"`
+	//		} `json:"0"`
+	//	} `json:"contractors"`
+	//}
+	var addResp Response
 	if err = json.Unmarshal(createRes, &addResp); err != nil {
 		c.log.Error("parse contractor creation response", sl.Err(err))
 		return "", err
 	}
-	if addResp.Contractors.Element0.Contractor.ID == "" {
-		//c.log.Error("no contractor ID returned from wFirma", slog.String("email", customer.Email))
+	contr := addResp.Contractors["0"].Contractor
+	if addResp.Status.Code == "ERROR" {
+		if len(contr.ErrorsRaw) > 0 {
+			for _, w := range contr.ErrorsRaw { // берём первый элемент мапы
+				c.log.With(
+					slog.String("field", w.Error.Field),
+					slog.String("message", w.Error.Message),
+					slog.String("method", w.Error.Method.Name),
+					slog.String("parameters", w.Error.Method.Parameters),
+				).Error("add contractor")
+				break
+			}
+		}
+		return "", fmt.Errorf("no contractor id returned")
+	}
+	if contr.ID == "" {
 		c.log.Error("no contractor ID returned from wFirma", slog.Any("error", createRes))
 		return "", fmt.Errorf("no contractor id returned")
 	}
-	contractorID := addResp.Contractors.Element0.Contractor.ID
 	c.log.Debug("new contractor created",
 		slog.String("email", customer.Email),
 		slog.String("name", customer.Name),
-		slog.String("contractorID", contractorID))
-	return contractorID, nil
+		slog.String("contractorID", contr.ID))
+	return contr.ID, nil
 }
 
 func (c *Client) getContractor(ctx context.Context, email string) (string, error) {
@@ -359,7 +373,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	log = log.With(slog.String("contractor_id", contractorID))
 
 	contractor := &Contractor{
-		Id: contractorID,
+		ID: contractorID,
 	}
 
 	var contents []*ContentLine

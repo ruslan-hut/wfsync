@@ -13,9 +13,9 @@ type Invoice struct {
 	Contents    []*ContentLine `json:"invoicecontents" bson:"invoicecontents"`
 }
 
-type Contractor struct {
-	Id string `json:"id" bson:"id"`
-}
+//type Contractor struct {
+//	Id string `json:"id" bson:"id"`
+//}
 
 type Content struct {
 	Name  string  `json:"name" bson:"name"`
