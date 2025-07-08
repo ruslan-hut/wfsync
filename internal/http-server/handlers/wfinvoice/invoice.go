@@ -57,8 +57,6 @@ func Download(logger *slog.Logger, handler Core) http.HandlerFunc {
 			w.Header().Set("Content-Length", strconv.FormatInt(meta.ContentLength, 10))
 		}
 
-		log.Debug("invoice id download")
-
 		if _, err = io.Copy(w, fileStream); err != nil {
 			log.Error("failed to copy file", sl.Err(err))
 		}

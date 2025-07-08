@@ -12,6 +12,14 @@ import (
 	"wfsync/opencart/database"
 )
 
+type JobType string
+
+const (
+	JobStripeLink JobType = "stripe-pay-link"
+	JobProforma   JobType = "wfirma-proforma"
+	JobInvoice    JobType = "wfirma-invoice"
+)
+
 type CheckoutHandler func(params *entity.CheckoutParams) (*entity.Payment, error)
 
 type Opencart struct {
@@ -103,17 +111,17 @@ func (oc *Opencart) ProcessOrders() {
 	oc.mutex.Lock()
 	defer oc.mutex.Unlock()
 
-	oc.handleByStatus(oc.statusUrlRequest, oc.statusUrlResult, oc.handlerUrl, "stripe-pay-link")
+	oc.handleByStatus(oc.statusUrlRequest, oc.statusUrlResult, oc.handlerUrl, JobStripeLink)
 
-	oc.handleByStatus(oc.statusProformaRequest, oc.statusProformaResult, oc.handlerProforma, "wfirma-proforma")
+	oc.handleByStatus(oc.statusProformaRequest, oc.statusProformaResult, oc.handlerProforma, JobProforma)
 }
 
-func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler CheckoutHandler, jobName string) {
+func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler CheckoutHandler, jobName JobType) {
 	if statusRequest == 0 || handler == nil {
 		return
 	}
 	log := oc.log.With(
-		slog.String("job", jobName),
+		slog.String("job", string(jobName)),
 		slog.Int("status", statusRequest),
 	)
 
@@ -168,6 +176,17 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 			).Error("change order status")
 			continue
 		}
+
+		if jobName == JobProforma {
+			err = oc.db.UpdateProforma(orderId, payment.Id, payment.InvoiceFile)
+			if err != nil {
+				log.With(
+					slog.String("order_id", order.OrderId),
+					sl.Err(err),
+				).Error("update proforma")
+			}
+		}
+
 		log.With(
 			slog.String("order_id", order.OrderId),
 		).Debug("order processed")

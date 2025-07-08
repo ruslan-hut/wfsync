@@ -6,6 +6,7 @@ import (
 	"github.com/stripe/stripe-go/v76"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -32,12 +33,14 @@ type Core struct {
 	inv      InvoiceService
 	auth     AuthService
 	filePath string
+	fileUrl  string
 	log      *slog.Logger
 }
 
 func New(conf *config.Config, log *slog.Logger) Core {
 	return Core{
 		filePath: conf.FilePath,
+		fileUrl:  conf.OpenCart.FileUrl,
 		log:      log.With(sl.Module("core")),
 	}
 }
@@ -120,7 +123,22 @@ func (c *Core) WFirmaRegisterProforma(params *entity.CheckoutParams) (*entity.Pa
 	if c.inv == nil {
 		return nil, fmt.Errorf("invoice service not connected")
 	}
-	return c.inv.RegisterProforma(context.Background(), params)
+	ctx := context.Background()
+	payment, err := c.inv.RegisterProforma(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	fileName, _, err := c.inv.DownloadInvoice(ctx, payment.Id)
+	if err != nil {
+		return nil, fmt.Errorf("download invoice: %w", err)
+	}
+	link, err := url.JoinPath(c.fileUrl, fileName)
+	if err != nil {
+		return nil, fmt.Errorf("join url: %w", err)
+	}
+	payment.Link = link
+	payment.InvoiceFile = fileName
+	return payment, nil
 }
 
 func (c *Core) StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
