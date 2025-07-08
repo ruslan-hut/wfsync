@@ -130,6 +130,9 @@ func NewFromCheckoutSession(sess *stripe.CheckoutSession) *CheckoutParams {
 			params.OrderId = id
 		}
 	}
+	if params.OrderId == "" {
+		params.OrderId = sess.ID
+	}
 	return params
 }
 
@@ -179,6 +182,9 @@ func NewFromInvoice(inv *stripe.Invoice) *CheckoutParams {
 		if ok {
 			params.OrderId = id
 		}
+	}
+	if params.OrderId == "" {
+		params.OrderId = inv.ID
 	}
 	return params
 }
