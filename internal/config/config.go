@@ -37,17 +37,21 @@ type Mongo struct {
 }
 
 type OpenCart struct {
-	Enabled          bool   `yaml:"enabled" env-default:"false"`
-	Driver           string `yaml:"driver" env-default:"mysql"`
-	HostName         string `yaml:"hostname" env-default:"localhost"`
-	UserName         string `yaml:"username" env-default:"root"`
-	Password         string `yaml:"password" env-default:""`
-	Database         string `yaml:"database" env-default:""`
-	Port             string `yaml:"port" env-default:"3306"`
-	Prefix           string `yaml:"prefix" env-default:""`
-	FileUrl          string `yaml:"file_url" env-default:""`
-	StatusUrlRequest string `yaml:"status_url_request" env-default:""`
-	StatusUrlResult  string `yaml:"status_url_result" env-default:""`
+	Enabled               bool   `yaml:"enabled" env-default:"false"`
+	Driver                string `yaml:"driver" env-default:"mysql"`
+	HostName              string `yaml:"hostname" env-default:"localhost"`
+	UserName              string `yaml:"username" env-default:"root"`
+	Password              string `yaml:"password" env-default:""`
+	Database              string `yaml:"database" env-default:""`
+	Port                  string `yaml:"port" env-default:"3306"`
+	Prefix                string `yaml:"prefix" env-default:""`
+	FileUrl               string `yaml:"file_url" env-default:""`
+	StatusUrlRequest      string `yaml:"status_url_request" env-default:""`
+	StatusUrlResult       string `yaml:"status_url_result" env-default:""`
+	StatusProformaRequest string `yaml:"status_proforma_request" env-default:""`
+	StatusProformaResult  string `yaml:"status_proforma_result" env-default:""`
+	StatusInvoiceRequest  string `yaml:"status_invoice_request" env-default:""`
+	StatusInvoiceResult   string `yaml:"status_invoice_result" env-default:""`
 }
 
 type Telegram struct {

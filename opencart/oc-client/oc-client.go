@@ -15,14 +15,16 @@ import (
 type CheckoutHandler func(params *entity.CheckoutParams) (*entity.Payment, error)
 
 type Opencart struct {
-	db               *database.MySql
-	log              *slog.Logger
-	statusUrlRequest int
-	statusUrlResult  int
-	handlerUrl       CheckoutHandler
-	handlerProforma  CheckoutHandler
-	handlerInvoice   CheckoutHandler
-	mutex            sync.Mutex
+	db                    *database.MySql
+	log                   *slog.Logger
+	statusUrlRequest      int
+	statusUrlResult       int
+	statusProformaRequest int
+	statusProformaResult  int
+	handlerUrl            CheckoutHandler
+	handlerProforma       CheckoutHandler
+	handlerInvoice        CheckoutHandler
+	mutex                 sync.Mutex
 }
 
 func New(conf *config.Config, log *slog.Logger) (*Opencart, error) {
@@ -42,6 +44,12 @@ func New(conf *config.Config, log *slog.Logger) (*Opencart, error) {
 	}
 	if conf.OpenCart.StatusUrlResult != "" {
 		oc.statusUrlResult, _ = strconv.Atoi(conf.OpenCart.StatusUrlResult)
+	}
+	if conf.OpenCart.StatusProformaRequest != "" {
+		oc.statusProformaRequest, _ = strconv.Atoi(conf.OpenCart.StatusProformaRequest)
+	}
+	if conf.OpenCart.StatusProformaResult != "" {
+		oc.statusProformaResult, _ = strconv.Atoi(conf.OpenCart.StatusProformaResult)
 	}
 	return oc, nil
 }
