@@ -311,11 +311,9 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		}
 	}
 
-	if params.ClientDetails == nil {
-		return nil, fmt.Errorf("client details not provided")
-	}
-	if len(params.LineItems) == 0 {
-		return nil, fmt.Errorf("no line items provided")
+	err := params.Validate()
+	if err != nil {
+		return nil, fmt.Errorf("invalid checkout params: %w", err)
 	}
 
 	contractorID, err := c.getContractor(ctx, params.ClientDetails.Email)
@@ -398,7 +396,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 
 	invID := addResp.Invoices.Element0.Invoice.ID
 	if invID == "" {
-		c.log.Error("no invoice ID returned from wFirma")
+		log.Error("no invoice ID returned from wFirma")
 		return nil, fmt.Errorf("no invoice id returned")
 	}
 
@@ -406,50 +404,64 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	if c.db != nil {
 		err = c.db.SaveInvoice(invID, invoice)
 		if err != nil {
-			c.log.Error("save invoice",
+			log.Error("save invoice",
 				sl.Err(err))
 		}
 		params.InvoiceId = invID
 		err = c.db.UpdateCheckoutParams(params)
 		if err != nil {
-			c.log.Error("update checkout params",
+			log.Error("update checkout params",
 				sl.Err(err))
 		}
+	}
+
+	payment := &entity.Payment{
+		Amount:  int64(invoice.Total * 100),
+		Id:      invID,
+		OrderId: params.OrderId,
 	}
 
 	c.log.With(
 		slog.String("wfirma_id", invID),
 		slog.String("order_id", params.OrderId),
 		slog.String("total", fmt.Sprintf("%.2f", total)),
-		slog.String("customer_email", params.ClientDetails.Email),
-		slog.String("customer_name", params.ClientDetails.Name),
+		slog.String("email", params.ClientDetails.Email),
+		slog.String("name", params.ClientDetails.Name),
+		slog.String("country", params.ClientDetails.Country),
 		slog.String("currency", params.Currency),
 	).Info("invoice created")
 
-	if !params.Paid {
-		return nil, nil
+	if params.Paid {
+		err = c.addPayment(ctx, *invoice)
+		if err != nil {
+			log.Error("add payment",
+				slog.String("wfirma_id", invID),
+				sl.Err(err))
+		}
 	}
 
-	payment := map[string]interface{}{
+	return payment, nil
+}
+
+func (c *Client) addPayment(ctx context.Context, invoice Invoice) error {
+	paymentData := map[string]interface{}{
 		"api": map[string]interface{}{
 			"payments": []map[string]interface{}{
 				{
 					"payment": map[string]interface{}{
 						"object_name": "invoice",
-						"object_id":   invID,
-						"value":       total,
-						"date":        params.Created.Format("2006-01-02"),
+						"object_id":   invoice.Id,
+						"value":       invoice.Total,
+						"date":        invoice.Date,
 					},
 				},
 			},
 		},
 	}
 
-	payRes, err := c.request(ctx, "payments", "add", payment)
+	payRes, err := c.request(ctx, "payments", "add", paymentData)
 	if err != nil {
-		log.Error("add payment",
-			sl.Err(err))
-		return nil, fmt.Errorf("add payment: %w", err)
+		return err
 	}
 
 	var payResp struct {
@@ -466,15 +478,10 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		} `json:"status"`
 	}
 	if err = json.Unmarshal(payRes, &payResp); err != nil {
-		log.Error("parse payment creation response",
-			sl.Err(err))
-		return nil, err
+		return err
 	}
 	if payResp.Status.Code == "ERROR" {
-		log.Error("add payment response",
-			slog.String("error", payResp.Status.Message))
-		//return fmt.Errorf("add payment failed")
+		return fmt.Errorf(payResp.Status.Message)
 	}
-
-	return nil, nil
+	return nil
 }

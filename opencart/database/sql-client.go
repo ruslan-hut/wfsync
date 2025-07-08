@@ -224,7 +224,7 @@ func (s *MySql) ChangeOrderStatus(orderId int64, orderStatusId int, comment stri
 	rec := map[string]interface{}{
 		"order_id":        orderId,
 		"order_status_id": orderStatusId,
-		"notify":          1, // notify customer
+		"notify":          0,
 		"comment":         comment,
 		"date_added":      dateModified,
 	}

@@ -105,6 +105,7 @@ func (oc *Opencart) ProcessOrders() {
 
 	oc.handleByStatus(oc.statusUrlRequest, oc.statusUrlResult, oc.handlerUrl, "stripe-pay-link")
 
+	oc.handleByStatus(oc.statusProformaRequest, oc.statusProformaResult, oc.handlerProforma, "wfirma-proforma")
 }
 
 func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler CheckoutHandler, jobName string) {
@@ -126,10 +127,6 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 	if len(orders) == 0 {
 		return
 	}
-
-	log.With(
-		slog.Int("count", len(orders)),
-	).Debug("processing orders")
 
 	for _, order := range orders {
 		if order == nil || order.OrderId == "" {
@@ -171,5 +168,8 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 			).Error("change order status")
 			continue
 		}
+		log.With(
+			slog.String("order_id", order.OrderId),
+		).Debug("order processed")
 	}
 }

@@ -53,6 +53,9 @@ func (c *CheckoutParams) Validate() error {
 	if len(c.LineItems) == 0 {
 		return fmt.Errorf("no line items")
 	}
+	if c.ClientDetails == nil {
+		return fmt.Errorf("no client details")
+	}
 	err := c.ValidateTotal()
 	if err != nil {
 		return err
