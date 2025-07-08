@@ -3,6 +3,7 @@
 env: dev
 log: /var/log/wfsyncd.log
 location: Europe/Warsaw
+file_path: ${FILE_PATH}
 listen:
   bind_ip: 127.0.0.1
   port: 9190
@@ -32,7 +33,7 @@ opencart:
   database: ${SQL_DATABASE}
   port: 3306
   prefix: oc_
-  file_path: ${FILE_PATH}
+  file_url: ${FILE_URL}
   status_url_request: 0
   status_url_result: 0
 telegram:

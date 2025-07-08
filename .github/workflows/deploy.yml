@@ -32,6 +32,7 @@ jobs:
           sed -i 's|${SQL_PASSWORD}|'"$SQL_PASSWORD"'|g' wfsync.yml
           sed -i 's|${SQL_DATABASE}|'"$SQL_DATABASE"'|g' wfsync.yml
           sed -i 's|${FILE_PATH}|'"$FILE_PATH"'|g' wfsync.yml
+          sed -i 's|${FILE_URL}|'"$FILE_URL"'|g' wfsync.yml
           sed -i 's|${TELEGRAM_API_KEY}|'"$TELEGRAM_API_KEY"'|g' wfsync.yml
 
         env:
@@ -51,6 +52,7 @@ jobs:
           SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
           SQL_DATABASE: ${{ secrets.SQL_DATABASE }}
           FILE_PATH: ${{ secrets.FILE_PATH }}
+          FILE_URL: ${{ secrets.FILE_URL }}
           TELEGRAM_API_KEY: ${{ secrets.TELEGRAM_API_KEY }}
 
       - name: Copy Configuration to Server

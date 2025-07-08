@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 	"wfsync/entity"
-	"wfsync/internal/wfirma"
+	"wfsync/internal/config"
 	"wfsync/lib/sl"
 )
 
@@ -26,29 +26,29 @@ type StripeClient struct {
 	sc            *client.API
 	webhookSecret string
 	successUrl    string
-	wfirma        *wfirma.Client
 	db            Database
 	log           *slog.Logger
 	mutex         sync.Mutex
 }
 
-func New(apiKey, whSecret string, wf *wfirma.Client, logger *slog.Logger) *StripeClient {
+func New(conf *config.Config, logger *slog.Logger) *StripeClient {
+	stripeKey := conf.Stripe.APIKey
+	if conf.Stripe.TestMode {
+		stripeKey = conf.Stripe.TestKey
+		logger.Info("using test mode for stripe", sl.Secret("key", stripeKey))
+	}
 	sc := &client.API{}
-	sc.Init(apiKey, nil)
+	sc.Init(stripeKey, nil)
 	return &StripeClient{
 		sc:            sc,
-		webhookSecret: whSecret,
-		wfirma:        wf,
+		webhookSecret: conf.Stripe.WebhookSecret,
+		successUrl:    conf.Stripe.SuccessURL,
 		log:           logger.With(sl.Module("stripe")),
 	}
 }
 
 func (s *StripeClient) SetDatabase(db Database) {
 	s.db = db
-}
-
-func (s *StripeClient) SetSuccessUrl(url string) {
-	s.successUrl = url
 }
 
 func (s *StripeClient) VerifySignature(payload []byte, header string, tolerance time.Duration) bool {

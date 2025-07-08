@@ -20,6 +20,8 @@ type Opencart struct {
 	statusUrlRequest int
 	statusUrlResult  int
 	handlerUrl       CheckoutHandler
+	handlerProforma  CheckoutHandler
+	handlerInvoice   CheckoutHandler
 	mutex            sync.Mutex
 }
 
@@ -44,8 +46,7 @@ func New(conf *config.Config, log *slog.Logger) (*Opencart, error) {
 	return oc, nil
 }
 
-func (oc *Opencart) WithUrlHandler(handler CheckoutHandler) *Opencart {
-	oc.handlerUrl = handler
+func (oc *Opencart) Start() {
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
@@ -54,6 +55,20 @@ func (oc *Opencart) WithUrlHandler(handler CheckoutHandler) *Opencart {
 			<-ticker.C
 		}
 	}()
+}
+
+func (oc *Opencart) WithUrlHandler(handler CheckoutHandler) *Opencart {
+	oc.handlerUrl = handler
+	return oc
+}
+
+func (oc *Opencart) WithProformaHandler(handler CheckoutHandler) *Opencart {
+	oc.handlerProforma = handler
+	return oc
+}
+
+func (oc *Opencart) WithInvoiceHandler(handler CheckoutHandler) *Opencart {
+	oc.handlerInvoice = handler
 	return oc
 }
 
@@ -82,60 +97,6 @@ func (oc *Opencart) ProcessOrders() {
 
 	oc.handleByStatus(oc.statusUrlRequest, oc.statusUrlResult, oc.handlerUrl, "stripe-pay-link")
 
-	//if oc.statusUrlRequest > 0 && oc.handlerUrl != nil {
-	//	orders, err := oc.db.OrderSearchStatus(oc.statusUrlRequest)
-	//	if err != nil {
-	//		oc.log.With(
-	//			slog.Int("status", oc.statusUrlRequest),
-	//			sl.Err(err),
-	//		).Error("get orders by status")
-	//		return
-	//	}
-	//	if len(orders) == 0 {
-	//		return
-	//	}
-	//	oc.log.With(
-	//		slog.Int("status", oc.statusUrlRequest),
-	//		slog.Int("count", len(orders)),
-	//	).Debug("process orders by status")
-	//	for _, order := range orders {
-	//		if order == nil || order.OrderId == "" {
-	//			continue
-	//		}
-	//		payment, err := oc.handlerUrl(order)
-	//		if err != nil {
-	//			oc.log.With(
-	//				slog.String("order_id", order.OrderId),
-	//				sl.Err(err),
-	//			).Error("handle order url request")
-	//			continue
-	//		}
-	//		if payment == nil {
-	//			continue
-	//		}
-	//		orderId, err := strconv.ParseInt(order.OrderId, 10, 64)
-	//		if err != nil {
-	//			oc.log.With(
-	//				slog.String("order_id", order.OrderId),
-	//				sl.Err(err),
-	//			).Error("invalid order id")
-	//			continue
-	//		}
-	//		comment := fmt.Sprintf("<a href=\"%s\" target=\"_blank\">Stripe Pay Link</a>", payment.Link)
-	//		err = oc.db.ChangeOrderStatus(orderId, oc.statusUrlResult, comment)
-	//		if err != nil {
-	//			oc.log.With(
-	//				slog.String("order_id", order.OrderId),
-	//				slog.Int("status", oc.statusUrlResult),
-	//				sl.Err(err),
-	//			).Error("change order status")
-	//			continue
-	//		}
-	//		oc.log.With(
-	//			slog.String("order_id", order.OrderId),
-	//		).Debug("link request processed")
-	//	}
-	//}
 }
 
 func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler CheckoutHandler, jobName string) {

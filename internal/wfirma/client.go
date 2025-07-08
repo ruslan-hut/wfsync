@@ -13,7 +13,15 @@ import (
 	"strings"
 	"time"
 	"wfsync/entity"
+	"wfsync/internal/config"
 	"wfsync/lib/sl"
+)
+
+type invoiceType string
+
+const (
+	invoiceProforma invoiceType = "proforma"
+	invoiceNormal   invoiceType = "normal"
 )
 
 type Database interface {
@@ -29,6 +37,7 @@ type Client struct {
 	accessKey string
 	secretKey string
 	appID     string
+	filePath  string
 	log       *slog.Logger
 }
 
@@ -38,16 +47,20 @@ type Config struct {
 	AppID     string
 }
 
-func NewClient(cfg Config, db Database, logger *slog.Logger) *Client {
+func NewClient(conf *config.Config, logger *slog.Logger) *Client {
 	return &Client{
 		hc:        &http.Client{Timeout: 10 * time.Second},
-		db:        db,
 		baseURL:   "https://api2.wfirma.pl",
-		accessKey: cfg.AccessKey,
-		secretKey: cfg.SecretKey,
-		appID:     cfg.AppID,
+		accessKey: conf.WFirma.AccessKey,
+		secretKey: conf.WFirma.SecretKey,
+		appID:     conf.WFirma.AppID,
+		filePath:  conf.FilePath,
 		log:       logger.With(sl.Module("wfirma")),
 	}
+}
+
+func (c *Client) SetDatabase(db Database) {
+	c.db = db
 }
 
 // request sends a signed POST to wFirma API using Access/Secret key headers.
@@ -276,7 +289,15 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (io.Read
 	return resp.Body, meta, nil
 }
 
-func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutParams) error {
+func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
+	return c.invoice(ctx, invoiceNormal, params)
+}
+
+func (c *Client) RegisterProforma(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
+	return c.invoice(ctx, invoiceProforma, params)
+}
+
+func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entity.CheckoutParams) (*entity.Payment, error) {
 	log := c.log.With(slog.String("session_id", params.SessionId), slog.String("order_id", params.OrderId))
 	defer func() {
 		if r := recover(); r != nil {
@@ -291,15 +312,15 @@ func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutPar
 	}
 
 	if params.ClientDetails == nil {
-		return fmt.Errorf("client details not provided")
+		return nil, fmt.Errorf("client details not provided")
 	}
 	if len(params.LineItems) == 0 {
-		return fmt.Errorf("no line items provided")
+		return nil, fmt.Errorf("no line items provided")
 	}
 
 	contractorID, err := c.getContractor(ctx, params.ClientDetails.Email)
 	if err != nil {
-		return fmt.Errorf("contractor: %w", err)
+		return nil, fmt.Errorf("contractor: %w", err)
 	}
 	if contractorID == "" {
 		email := params.ClientDetails.Email
@@ -308,7 +329,7 @@ func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutPar
 		}
 		contractorID, err = c.createContractor(ctx, params.ClientDetails)
 		if err != nil {
-			return fmt.Errorf("create contractor: %w", err)
+			return nil, fmt.Errorf("create contractor: %w", err)
 		}
 	}
 	log = log.With(slog.String("contractor_id", contractorID))
@@ -334,7 +355,7 @@ func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutPar
 
 	invoice := &Invoice{
 		Contractor:  contractor,
-		Type:        "normal",
+		Type:        string(invType),
 		PriceType:   "brutto",
 		Total:       total,
 		IdExternal:  params.OrderId,
@@ -357,7 +378,7 @@ func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutPar
 	addRes, err := c.request(ctx, "invoices", "add", addPayload)
 	if err != nil {
 		log.Error("add invoice", sl.Err(err))
-		return fmt.Errorf("add invoice: %w", err)
+		return nil, fmt.Errorf("add invoice: %w", err)
 	}
 
 	var addResp struct {
@@ -372,13 +393,13 @@ func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutPar
 	if err = json.Unmarshal(addRes, &addResp); err != nil {
 		log.Error("parse invoice creation response",
 			sl.Err(err))
-		return err
+		return nil, err
 	}
 
 	invID := addResp.Invoices.Element0.Invoice.ID
 	if invID == "" {
 		c.log.Error("no invoice ID returned from wFirma")
-		return fmt.Errorf("no invoice id returned")
+		return nil, fmt.Errorf("no invoice id returned")
 	}
 
 	invoice.Id = invID
@@ -406,7 +427,7 @@ func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutPar
 	).Info("invoice created")
 
 	if !params.Paid {
-		return nil
+		return nil, nil
 	}
 
 	payment := map[string]interface{}{
@@ -428,7 +449,7 @@ func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutPar
 	if err != nil {
 		log.Error("add payment",
 			sl.Err(err))
-		return fmt.Errorf("add payment: %w", err)
+		return nil, fmt.Errorf("add payment: %w", err)
 	}
 
 	var payResp struct {
@@ -447,7 +468,7 @@ func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutPar
 	if err = json.Unmarshal(payRes, &payResp); err != nil {
 		log.Error("parse payment creation response",
 			sl.Err(err))
-		return err
+		return nil, err
 	}
 	if payResp.Status.Code == "ERROR" {
 		log.Error("add payment response",
@@ -455,5 +476,5 @@ func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutPar
 		//return fmt.Errorf("add payment failed")
 	}
 
-	return nil
+	return nil, nil
 }

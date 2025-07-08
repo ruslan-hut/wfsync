@@ -1,6 +1,9 @@
 ---
 
 env: local
+log: /var/log/wfsync.log
+location: UTC
+file_path: /local/file/path
 listen:
   bind_ip: 0.0.0.0
   port: 8080
@@ -30,7 +33,11 @@ opencart:
   database: oc
   port: 3306
   prefix: oc_
-  file_path: /local/file/path
+  file_url: file-url
+  status_url_request: 0
+  status_url_result: 0
+  status_proforma_request: 0
+  status_proforma_result: 0
 telegram:
   enabled: true
-  api_key: ${TELEGRAM_API_KEY}
+  api_key: your-telegram-api-key

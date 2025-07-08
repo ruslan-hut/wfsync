@@ -65,19 +65,14 @@ func main() {
 		log.Error("opencart client", sl.Err(err))
 	}
 
-	wfirmaClient := wfirma.NewClient(wfirma.Config(conf.WFirma), mongo, log)
-	stripeKey := conf.Stripe.APIKey
-	if conf.Stripe.TestMode {
-		stripeKey = conf.Stripe.TestKey
-		log.Info("using test mode for stripe", slog.String("key", stripeKey))
-	}
-	stripeClient := stripeclient.New(stripeKey, conf.Stripe.WebhookSecret, wfirmaClient, log)
+	wfirmaClient := wfirma.NewClient(conf, log)
+	wfirmaClient.SetDatabase(mongo)
+
+	stripeClient := stripeclient.New(conf, log)
 	stripeClient.SetDatabase(mongo)
-	stripeClient.SetSuccessUrl(conf.Stripe.SuccessURL)
 
-	handler := core.New(stripeClient, log)
-
-	//wfSoap := wfirma_soap.NewClient(wfirma_soap.Config(conf.WFirmaSoap), log)
+	handler := core.New(conf, log)
+	handler.SetStripeClient(stripeClient)
 	handler.SetInvoiceService(wfirmaClient)
 	handler.SetOpencart(oc)
 

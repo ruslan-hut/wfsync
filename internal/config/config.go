@@ -45,7 +45,7 @@ type OpenCart struct {
 	Database         string `yaml:"database" env-default:""`
 	Port             string `yaml:"port" env-default:"3306"`
 	Prefix           string `yaml:"prefix" env-default:""`
-	FilePath         string `yaml:"file_path" env-default:""`
+	FileUrl          string `yaml:"file_url" env-default:""`
 	StatusUrlRequest string `yaml:"status_url_request" env-default:""`
 	StatusUrlResult  string `yaml:"status_url_result" env-default:""`
 }
@@ -65,6 +65,7 @@ type Config struct {
 	Env      string       `yaml:"env" env-default:"local"`
 	Log      string       `yaml:"log"`
 	Location string       `yaml:"location" env-default:"UTC"`
+	FilePath string       `yaml:"file_path" env-default:""`
 }
 
 var instance *Config

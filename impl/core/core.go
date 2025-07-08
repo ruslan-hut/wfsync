@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 	"wfsync/entity"
+	"wfsync/internal/config"
 	"wfsync/internal/stripeclient"
 	"wfsync/lib/sl"
 	occlient "wfsync/opencart/oc-client"
@@ -19,25 +20,28 @@ type AuthService interface {
 
 type InvoiceService interface {
 	DownloadInvoice(ctx context.Context, invoiceID string) (io.ReadCloser, *entity.FileMeta, error)
-	RegisterInvoice(ctx context.Context, params *entity.CheckoutParams) error
+	RegisterInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
+	RegisterProforma(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 }
 
 type Core struct {
-	sc   *stripeclient.StripeClient
-	oc   *occlient.Opencart
-	inv  InvoiceService
-	auth AuthService
-	log  *slog.Logger
+	sc       *stripeclient.StripeClient
+	oc       *occlient.Opencart
+	inv      InvoiceService
+	auth     AuthService
+	filePath string
+	log      *slog.Logger
 }
 
-func New(sc *stripeclient.StripeClient, log *slog.Logger) Core {
-	if sc == nil {
-		panic("stripe client is nil")
-	}
+func New(conf *config.Config, log *slog.Logger) Core {
 	return Core{
-		sc:  sc,
-		log: log.With(sl.Module("core")),
+		filePath: conf.FilePath,
+		log:      log.With(sl.Module("core")),
 	}
+}
+
+func (c *Core) SetStripeClient(sc *stripeclient.StripeClient) {
+	c.sc = sc
 }
 
 func (c *Core) SetInvoiceService(inv InvoiceService) {
@@ -54,6 +58,8 @@ func (c *Core) SetOpencart(oc *occlient.Opencart) {
 		return
 	}
 	c.oc = oc.WithUrlHandler(c.StripePayAmount)
+	c.oc = oc.WithProformaHandler(c.WFirmaRegisterProforma)
+	c.oc.Start()
 }
 
 func (c *Core) AuthenticateByToken(token string) (*entity.User, error) {
@@ -84,7 +90,7 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 			params.LineItems = items
 		}
 	}
-	err := c.inv.RegisterInvoice(ctx, params)
+	_, err := c.inv.RegisterInvoice(ctx, params)
 	if err != nil {
 		c.log.With(
 			sl.Err(err),
@@ -97,6 +103,13 @@ func (c *Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (io.
 		return nil, nil, fmt.Errorf("invoice service not connected")
 	}
 	return c.inv.DownloadInvoice(ctx, invoiceID)
+}
+
+func (c *Core) WFirmaRegisterProforma(params *entity.CheckoutParams) (*entity.Payment, error) {
+	if c.inv == nil {
+		return nil, fmt.Errorf("invoice service not connected")
+	}
+	return c.inv.RegisterProforma(context.Background(), params)
 }
 
 func (c *Core) StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
