@@ -173,6 +173,7 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 			&client.City,
 			&client.Street,
 			&order.Currency,
+			&order.InvoiceId,
 		); err != nil {
 			return nil, err
 		}

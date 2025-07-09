@@ -123,11 +123,27 @@ func (c *Core) WFirmaRegisterProforma(params *entity.CheckoutParams) (*entity.Pa
 	if c.inv == nil {
 		return nil, fmt.Errorf("invoice service not connected")
 	}
+
 	ctx := context.Background()
-	payment, err := c.inv.RegisterProforma(ctx, params)
-	if err != nil {
-		return nil, err
+	var payment *entity.Payment
+	var err error
+
+	// when the invoice was already registered, we will get InvoiceId in CheckoutParams
+	// in this case we need only to download a file
+
+	if params.InvoiceId == "" {
+		payment, err = c.inv.RegisterProforma(ctx, params)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		payment = &entity.Payment{
+			Id:      params.InvoiceId,
+			Amount:  params.Total,
+			OrderId: params.OrderId,
+		}
 	}
+
 	fileName, _, err := c.inv.DownloadInvoice(ctx, payment.Id)
 	if err != nil {
 		return nil, fmt.Errorf("download invoice: %w", err)
@@ -136,8 +152,10 @@ func (c *Core) WFirmaRegisterProforma(params *entity.CheckoutParams) (*entity.Pa
 	if err != nil {
 		return nil, fmt.Errorf("join url: %w", err)
 	}
+
 	payment.Link = link
 	payment.InvoiceFile = fileName
+
 	return payment, nil
 }
 

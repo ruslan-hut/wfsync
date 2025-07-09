@@ -96,7 +96,8 @@ func (s *MySql) stmtSelectOrderStatus() (*sql.Stmt, error) {
 			shipping_postcode,
 			shipping_city,
 			shipping_address_1,
-			currency_code
+			currency_code,
+			wf_proforma
 		 FROM %sorder
 		 WHERE order_status_id = ?
 		 LIMIT 5`,
