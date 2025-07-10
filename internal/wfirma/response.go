@@ -11,13 +11,12 @@ type ContractorWrapper struct {
 
 type Contractor struct {
 	ID        string                  `json:"id"`
-	City      string                  `json:"city,omitempty"`
-	Country   string                  `json:"country,omitempty"`
-	Email     string                  `json:"email,omitempty"`
-	Name      string                  `json:"name,omitempty"`
-	Zip       string                  `json:"zip,omitempty"`
-	ErrorsRaw map[string]ErrorWrapper `json:"errors,omitempty"`
-	// Остальные поля опущены
+	City      string                  `json:"city,omitempty" bson:"city,omitempty"`
+	Country   string                  `json:"country,omitempty" bson:"country,omitempty"`
+	Email     string                  `json:"email,omitempty" bson:"email,omitempty"`
+	Name      string                  `json:"name,omitempty" bson:"name,omitempty"`
+	Zip       string                  `json:"zip,omitempty" bson:"zip,omitempty"`
+	ErrorsRaw map[string]ErrorWrapper `json:"errors,omitempty" bson:"errors,omitempty"`
 }
 
 type ErrorWrapper struct {
