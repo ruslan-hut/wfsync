@@ -287,7 +287,7 @@ func (s *StripeClient) sessionParamsFromCheckout(pm *entity.CheckoutParams) *str
 				ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
 					Name: stripe.String(item.Name),
 				},
-				UnitAmount: stripe.Int64(item.Price * item.Qty),
+				UnitAmount: stripe.Int64(item.Price),
 			},
 			Quantity: stripe.Int64(item.Qty),
 		})
