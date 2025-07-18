@@ -179,6 +179,10 @@ func (c *Core) StripePayAmount(params *entity.CheckoutParams) (*entity.Payment, 
 			slog.String("order_id", params.OrderId),
 			sl.Err(err),
 		).Warn("invalid order total")
+		err = params.RefineTotal(0)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return c.sc.PayAmount(params)
 }

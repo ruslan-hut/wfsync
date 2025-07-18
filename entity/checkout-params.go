@@ -64,6 +64,33 @@ func (c *CheckoutParams) Validate() error {
 	return nil
 }
 
+func (c *CheckoutParams) RefineTotal(count int) error {
+	var linesTotal int64
+	for _, item := range c.LineItems {
+		linesTotal += item.Qty * item.Price
+	}
+	if linesTotal == c.Total {
+		return nil
+	}
+	if count > 10 {
+		return fmt.Errorf("too many refinements")
+	}
+	diff := c.Total - linesTotal
+	for _, item := range c.LineItems {
+		if item.Price > 0 {
+			if diff > 0 {
+				item.Price++
+				diff--
+			} else {
+				item.Price--
+				diff++
+			}
+		}
+	}
+	count++
+	return c.RefineTotal(count)
+}
+
 func (c *CheckoutParams) AddShipping(title string, amount int64) {
 	c.LineItems = append(c.LineItems, ShippingLineItem(title, amount))
 }
