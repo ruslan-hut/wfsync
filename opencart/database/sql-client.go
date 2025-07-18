@@ -99,7 +99,7 @@ func (s *MySql) OrderProducts(orderId int64) ([]*entity.LineItem, error) {
 		var tax float64
 		if err = rows.Scan(
 			&product.Name,
-			&price,
+			&price, //here using the field 'total' - it's calculated with discount
 			&tax,
 			&product.Qty,
 			&product.Sku,

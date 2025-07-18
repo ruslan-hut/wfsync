@@ -60,7 +60,7 @@ func (s *MySql) stmtSelectOrderProducts() (*sql.Stmt, error) {
 	query := fmt.Sprintf(
 		`SELECT
 			pd.name,
-			op.price,
+			op.total,
 			op.tax,
 			op.quantity,
 			op.sku
