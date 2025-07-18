@@ -213,7 +213,7 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 		).Error("create checkout session")
 		return nil, fmt.Errorf("create checkout session: %w", err)
 	}
-	log = log.With(slog.String("session_id", cs.ID))
+	//log = log.With(slog.String("session_id", cs.ID))
 
 	params.Payload = cs
 	params.SessionId = cs.ID
@@ -226,6 +226,7 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 		Link:    cs.URL,
 	}
 
+	log.Info("hold link created")
 	return payment, nil
 }
 
@@ -262,7 +263,7 @@ func (s *StripeClient) PayAmount(params *entity.CheckoutParams) (*entity.Payment
 		).Error("create checkout session")
 		return nil, fmt.Errorf("create checkout session: %w", err)
 	}
-	log = log.With(slog.String("session_id", cs.ID))
+	//log = log.With(slog.String("session_id", cs.ID))
 
 	params.Payload = cs
 	params.SessionId = cs.ID
@@ -275,6 +276,7 @@ func (s *StripeClient) PayAmount(params *entity.CheckoutParams) (*entity.Payment
 		Link:    cs.URL,
 	}
 
+	log.Info("payment link created")
 	return payment, nil
 }
 
