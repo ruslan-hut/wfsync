@@ -106,8 +106,11 @@ func (s *MySql) OrderProducts(orderId int64) ([]*entity.LineItem, error) {
 		); err != nil {
 			return nil, err
 		}
-		product.Price = int64(math.Round((price + tax) * 100))
-		products = append(products, &product)
+		if product.Qty > 0 && price > 0 {
+			// divide by quantity because 'total' contains row total value
+			product.Price = int64(math.Round((price+tax)*100)) / product.Qty
+			products = append(products, &product)
+		}
 	}
 
 	if err = rows.Err(); err != nil {
