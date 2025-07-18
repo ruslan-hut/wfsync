@@ -97,7 +97,8 @@ func (s *MySql) stmtSelectOrderStatus() (*sql.Stmt, error) {
 			shipping_city,
 			shipping_address_1,
 			currency_code,
-			wf_proforma
+			wf_proforma,
+			total
 		 FROM %sorder
 		 WHERE order_status_id = ?
 		 LIMIT 5`,

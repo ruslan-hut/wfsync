@@ -108,7 +108,8 @@ func (s *MySql) OrderProducts(orderId int64) ([]*entity.LineItem, error) {
 		}
 		if product.Qty > 0 && price > 0 {
 			// divide by quantity because 'total' contains row total value
-			product.Price = int64(price*100)/product.Qty + int64(tax*100)
+			price = (price + tax) / float64(product.Qty)
+			product.Price = int64(math.Round(price * 100))
 			products = append(products, &product)
 		}
 	}
@@ -165,6 +166,7 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 		var order entity.CheckoutParams
 		var client entity.ClientDetails
 		var firstName, lastName string
+		var total float64
 		if err = rows.Scan(
 			&order.OrderId,
 			&firstName,
@@ -177,11 +179,13 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 			&client.Street,
 			&order.Currency,
 			&order.InvoiceId,
+			&total,
 		); err != nil {
 			return nil, err
 		}
 		client.Name = firstName + " " + lastName
 		order.ClientDetails = &client
+		order.Total = int64(math.Round(total * 100))
 		order.Created = time.Now().In(s.loc)
 		order.Source = entity.SourceOpenCart
 		orders = append(orders, &order)
