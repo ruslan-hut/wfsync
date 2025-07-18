@@ -86,6 +86,9 @@ func (c *CheckoutParams) RefineTotal(count int) error {
 				diff++
 			}
 		}
+		if diff == 0 {
+			break
+		}
 	}
 	count++
 	return c.RefineTotal(count)
