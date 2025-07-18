@@ -95,20 +95,20 @@ func (s *MySql) OrderProducts(orderId int64) ([]*entity.LineItem, error) {
 	var products []*entity.LineItem
 	for rows.Next() {
 		var product entity.LineItem
-		var price float64
+		var total float64
 		var tax float64
 		if err = rows.Scan(
 			&product.Name,
-			&price, //here using the field 'total' - it's calculated with discount
+			&total, //here using the field 'total' - it's calculated with discount
 			&tax,
 			&product.Qty,
 			&product.Sku,
 		); err != nil {
 			return nil, err
 		}
-		if product.Qty > 0 && price > 0 {
+		if product.Qty > 0 && total > 0 {
 			// divide by quantity because 'total' contains row total value
-			price = (price + tax) / float64(product.Qty)
+			price := (total + tax) / float64(product.Qty)
 			product.Price = int64(math.Round(price * 100))
 			products = append(products, &product)
 		}
@@ -213,9 +213,9 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 			order.AddShipping(title, value)
 		}
 		// calculate total
-		for _, item := range order.LineItems {
-			order.Total += item.Price * item.Qty
-		}
+		//for _, item := range order.LineItems {
+		//	order.Total += item.Price * item.Qty
+		//}
 	}
 
 	return orders, nil

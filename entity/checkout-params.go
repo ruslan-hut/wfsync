@@ -57,10 +57,10 @@ func (c *CheckoutParams) Validate() error {
 	if c.ClientDetails == nil {
 		return fmt.Errorf("no client details")
 	}
-	err := c.ValidateTotal()
-	if err != nil {
-		return err
-	}
+	//err := c.ValidateTotal()
+	//if err != nil {
+	//	return err
+	//}
 	return nil
 }
 
