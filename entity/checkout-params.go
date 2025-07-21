@@ -148,16 +148,17 @@ func (c *ClientDetails) CountryCode() string {
 
 // ParseTaxId extracts a tax ID from a JSON-formatted string based on the given field ID and assigns it to the ClientDetails.
 // Returns an error if the provided raw data is invalid JSON or the extraction fails.
+// Raw string example: {"2":"DE362155758"}
 func (c *ClientDetails) ParseTaxId(fieldId, raw string) error {
 	if fieldId == "" || raw == "" {
 		return nil
 	}
-	var jsonStr string
-	if err := json.Unmarshal([]byte(raw), &jsonStr); err != nil {
-		return err
-	}
+	//var jsonStr string
+	//if err := json.Unmarshal([]byte(raw), &jsonStr); err != nil {
+	//	return err
+	//}
 	var data map[string]string
-	if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+	if err := json.Unmarshal([]byte(raw), &data); err != nil {
 		return err
 	}
 	c.TaxId = data[fieldId]
