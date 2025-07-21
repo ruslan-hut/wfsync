@@ -151,24 +151,25 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 			continue
 		}
 
-		payment, err := handler(order)
-		if err != nil {
-			log.With(
-				slog.String("order_id", order.OrderId),
-				sl.Err(err),
-			).Error("handle order")
-			continue
-		}
-		if payment == nil {
-			continue
-		}
-
 		orderId, err := strconv.ParseInt(order.OrderId, 10, 64)
 		if err != nil {
 			log.With(
 				slog.String("order_id", order.OrderId),
 				sl.Err(err),
 			).Error("invalid order id")
+			continue
+		}
+
+		payment, err := handler(order)
+		if err != nil {
+			log.With(
+				slog.String("order_id", order.OrderId),
+				sl.Err(err),
+			).Error("handle order")
+			_ = oc.db.ChangeOrderStatus(orderId, statusResult, fmt.Sprintf("Error: %v", err))
+			continue
+		}
+		if payment == nil {
 			continue
 		}
 
