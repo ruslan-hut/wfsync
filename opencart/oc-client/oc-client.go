@@ -29,6 +29,8 @@ type Opencart struct {
 	statusUrlResult       int
 	statusProformaRequest int
 	statusProformaResult  int
+	statusInvoiceRequest  int
+	statusInvoiceResult   int
 	handlerUrl            CheckoutHandler
 	handlerProforma       CheckoutHandler
 	handlerInvoice        CheckoutHandler
@@ -58,6 +60,12 @@ func New(conf *config.Config, log *slog.Logger) (*Opencart, error) {
 	}
 	if conf.OpenCart.StatusProformaResult != "" {
 		oc.statusProformaResult, _ = strconv.Atoi(conf.OpenCart.StatusProformaResult)
+	}
+	if conf.OpenCart.StatusInvoiceRequest != "" {
+		oc.statusInvoiceRequest, _ = strconv.Atoi(conf.OpenCart.StatusInvoiceRequest)
+	}
+	if conf.OpenCart.StatusInvoiceResult != "" {
+		oc.statusInvoiceResult, _ = strconv.Atoi(conf.OpenCart.StatusInvoiceResult)
 	}
 	return oc, nil
 }
@@ -114,6 +122,8 @@ func (oc *Opencart) ProcessOrders() {
 	oc.handleByStatus(oc.statusUrlRequest, oc.statusUrlResult, oc.handlerUrl, JobStripeLink)
 
 	oc.handleByStatus(oc.statusProformaRequest, oc.statusProformaResult, oc.handlerProforma, JobProforma)
+
+	oc.handleByStatus(oc.statusInvoiceRequest, oc.statusInvoiceResult, oc.handlerInvoice, JobInvoice)
 }
 
 func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler CheckoutHandler, jobName JobType) {
@@ -184,6 +194,15 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 					slog.String("order_id", order.OrderId),
 					sl.Err(err),
 				).Error("update proforma")
+			}
+		}
+		if jobName == JobInvoice {
+			err = oc.db.UpdateInvoice(orderId, payment.Id, payment.InvoiceFile)
+			if err != nil {
+				log.With(
+					slog.String("order_id", order.OrderId),
+					sl.Err(err),
+				).Error("update invoice")
 			}
 		}
 

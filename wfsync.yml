@@ -36,6 +36,8 @@ opencart:
   file_url: ${FILE_URL}
   status_url_request: 22
   status_url_result: 23
+  status_invoice_request: 26
+  status_invoice_result: 27
   status_proforma_request: 24
   status_proforma_result: 25
 telegram:

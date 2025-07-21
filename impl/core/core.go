@@ -64,6 +64,7 @@ func (c *Core) SetOpencart(oc *occlient.Opencart) {
 	}
 	c.oc = oc.WithUrlHandler(c.StripePayAmount)
 	c.oc = oc.WithProformaHandler(c.WFirmaRegisterProforma)
+	c.oc = oc.WithInvoiceHandler(c.WFirmaRegisterInvoice)
 	c.oc.Start()
 }
 
@@ -149,6 +150,46 @@ func (c *Core) WFirmaRegisterProforma(params *entity.CheckoutParams) (*entity.Pa
 	} else {
 		payment = &entity.Payment{
 			Id:      params.ProformaId,
+			Amount:  params.Total,
+			OrderId: params.OrderId,
+		}
+	}
+
+	fileName, _, err := c.inv.DownloadInvoice(ctx, payment.Id)
+	if err != nil {
+		return nil, fmt.Errorf("download invoice: %w", err)
+	}
+	link, err := url.JoinPath(c.fileUrl, fileName)
+	if err != nil {
+		return nil, fmt.Errorf("join url: %w", err)
+	}
+
+	payment.Link = link
+	payment.InvoiceFile = fileName
+
+	return payment, nil
+}
+
+func (c *Core) WFirmaRegisterInvoice(params *entity.CheckoutParams) (*entity.Payment, error) {
+	if c.inv == nil {
+		return nil, fmt.Errorf("invoice service not connected")
+	}
+
+	ctx := context.Background()
+	var payment *entity.Payment
+	var err error
+
+	// when the invoice was already registered, we will get InvoiceId in CheckoutParams
+	// in this case we need only to download a file
+
+	if params.InvoiceId == "" {
+		payment, err = c.inv.RegisterInvoice(ctx, params)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		payment = &entity.Payment{
+			Id:      params.InvoiceId,
 			Amount:  params.Total,
 			OrderId: params.OrderId,
 		}
