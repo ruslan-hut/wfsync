@@ -253,15 +253,16 @@ func (s *StripeClient) PayAmount(params *entity.CheckoutParams) (*entity.Payment
 		return nil, fmt.Errorf("missing success url")
 	}
 
+	if params.ClientDetails.Email == "" {
+		return nil, fmt.Errorf("missing email address")
+	}
+
 	csParams := s.sessionParamsFromCheckout(params)
 
 	cs, err := s.sc.CheckoutSessions.New(csParams)
 	if err != nil {
 		err = s.parseErr(err)
-		log.With(
-			sl.Err(err),
-		).Error("create checkout session")
-		return nil, fmt.Errorf("create checkout session: %w", err)
+		return nil, fmt.Errorf("stripe checkout session: %w", err)
 	}
 	//log = log.With(slog.String("session_id", cs.ID))
 
