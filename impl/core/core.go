@@ -104,7 +104,7 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 	}
 	// save invoice id to a site database
 	if payment != nil && c.oc != nil {
-		err = c.oc.SaveInvoiceId(params.OrderId, payment.Id, payment.Link)
+		err = c.oc.SaveInvoiceId(params.OrderId, payment.Id, payment.InvoiceFile)
 		if err != nil {
 			c.log.With(
 				sl.Err(err),
@@ -141,14 +141,14 @@ func (c *Core) WFirmaRegisterProforma(params *entity.CheckoutParams) (*entity.Pa
 	// when the invoice was already registered, we will get InvoiceId in CheckoutParams
 	// in this case we need only to download a file
 
-	if params.InvoiceId == "" {
+	if params.ProformaId == "" {
 		payment, err = c.inv.RegisterProforma(ctx, params)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		payment = &entity.Payment{
-			Id:      params.InvoiceId,
+			Id:      params.ProformaId,
 			Amount:  params.Total,
 			OrderId: params.OrderId,
 		}

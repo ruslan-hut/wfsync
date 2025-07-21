@@ -29,6 +29,7 @@ type CheckoutParams struct {
 	Status        string         `json:"status" bson:"status"`
 	SessionId     string         `json:"session_id,omitempty" bson:"session_id"`
 	InvoiceId     string         `json:"invoice_id,omitempty" bson:"invoice_id"`
+	ProformaId    string         `json:"proforma_id,omitempty" bson:"proforma_id"`
 	Paid          bool           `json:"paid,omitempty" bson:"paid"`
 	Source        Source         `json:"source,omitempty" bson:"source"`
 	Payload       interface{}    `json:"payload,omitempty" bson:"payload"`

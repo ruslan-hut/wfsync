@@ -108,6 +108,7 @@ func (s *MySql) stmtSelectOrderStatus() (*sql.Stmt, error) {
 			shipping_city,
 			shipping_address_1,
 			currency_code,
+			wf_invoice,
 			wf_proforma,
 			total
 		 FROM %sorder
