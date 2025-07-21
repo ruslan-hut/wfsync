@@ -40,6 +40,7 @@ opencart:
   status_invoice_result: 27
   status_proforma_request: 24
   status_proforma_result: 25
+  custom_field_nip: 2
 telegram:
   enabled: true
   api_key: ${TELEGRAM_API_KEY}

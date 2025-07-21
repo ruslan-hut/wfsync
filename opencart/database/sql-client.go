@@ -18,6 +18,7 @@ type MySql struct {
 	prefix     string
 	structure  map[string]map[string]Column
 	statements map[string]*sql.Stmt
+	nipId      string
 	mu         sync.Mutex
 }
 
@@ -52,6 +53,7 @@ func NewSQLClient(conf *config.Config) (*MySql, error) {
 		prefix:     conf.OpenCart.Prefix,
 		structure:  make(map[string]map[string]Column),
 		statements: make(map[string]*sql.Stmt),
+		nipId:      conf.OpenCart.CustomFieldNIP,
 	}
 
 	if err = sdb.addColumnIfNotExists("order", "wf_proforma", "VARCHAR(64) NOT NULL DEFAULT ''"); err != nil {
@@ -163,16 +165,20 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 
 	var orders []*entity.CheckoutParams
 	for rows.Next() {
+
 		var order entity.CheckoutParams
 		var client entity.ClientDetails
+		var customField string
 		var firstName, lastName string
 		var total float64
+
 		if err = rows.Scan(
 			&order.OrderId,
 			&firstName,
 			&lastName,
 			&client.Email,
 			&client.Phone,
+			&customField,
 			&client.Country,
 			&client.ZipCode,
 			&client.City,
@@ -184,11 +190,16 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 		); err != nil {
 			return nil, err
 		}
+
+		// client data
+		_ = client.ParseTaxId(s.nipId, customField)
 		client.Name = firstName + " " + lastName
 		order.ClientDetails = &client
+		// order summary
 		order.Total = int64(math.Round(total * 100))
 		order.Created = time.Now().In(s.loc)
 		order.Source = entity.SourceOpenCart
+
 		orders = append(orders, &order)
 	}
 

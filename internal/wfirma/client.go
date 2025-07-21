@@ -123,6 +123,10 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 	if customer.City == "" {
 		customer.City = "Warszawa"
 	}
+	taxIdType := "other"
+	if customer.TaxId != "" {
+		taxIdType = "custom"
+	}
 
 	// If not found, create a new contractor.
 	payload := map[string]interface{}{
@@ -136,7 +140,8 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 						"zip":         customer.ZipCode,
 						"city":        customer.City,
 						"street":      customer.Street,
-						"tax_id_type": "other",
+						"tax_id_type": taxIdType,
+						"nip":         customer.TaxId,
 					},
 				},
 			},

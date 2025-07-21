@@ -103,6 +103,7 @@ func (s *MySql) stmtSelectOrderStatus() (*sql.Stmt, error) {
 			lastname,
 			email,
 			telephone,
+			custom_field,
 			shipping_country,
 			shipping_postcode,
 			shipping_city,

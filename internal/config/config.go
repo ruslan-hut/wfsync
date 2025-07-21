@@ -52,6 +52,7 @@ type OpenCart struct {
 	StatusProformaResult  string `yaml:"status_proforma_result" env-default:""`
 	StatusInvoiceRequest  string `yaml:"status_invoice_request" env-default:""`
 	StatusInvoiceResult   string `yaml:"status_invoice_result" env-default:""`
+	CustomFieldNIP        string `yaml:"custom_field_nip" env-default:""`
 }
 
 type Telegram struct {
