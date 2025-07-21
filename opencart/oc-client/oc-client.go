@@ -192,3 +192,14 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 		).Debug("order processed")
 	}
 }
+
+func (oc *Opencart) SaveInvoiceId(orderId string, invoiceId, invoiceFile string) error {
+	if oc.db == nil || orderId == "" {
+		return nil
+	}
+	id, err := strconv.ParseInt(orderId, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid order id: %s", orderId)
+	}
+	return oc.db.UpdateInvoice(id, invoiceId, invoiceFile)
+}

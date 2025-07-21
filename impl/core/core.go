@@ -95,11 +95,21 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 			params.LineItems = items
 		}
 	}
-	_, err := c.inv.RegisterInvoice(ctx, params)
+	// register new invoice
+	payment, err := c.inv.RegisterInvoice(ctx, params)
 	if err != nil {
 		c.log.With(
 			sl.Err(err),
 		).Error("register invoice")
+	}
+	// save invoice id to a site database
+	if payment != nil && c.oc != nil {
+		err = c.oc.SaveInvoiceId(params.OrderId, payment.Id, payment.Link)
+		if err != nil {
+			c.log.With(
+				sl.Err(err),
+			).Error("save invoice id")
+		}
 	}
 }
 

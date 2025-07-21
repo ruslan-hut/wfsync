@@ -259,3 +259,15 @@ func (s *MySql) UpdateProforma(orderId int64, proformaId, proformaFile string) e
 	}
 	return nil
 }
+
+func (s *MySql) UpdateInvoice(orderId int64, invoiceId, invoiceFile string) error {
+	stmt, err := s.stmtUpdateOrderInvoice()
+	if err != nil {
+		return err
+	}
+	_, err = stmt.Exec(invoiceId, invoiceFile, orderId)
+	if err != nil {
+		return err
+	}
+	return nil
+}

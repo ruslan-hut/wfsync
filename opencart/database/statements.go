@@ -56,6 +56,17 @@ func (s *MySql) stmtUpdateOrderProforma() (*sql.Stmt, error) {
 	return s.prepareStmt("updateOrderProforma", query)
 }
 
+func (s *MySql) stmtUpdateOrderInvoice() (*sql.Stmt, error) {
+	query := fmt.Sprintf(
+		`UPDATE %sorder SET   
+                   wf_invoice = ?,
+                   wf_file_invoice = ?
+                   WHERE order_id = ?`,
+		s.prefix,
+	)
+	return s.prepareStmt("stmtUpdateOrderInvoice", query)
+}
+
 func (s *MySql) stmtSelectOrderProducts() (*sql.Stmt, error) {
 	query := fmt.Sprintf(
 		`SELECT
