@@ -83,7 +83,7 @@ func (s *MySql) Close() {
 	_ = s.db.Close()
 }
 
-func (s *MySql) OrderProducts(orderId int64) ([]*entity.LineItem, error) {
+func (s *MySql) OrderProducts(orderId int64, currencyValue float64) ([]*entity.LineItem, error) {
 	stmt, err := s.stmtSelectOrderProducts()
 	if err != nil {
 		return nil, err
@@ -111,7 +111,7 @@ func (s *MySql) OrderProducts(orderId int64) ([]*entity.LineItem, error) {
 		if product.Qty > 0 && total > 0 {
 			// divide by quantity because 'total' contains row total value
 			price := (total + tax) / float64(product.Qty)
-			product.Price = int64(math.Round(price * 100))
+			product.Price = int64(math.Round(price * currencyValue * 100))
 			products = append(products, &product)
 		}
 	}
@@ -123,7 +123,7 @@ func (s *MySql) OrderProducts(orderId int64) ([]*entity.LineItem, error) {
 	return products, nil
 }
 
-func (s *MySql) OrderShipping(orderId int64) (string, int64, error) {
+func (s *MySql) OrderShipping(orderId int64, currencyValue float64) (string, int64, error) {
 	stmt, err := s.stmtSelectOrderTotals()
 	if err != nil {
 		return "", 0, err
@@ -149,7 +149,7 @@ func (s *MySql) OrderShipping(orderId int64) (string, int64, error) {
 		return "", 0, err
 	}
 
-	return title, int64(math.Round(shipping * 100)), nil
+	return title, int64(math.Round(shipping * currencyValue * 100)), nil
 }
 
 func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error) {
@@ -184,6 +184,7 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 			&client.City,
 			&client.Street,
 			&order.Currency,
+			&order.CurrencyValue,
 			&order.InvoiceId,
 			&order.InvoiceFile,
 			&order.ProformaId,
@@ -198,7 +199,7 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 		client.Name = firstName + " " + lastName
 		order.ClientDetails = &client
 		// order summary
-		order.Total = int64(math.Round(total * 100))
+		order.Total = int64(math.Round(total * order.CurrencyValue * 100))
 		order.Created = time.Now().In(s.loc)
 		order.Source = entity.SourceOpenCart
 
@@ -215,11 +216,11 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 		if err != nil {
 			return nil, fmt.Errorf("invalid order id: %s", order.OrderId)
 		}
-		order.LineItems, err = s.OrderProducts(id)
+		order.LineItems, err = s.OrderProducts(id, order.CurrencyValue)
 		if err != nil {
 			return nil, fmt.Errorf("get order products: %w", err)
 		}
-		title, value, err := s.OrderShipping(id)
+		title, value, err := s.OrderShipping(id, order.CurrencyValue)
 		if err != nil {
 			return nil, fmt.Errorf("get order shipping: %w", err)
 		}

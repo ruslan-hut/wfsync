@@ -109,6 +109,7 @@ func (s *MySql) stmtSelectOrderStatus() (*sql.Stmt, error) {
 			shipping_city,
 			shipping_address_1,
 			currency_code,
+			currency_value,
 			wf_invoice,
 			wf_file_invoice,
 			wf_proforma,

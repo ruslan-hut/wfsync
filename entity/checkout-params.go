@@ -23,6 +23,7 @@ type CheckoutParams struct {
 	LineItems     []*LineItem    `json:"line_items" bson:"line_items" validate:"required,min=1,dive"`
 	Total         int64          `json:"total" bson:"total" validate:"required,min=1"`
 	Currency      string         `json:"currency" bson:"currency" validate:"required,oneof=PLN EUR"`
+	CurrencyValue float64        `json:"currency_value,omitempty" bson:"currency_value,omitempty"`
 	OrderId       string         `json:"order_id" bson:"order_id" validate:"required,min=1,max=32"`
 	SuccessUrl    string         `json:"success_url" bson:"success_url" validate:"required,url"`
 	Created       time.Time      `json:"created" bson:"created"`
