@@ -64,7 +64,7 @@ func (s *MySql) stmtUpdateOrderInvoice() (*sql.Stmt, error) {
                    WHERE order_id = ?`,
 		s.prefix,
 	)
-	return s.prepareStmt("stmtUpdateOrderInvoice", query)
+	return s.prepareStmt("updateOrderInvoice", query)
 }
 
 func (s *MySql) stmtSelectOrderProducts() (*sql.Stmt, error) {
@@ -110,7 +110,9 @@ func (s *MySql) stmtSelectOrderStatus() (*sql.Stmt, error) {
 			shipping_address_1,
 			currency_code,
 			wf_invoice,
+			wf_file_invoice,
 			wf_proforma,
+			wf_file_proforma,
 			total
 		 FROM %sorder
 		 WHERE order_status_id = ?

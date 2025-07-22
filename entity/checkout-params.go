@@ -28,12 +28,14 @@ type CheckoutParams struct {
 	Created       time.Time      `json:"created" bson:"created"`
 	Closed        time.Time      `json:"closed,omitempty" bson:"closed"`
 	Status        string         `json:"status" bson:"status"`
-	SessionId     string         `json:"session_id,omitempty" bson:"session_id"`
-	InvoiceId     string         `json:"invoice_id,omitempty" bson:"invoice_id"`
-	ProformaId    string         `json:"proforma_id,omitempty" bson:"proforma_id"`
+	SessionId     string         `json:"session_id,omitempty" bson:"session_id,omitempty"`
+	InvoiceId     string         `json:"invoice_id,omitempty" bson:"invoice_id,omitempty"`
+	InvoiceFile   string         `json:"invoice_file,omitempty" bson:"invoice_file,omitempty"`
+	ProformaId    string         `json:"proforma_id,omitempty" bson:"proforma_id,omitempty"`
+	ProformaFile  string         `json:"proforma_file,omitempty" bson:"proforma_file,omitempty"`
 	Paid          bool           `json:"paid,omitempty" bson:"paid"`
 	Source        Source         `json:"source,omitempty" bson:"source"`
-	Payload       interface{}    `json:"payload,omitempty" bson:"payload"`
+	Payload       interface{}    `json:"payload,omitempty" bson:"payload,omitempty"`
 }
 
 func (c *CheckoutParams) Bind(_ *http.Request) error {

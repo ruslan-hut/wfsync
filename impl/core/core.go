@@ -155,10 +155,14 @@ func (c *Core) WFirmaRegisterProforma(params *entity.CheckoutParams) (*entity.Pa
 		}
 	}
 
-	fileName, _, err := c.inv.DownloadInvoice(ctx, payment.Id)
-	if err != nil {
-		return nil, fmt.Errorf("download invoice: %w", err)
+	fileName := params.ProformaFile
+	if fileName == "" {
+		fileName, _, err = c.inv.DownloadInvoice(ctx, payment.Id)
+		if err != nil {
+			return nil, fmt.Errorf("download invoice: %w", err)
+		}
 	}
+
 	link, err := url.JoinPath(c.fileUrl, fileName)
 	if err != nil {
 		return nil, fmt.Errorf("join url: %w", err)
@@ -195,10 +199,14 @@ func (c *Core) WFirmaRegisterInvoice(params *entity.CheckoutParams) (*entity.Pay
 		}
 	}
 
-	fileName, _, err := c.inv.DownloadInvoice(ctx, payment.Id)
-	if err != nil {
-		return nil, fmt.Errorf("download invoice: %w", err)
+	fileName := params.InvoiceFile
+	if fileName == "" {
+		fileName, _, err = c.inv.DownloadInvoice(ctx, payment.Id)
+		if err != nil {
+			return nil, fmt.Errorf("download invoice: %w", err)
+		}
 	}
+
 	link, err := url.JoinPath(c.fileUrl, fileName)
 	if err != nil {
 		return nil, fmt.Errorf("join url: %w", err)
