@@ -33,7 +33,6 @@ type Mongo struct {
 	User     string `yaml:"user" env-default:"admin"`
 	Password string `yaml:"password" env-default:"pass"`
 	Database string `yaml:"database" env-default:""`
-	SaveUrl  string `yaml:"save_url" env-default:""`
 }
 
 type OpenCart struct {

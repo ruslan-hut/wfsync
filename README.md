@@ -53,7 +53,10 @@ WFSync is a Go application designed to synchronize invoices between Stripe and W
 The application uses a YAML configuration file. Create a `config.yml` file in the project root with the following structure:
 
 ```yaml
-env: "dev" # for development or "prod" for production
+env: "dev"                      # "dev" for development or "prod" for production
+log: /var/log/wfsync.log        # log file path
+location: UTC                   # timezone for timestamps
+file_path: /local/file/path     # local path to downloaded files
 
 # Server settings
 listen:
@@ -66,6 +69,7 @@ stripe:
   api_key: "your_stripe_live_api_key"
   test_key: "your_stripe_test_api_key"
   webhook_secret: "your_stripe_webhook_secret"
+  success_url: "https://yourdomain.com/success"  # URL to redirect after successful payment
 
 # Wfirma API credentials see documentation on https://doc.wfirma.pl/
 wfirma:
@@ -81,7 +85,6 @@ mongo:
   user: "admin"
   password: "password"
   database: "wfsync"
-  save_url: ""
 
 # OpenCart database and site settings
 opencart:
@@ -93,17 +96,15 @@ opencart:
   database: ""
   port: "3306"
   prefix: ""
-  # local path to downloaded files
-  file_path: ""
+  file_url: ""                    # base URL for downloaded files
   # order status codes for interactive operations
-  status_url_request: 0
+  status_url_request: 0           # request payment link via Stripe           
   status_url_result: 0
-  status_invoice_request: 0
+  status_invoice_request: 0       # request invoice download from Wfirma
   status_invoice_result: 0
-  status_proforma_request: 0
+  status_proforma_request: 0      # request proforma download from Wfirma
   status_proforma_result: 0
-  # order custom field with customer's NIP
-  custom_field_nip: 0
+  custom_field_nip: 0             # order custom field with customer's NIP
   
 # Telegram bot settings to receive logs and notifications
 telegram:
