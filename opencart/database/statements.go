@@ -74,7 +74,7 @@ func (s *MySql) stmtSelectOrderProducts() (*sql.Stmt, error) {
 			op.total,
 			op.tax,
 			op.quantity,
-			op.sku
+			op.model
 		 FROM %sorder_product op
 		 JOIN %sproduct_description pd ON op.product_id = pd.product_id 
 		 WHERE op.order_id = ? AND pd.language_id = 2`,
