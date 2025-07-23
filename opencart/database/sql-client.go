@@ -256,21 +256,14 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 		if err != nil {
 			return nil, fmt.Errorf("get order products: %w", err)
 		}
-		// discount must be added after products and before shipping to avoid discount on shipping
-		discount, _ := s.OrderDiscount(id, order.CurrencyValue)
-		if discount > 0 {
-			order.RecalcWithDiscount(discount)
-		}
 		title, value, err := s.OrderShipping(id, order.CurrencyValue)
 		if err != nil {
 			return nil, fmt.Errorf("get order shipping: %w", err)
 		}
 		if value > 0 {
-			diff := order.Total - order.ItemsTotal() - value
-			order.AddShipping(title, value+diff)
-		} else {
-			//_ = order.RefineTotal(0)
+			order.AddShipping(title, value)
 		}
+		order.RecalcWithDiscount()
 	}
 
 	return orders, nil

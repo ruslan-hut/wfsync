@@ -72,7 +72,7 @@ func New(conf *config.Config, log *slog.Logger) (*Opencart, error) {
 
 func (oc *Opencart) Start() {
 	go func() {
-		ticker := time.NewTicker(2 * time.Minute)
+		ticker := time.NewTicker(3 * time.Minute)
 		defer ticker.Stop()
 		for {
 			oc.ProcessOrders()
@@ -157,7 +157,8 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 				slog.String("order_id", order.OrderId),
 				slog.Int64("total", order.Total),
 				slog.Int64("lines_total", linesTotal),
-			).Warn("order total mismatch")
+				slog.Int64("diff", order.Total-linesTotal),
+			).Debug("order total mismatch")
 			err = order.RefineTotal(0)
 			if err != nil {
 				log.With(

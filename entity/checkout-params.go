@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/biter777/countries"
 	"github.com/stripe/stripe-go/v76"
-	"log"
 	"math"
 	"net/http"
 	"time"
@@ -24,6 +23,7 @@ type CheckoutParams struct {
 	ClientDetails *ClientDetails `json:"client_details" bson:"client_details" validate:"required"`
 	LineItems     []*LineItem    `json:"line_items" bson:"line_items" validate:"required,min=1,dive"`
 	Total         int64          `json:"total" bson:"total" validate:"required,min=1"`
+	Shipping      int64          `json:"shipping,omitempty" bson:"shipping,omitempty"`
 	Currency      string         `json:"currency" bson:"currency" validate:"required,oneof=PLN EUR"`
 	CurrencyValue float64        `json:"currency_value,omitempty" bson:"currency_value,omitempty"`
 	OrderId       string         `json:"order_id" bson:"order_id" validate:"required,min=1,max=32"`
@@ -104,33 +104,34 @@ func (c *CheckoutParams) RefineTotal(count int) error {
 }
 
 func (c *CheckoutParams) AddShipping(title string, amount int64) {
+	c.Shipping = amount
 	c.LineItems = append(c.LineItems, ShippingLineItem(title, amount))
 }
 
-func (c *CheckoutParams) RecalcWithDiscount(_ int64) {
+func (c *CheckoutParams) RecalcWithDiscount() {
 	linesTotal := c.ItemsTotal()
-	if linesTotal == 0 || c.Total == 0 {
+	if linesTotal == 0 {
 		return
 	}
-	//newTotal := linesTotal - amount
-	//if newTotal <= 0 {
-	//	return
-	//}
-	k := float64(c.Total) / float64(linesTotal)
-	log.Printf("total %d; lines total %d; k=%f", c.Total, linesTotal, k)
+	k := float64(c.Total-c.Shipping) / float64(linesTotal)
+	if k == 0 {
+		return
+	}
 	for _, item := range c.LineItems {
-		newPrice := int64(math.Round(float64(item.Price) * k))
-		//log.Printf("item %s; price %d; new price %d", item.Name, item.Price, newPrice)
-		item.Price = newPrice
+		if item.Shipping {
+			continue
+		}
+		item.Price = int64(math.Round(float64(item.Price) * k))
 	}
 	//c.Total = newTotal
 }
 
 type LineItem struct {
-	Name  string `json:"name" validate:"required"`
-	Qty   int64  `json:"qty" validate:"required,min=1"`
-	Price int64  `json:"price" validate:"required,min=1"`
-	Sku   string `json:"sku,omitempty" bson:"sku"`
+	Name     string `json:"name" validate:"required"`
+	Qty      int64  `json:"qty" validate:"required,min=1"`
+	Price    int64  `json:"price" validate:"required,min=1"`
+	Sku      string `json:"sku,omitempty" bson:"sku"`
+	Shipping bool   `json:"shipping,omitempty" bson:"shipping"`
 }
 
 func ShippingLineItem(title string, amount int64) *LineItem {
@@ -140,9 +141,10 @@ func ShippingLineItem(title string, amount int64) *LineItem {
 		title = fmt.Sprintf("Zwrot kosztów transportu towarów (%s)", title)
 	}
 	return &LineItem{
-		Name:  title,
-		Qty:   1,
-		Price: amount,
+		Name:     title,
+		Qty:      1,
+		Price:    amount,
+		Shipping: true,
 	}
 }
 
