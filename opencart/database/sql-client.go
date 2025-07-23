@@ -271,6 +271,7 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 		if value > 0 {
 			order.AddShipping(title, value)
 		}
+		_ = order.RefineTotal(0)
 	}
 
 	return orders, nil
