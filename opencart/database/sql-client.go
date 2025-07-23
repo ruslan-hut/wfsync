@@ -272,7 +272,7 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 			diff := order.Total - order.ItemsTotal() - value
 			order.AddShipping(title, value+diff)
 		} else {
-			_ = order.RefineTotal(0)
+			//_ = order.RefineTotal(0)
 		}
 	}
 

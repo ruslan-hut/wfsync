@@ -151,6 +151,20 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 			continue
 		}
 
+		linesTotal := order.ItemsTotal()
+		if order.Total != linesTotal {
+			log.With(
+				slog.Int64("total", order.Total),
+				slog.Int64("lines_total", linesTotal),
+			).Warn("order total mismatch")
+			err = order.RefineTotal(0)
+			if err != nil {
+				log.With(
+					sl.Err(err),
+				).Warn("refine order total")
+			}
+		}
+
 		orderId, err := strconv.ParseInt(order.OrderId, 10, 64)
 		if err != nil {
 			log.With(
