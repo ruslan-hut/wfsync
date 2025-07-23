@@ -154,6 +154,7 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 		linesTotal := order.ItemsTotal()
 		if order.Total != linesTotal {
 			log.With(
+				slog.String("order_id", order.OrderId),
 				slog.Int64("total", order.Total),
 				slog.Int64("lines_total", linesTotal),
 			).Warn("order total mismatch")
