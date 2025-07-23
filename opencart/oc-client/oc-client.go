@@ -72,7 +72,7 @@ func New(conf *config.Config, log *slog.Logger) (*Opencart, error) {
 
 func (oc *Opencart) Start() {
 	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
+		ticker := time.NewTicker(2 * time.Minute)
 		defer ticker.Stop()
 		for {
 			oc.ProcessOrders()
