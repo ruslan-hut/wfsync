@@ -107,17 +107,17 @@ func (c *CheckoutParams) AddShipping(title string, amount int64) {
 	c.LineItems = append(c.LineItems, ShippingLineItem(title, amount))
 }
 
-func (c *CheckoutParams) SetDiscount(amount int64) {
+func (c *CheckoutParams) RecalcWithDiscount(_ int64) {
 	linesTotal := c.ItemsTotal()
-	if linesTotal == 0 {
+	if linesTotal == 0 || c.Total == 0 {
 		return
 	}
-	newTotal := linesTotal - amount
-	if newTotal <= 0 {
-		return
-	}
-	k := float64(newTotal) / float64(linesTotal)
-	log.Printf("total %d; set discount %d; lines total %d; new total %d; k=%f", c.Total, amount, linesTotal, newTotal, k)
+	//newTotal := linesTotal - amount
+	//if newTotal <= 0 {
+	//	return
+	//}
+	k := float64(c.Total) / float64(linesTotal)
+	log.Printf("total %d; lines total %d; k=%f", c.Total, linesTotal, k)
 	for _, item := range c.LineItems {
 		newPrice := int64(math.Round(float64(item.Price) * k))
 		//log.Printf("item %s; price %d; new price %d", item.Name, item.Price, newPrice)

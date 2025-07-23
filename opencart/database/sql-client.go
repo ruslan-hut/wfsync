@@ -257,12 +257,9 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 			return nil, fmt.Errorf("get order products: %w", err)
 		}
 		// discount must be added after products and before shipping to avoid discount on shipping
-		discount, err := s.OrderDiscount(id, order.CurrencyValue)
-		if err != nil {
-			return nil, fmt.Errorf("get order discount: %w", err)
-		}
+		discount, _ := s.OrderDiscount(id, order.CurrencyValue)
 		if discount > 0 {
-			order.SetDiscount(discount)
+			order.RecalcWithDiscount(discount)
 		}
 		title, value, err := s.OrderShipping(id, order.CurrencyValue)
 		if err != nil {
