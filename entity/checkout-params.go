@@ -117,10 +117,10 @@ func (c *CheckoutParams) SetDiscount(amount int64) {
 		return
 	}
 	k := float64(newTotal) / float64(linesTotal)
-	log.Printf("set discount %d; lines total %d; new total %d; k=%f", amount, linesTotal, newTotal, k)
+	log.Printf("total %d; set discount %d; lines total %d; new total %d; k=%f", c.Total, amount, linesTotal, newTotal, k)
 	for _, item := range c.LineItems {
 		newPrice := int64(math.Round(float64(item.Price) * k))
-		log.Printf("item %s; price %d; new price %d", item.Name, item.Price, newPrice)
+		//log.Printf("item %s; price %d; new price %d", item.Name, item.Price, newPrice)
 		item.Price = newPrice
 	}
 	//c.Total = newTotal
