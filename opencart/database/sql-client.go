@@ -269,9 +269,11 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 			return nil, fmt.Errorf("get order shipping: %w", err)
 		}
 		if value > 0 {
-			order.AddShipping(title, value)
+			diff := order.Total - order.ItemsTotal() - value
+			order.AddShipping(title, value+diff)
+		} else {
+			_ = order.RefineTotal(0)
 		}
-		_ = order.RefineTotal(0)
 	}
 
 	return orders, nil

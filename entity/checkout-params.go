@@ -88,10 +88,10 @@ func (c *CheckoutParams) RefineTotal(count int) error {
 		if item.Price > 0 {
 			if diff > 0 {
 				item.Price++
-				diff--
+				diff = diff - item.Qty
 			} else {
 				item.Price--
-				diff++
+				diff = diff + item.Qty
 			}
 		}
 		if diff == 0 {
