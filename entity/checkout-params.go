@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/biter777/countries"
 	"github.com/stripe/stripe-go/v76"
+	"math"
 	"net/http"
 	"time"
 	"wfsync/lib/validate"
@@ -44,11 +45,16 @@ func (c *CheckoutParams) Bind(_ *http.Request) error {
 	return validate.Struct(c)
 }
 
-func (c *CheckoutParams) ValidateTotal() error {
+func (c *CheckoutParams) ItemsTotal() int64 {
 	var total int64
 	for _, item := range c.LineItems {
 		total += item.Qty * item.Price
 	}
+	return total
+}
+
+func (c *CheckoutParams) ValidateTotal() error {
+	total := c.ItemsTotal()
 	if c.Total == total {
 		return nil
 	}
@@ -70,10 +76,7 @@ func (c *CheckoutParams) Validate() error {
 }
 
 func (c *CheckoutParams) RefineTotal(count int) error {
-	var linesTotal int64
-	for _, item := range c.LineItems {
-		linesTotal += item.Qty * item.Price
-	}
+	linesTotal := c.ItemsTotal()
 	if linesTotal == c.Total {
 		return nil
 	}
@@ -101,6 +104,22 @@ func (c *CheckoutParams) RefineTotal(count int) error {
 
 func (c *CheckoutParams) AddShipping(title string, amount int64) {
 	c.LineItems = append(c.LineItems, ShippingLineItem(title, amount))
+}
+
+func (c *CheckoutParams) SetDiscount(amount int64) {
+	linesTotal := c.ItemsTotal()
+	if linesTotal == 0 {
+		return
+	}
+	newTotal := linesTotal - amount
+	if newTotal <= 0 {
+		return
+	}
+	k := float64(newTotal) / float64(linesTotal)
+	for _, item := range c.LineItems {
+		item.Price = int64(math.Round(float64(item.Price) * k))
+	}
+	//c.Total = newTotal
 }
 
 type LineItem struct {

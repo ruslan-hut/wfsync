@@ -89,7 +89,7 @@ func (s *MySql) stmtSelectOrderTotals() (*sql.Stmt, error) {
 			op.title,
 			op.value
 		 FROM %sorder_total op
-		 WHERE op.order_id = ? AND op.code='shipping'`,
+		 WHERE op.order_id = ? AND op.code=?`,
 		s.prefix,
 	)
 	return s.prepareStmt("selectOrderTotals", query)

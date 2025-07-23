@@ -12,6 +12,13 @@ import (
 	"wfsync/internal/config"
 )
 
+const (
+	totalCodeShipping = "shipping"
+	totalCodeDiscount = "discount"
+	//totalCodeTax      = "tax"
+	//totalCodeTotal    = "total"
+)
+
 type MySql struct {
 	db         *sql.DB
 	loc        *time.Location
@@ -128,7 +135,7 @@ func (s *MySql) OrderShipping(orderId int64, currencyValue float64) (string, int
 	if err != nil {
 		return "", 0, err
 	}
-	rows, err := stmt.Query(orderId)
+	rows, err := stmt.Query(orderId, totalCodeShipping)
 	if err != nil {
 		return "", 0, err
 	}
@@ -150,6 +157,35 @@ func (s *MySql) OrderShipping(orderId int64, currencyValue float64) (string, int
 	}
 
 	return title, int64(math.Round(shipping * currencyValue * 100)), nil
+}
+
+func (s *MySql) OrderDiscount(orderId int64, currencyValue float64) (int64, error) {
+	stmt, err := s.stmtSelectOrderTotals()
+	if err != nil {
+		return 0, err
+	}
+	rows, err := stmt.Query(orderId, totalCodeDiscount)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	var title string
+	var discount float64
+	for rows.Next() {
+		if err = rows.Scan(
+			&title,
+			&discount,
+		); err != nil {
+			return 0, err
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		return 0, err
+	}
+
+	return int64(math.Round(discount * currencyValue * 100)), nil
 }
 
 func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error) {
@@ -220,6 +256,14 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 		if err != nil {
 			return nil, fmt.Errorf("get order products: %w", err)
 		}
+		// discount must be added after products and before shipping to avoid discount on shipping
+		discount, err := s.OrderDiscount(id, order.CurrencyValue)
+		if err != nil {
+			return nil, fmt.Errorf("get order discount: %w", err)
+		}
+		if discount > 0 {
+			order.SetDiscount(discount)
+		}
 		title, value, err := s.OrderShipping(id, order.CurrencyValue)
 		if err != nil {
 			return nil, fmt.Errorf("get order shipping: %w", err)
@@ -227,10 +271,6 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 		if value > 0 {
 			order.AddShipping(title, value)
 		}
-		// calculate total
-		//for _, item := range order.LineItems {
-		//	order.Total += item.Price * item.Qty
-		//}
 	}
 
 	return orders, nil
