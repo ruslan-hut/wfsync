@@ -45,6 +45,15 @@ func (s *MySql) stmtUpdateOrderStatus() (*sql.Stmt, error) {
 	return s.prepareStmt("updateOrderStatus", query)
 }
 
+func (s *MySql) stmtDeleteStatusHistory() (*sql.Stmt, error) {
+	query := fmt.Sprintf(
+		`DELETE FROM %sorder_history WHERE 
+                   order_id = ? AND order_status_id = ?`,
+		s.prefix,
+	)
+	return s.prepareStmt("deleteStatusHistory", query)
+}
+
 func (s *MySql) stmtUpdateOrderProforma() (*sql.Stmt, error) {
 	query := fmt.Sprintf(
 		`UPDATE %sorder SET   

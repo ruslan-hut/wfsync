@@ -178,6 +178,24 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 			continue
 		}
 
+		// clear status history
+		err = oc.db.ClearStatusHistory(orderId, statusRequest)
+		if err != nil {
+			log.With(
+				slog.String("order_id", order.OrderId),
+				slog.Int("status", statusRequest),
+				sl.Err(err),
+			).Warn("clear status history")
+		}
+		err = oc.db.ClearStatusHistory(orderId, statusResult)
+		if err != nil {
+			log.With(
+				slog.String("order_id", order.OrderId),
+				slog.Int("status", statusResult),
+				sl.Err(err),
+			).Warn("clear status history")
+		}
+
 		payment, err := handler(order)
 		if err != nil {
 			log.With(

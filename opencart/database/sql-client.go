@@ -296,6 +296,18 @@ func (s *MySql) ChangeOrderStatus(orderId int64, orderStatusId int, comment stri
 	return nil
 }
 
+func (s *MySql) ClearStatusHistory(orderId int64, orderStatusId int) error {
+	stmt, err := s.stmtDeleteStatusHistory()
+	if err != nil {
+		return err
+	}
+	_, err = stmt.Exec(orderId, orderStatusId)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *MySql) UpdateProforma(orderId int64, proformaId, proformaFile string) error {
 	stmt, err := s.stmtUpdateOrderProforma()
 	if err != nil {
