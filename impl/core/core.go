@@ -139,20 +139,30 @@ func (c *Core) WFirmaRegisterProforma(params *entity.CheckoutParams) (*entity.Pa
 	var payment *entity.Payment
 	var err error
 
-	// when the invoice was already registered, we will get InvoiceId in CheckoutParams
-	// in this case we need only to download a file
+	// when the invoice was already registered, we will get ProformaId and ProformaFile in CheckoutParams
+	// in this case we need to delete the old file before downloading a new one
 
-	if params.ProformaId == "" {
-		payment, err = c.inv.RegisterProforma(ctx, params)
-		if err != nil {
-			return nil, err
+	if params.ProformaFile != "" {
+		fileName := filepath.Join(c.filePath, params.ProformaFile)
+		if _, err = os.Stat(fileName); err == nil {
+			err = os.Remove(fileName)
+			if err != nil {
+				c.log.With(
+					slog.String("order_id", params.OrderId),
+					slog.String("path", c.filePath),
+					slog.String("file_id", params.ProformaId),
+					slog.String("file_name", params.ProformaFile),
+					sl.Err(err),
+				).Warn("remove file")
+			}
 		}
-	} else {
-		payment = &entity.Payment{
-			Id:      params.ProformaId,
-			Amount:  params.Total,
-			OrderId: params.OrderId,
-		}
+		params.ProformaFile = ""
+		params.ProformaId = ""
+	}
+
+	payment, err = c.inv.RegisterProforma(ctx, params)
+	if err != nil {
+		return nil, err
 	}
 
 	fileName := params.ProformaFile

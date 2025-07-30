@@ -126,6 +126,7 @@ func (oc *Opencart) ProcessOrders() {
 	oc.handleByStatus(oc.statusInvoiceRequest, oc.statusInvoiceResult, oc.handlerInvoice, JobInvoice)
 }
 
+// handleByStatus processes orders based on the given status and applies the provided handler to update their state.
 func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler CheckoutHandler, jobName JobType) {
 	if statusRequest == 0 || handler == nil {
 		return
@@ -151,6 +152,7 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 			continue
 		}
 
+		// control order total and try to refine if needed
 		linesTotal := order.ItemsTotal()
 		if order.Total != linesTotal {
 			log.With(
