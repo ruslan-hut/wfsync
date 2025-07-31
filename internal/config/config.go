@@ -21,6 +21,7 @@ type StripeConfig struct {
 }
 
 type WfirmaConfig struct {
+	Enabled   bool   `yaml:"enabled" env-default:"false"`
 	AccessKey string `yaml:"access_key" env-default:""`
 	SecretKey string `yaml:"secret_key" env-default:""`
 	AppID     string `yaml:"app_id" env-default:""`

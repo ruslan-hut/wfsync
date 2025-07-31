@@ -33,6 +33,7 @@ type Database interface {
 }
 
 type Client struct {
+	enabled   bool
 	hc        *http.Client
 	db        Database
 	baseURL   string
@@ -51,6 +52,7 @@ type Config struct {
 
 func NewClient(conf *config.Config, logger *slog.Logger) *Client {
 	return &Client{
+		enabled:   conf.WFirma.Enabled,
 		hc:        &http.Client{Timeout: 10 * time.Second},
 		baseURL:   "https://api2.wfirma.pl",
 		accessKey: conf.WFirma.AccessKey,
@@ -236,6 +238,9 @@ func (c *Client) getContractor(ctx context.Context, email string) (string, error
 }
 
 func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string, *entity.FileMeta, error) {
+	if !c.enabled {
+		return "", nil, fmt.Errorf("wFirma is disabled")
+	}
 	log := c.log.With(slog.String("invoice_id", invoiceID))
 	defer func() {
 		if r := recover(); r != nil {
@@ -326,10 +331,16 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string,
 }
 
 func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
+	if !c.enabled {
+		return nil, fmt.Errorf("wFirma is disabled")
+	}
 	return c.invoice(ctx, invoiceNormal, params)
 }
 
 func (c *Client) RegisterProforma(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
+	if !c.enabled {
+		return nil, fmt.Errorf("wFirma is disabled")
+	}
 	return c.invoice(ctx, invoiceProforma, params)
 }
 

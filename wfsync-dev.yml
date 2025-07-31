@@ -14,6 +14,7 @@ stripe:
   webhook_secret: ${STRIPE_WH_SECRET}
   success_url: ${STRIPE_SUCCESS_URL}
 wfirma:
+  enabled: false
   access_key: ${WF_ACCESS_KEY}
   secret_key: ${WF_SECRET_KEY}
   app_id: ${WF_APP_ID}
