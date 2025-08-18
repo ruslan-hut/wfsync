@@ -108,6 +108,7 @@ func (s *MySql) stmtSelectOrderStatus() (*sql.Stmt, error) {
 	query := fmt.Sprintf(
 		`SELECT
 			order_id,
+			date_added,
 			firstname,
 			lastname,
 			email,
@@ -130,4 +131,32 @@ func (s *MySql) stmtSelectOrderStatus() (*sql.Stmt, error) {
 		s.prefix,
 	)
 	return s.prepareStmt("selectOrderStatus", query)
+}
+
+func (s *MySql) stmtSelectOrderId() (*sql.Stmt, error) {
+	query := fmt.Sprintf(
+		`SELECT
+			order_id,
+			date_added,
+			firstname,
+			lastname,
+			email,
+			telephone,
+			custom_field,
+			shipping_country,
+			shipping_postcode,
+			shipping_city,
+			shipping_address_1,
+			currency_code,
+			currency_value,
+			wf_invoice,
+			wf_file_invoice,
+			wf_proforma,
+			wf_file_proforma,
+			total
+		 FROM %sorder
+		 WHERE order_id = ?`,
+		s.prefix,
+	)
+	return s.prepareStmt("stmtSelectOrderId", query)
 }

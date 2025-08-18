@@ -2,9 +2,6 @@ package api
 
 import (
 	"fmt"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/render"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,6 +11,10 @@ import (
 	"wfsync/internal/http-server/handlers/payment"
 	"wfsync/internal/http-server/handlers/stripehandler"
 	"wfsync/internal/http-server/handlers/wfinvoice"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/render"
 
 	"wfsync/internal/http-server/middleware/authenticate"
 	"wfsync/internal/http-server/middleware/timeout"
@@ -53,6 +54,7 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) error {
 		rootApi.Use(authenticate.New(log, handler))
 		rootApi.Route("/wf", func(wf chi.Router) {
 			wf.Get("/invoice/{id}", wfinvoice.Download(log, handler))
+			wf.Get("/order/{id}", wfinvoice.OrderToInvoice(log, handler))
 		})
 		rootApi.Route("/st", func(st chi.Router) {
 			st.Post("/hold", payment.Hold(log, handler))

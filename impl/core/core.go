@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"fmt"
-	"github.com/stripe/stripe-go/v76"
 	"io"
 	"log/slog"
 	"net/url"
@@ -15,6 +14,8 @@ import (
 	"wfsync/internal/stripeclient"
 	"wfsync/lib/sl"
 	occlient "wfsync/opencart/oc-client"
+
+	"github.com/stripe/stripe-go/v76"
 )
 
 type AuthService interface {
@@ -130,6 +131,32 @@ func (c *Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (io.
 	return file, meta, nil
 }
 
+func (c *Core) WFirmaOrderToInvoice(ctx context.Context, orderId int64) (*entity.CheckoutParams, error) {
+	if c.inv == nil {
+		return nil, fmt.Errorf("invoice service not connected")
+	}
+	if c.oc == nil {
+		return nil, fmt.Errorf("opencart service not connected")
+	}
+
+	params, err := c.oc.GetOrder(orderId)
+	if err != nil {
+		return nil, err
+	}
+	if params == nil {
+		return nil, fmt.Errorf("order not found")
+	}
+	params.Paid = true
+
+	payment, err := c.inv.RegisterInvoice(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	params.InvoiceId = payment.Id
+
+	return params, nil
+}
+
 func (c *Core) WFirmaRegisterProforma(params *entity.CheckoutParams) (*entity.Payment, error) {
 	if c.inv == nil {
 		return nil, fmt.Errorf("invoice service not connected")
@@ -165,19 +192,10 @@ func (c *Core) WFirmaRegisterProforma(params *entity.CheckoutParams) (*entity.Pa
 		return nil, err
 	}
 
-	fileName := params.ProformaFile
-	if fileName == "" {
-		fileName, _, err = c.inv.DownloadInvoice(ctx, payment.Id)
-		if err != nil {
-			return nil, fmt.Errorf("download invoice: %w", err)
-		}
-	}
-
-	link, err := url.JoinPath(c.fileUrl, fileName)
+	fileName, link, err := c.downloadInvoice(ctx, params.ProformaFile, payment.Id)
 	if err != nil {
-		return nil, fmt.Errorf("join url: %w", err)
+		return nil, err
 	}
-
 	payment.Link = link
 	payment.InvoiceFile = fileName
 
@@ -209,23 +227,30 @@ func (c *Core) WFirmaRegisterInvoice(params *entity.CheckoutParams) (*entity.Pay
 		}
 	}
 
-	fileName := params.InvoiceFile
+	fileName, link, err := c.downloadInvoice(ctx, params.InvoiceFile, payment.Id)
+	if err != nil {
+		return nil, err
+	}
+	payment.Link = link
+	payment.InvoiceFile = fileName
+
+	return payment, nil
+}
+
+func (c *Core) downloadInvoice(ctx context.Context, fileName, paymentId string) (string, string, error) {
+	var err error
 	if fileName == "" {
-		fileName, _, err = c.inv.DownloadInvoice(ctx, payment.Id)
+		fileName, _, err = c.inv.DownloadInvoice(ctx, paymentId)
 		if err != nil {
-			return nil, fmt.Errorf("download invoice: %w", err)
+			return "", "", fmt.Errorf("download invoice: %w", err)
 		}
 	}
 
 	link, err := url.JoinPath(c.fileUrl, fileName)
 	if err != nil {
-		return nil, fmt.Errorf("join url: %w", err)
+		return "", "", fmt.Errorf("join url: %w", err)
 	}
-
-	payment.Link = link
-	payment.InvoiceFile = fileName
-
-	return payment, nil
+	return fileName, link, nil
 }
 
 func (c *Core) StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment, error) {

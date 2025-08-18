@@ -249,6 +249,13 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 	}
 }
 
+func (oc *Opencart) GetOrder(orderId int64) (*entity.CheckoutParams, error) {
+	if oc.db == nil {
+		return nil, fmt.Errorf("database not connected")
+	}
+	return oc.db.OrderSearchId(orderId)
+}
+
 func (oc *Opencart) SaveInvoiceId(orderId string, invoiceId, invoiceFile string) error {
 	if oc.db == nil || orderId == "" {
 		return nil

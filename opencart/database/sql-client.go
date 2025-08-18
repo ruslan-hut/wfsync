@@ -3,13 +3,14 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	_ "github.com/go-sql-driver/mysql" // MySQL driver
 	"math"
 	"strconv"
 	"sync"
 	"time"
 	"wfsync/entity"
 	"wfsync/internal/config"
+
+	_ "github.com/go-sql-driver/mysql" // MySQL driver
 )
 
 const (
@@ -210,6 +211,7 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 
 		if err = rows.Scan(
 			&order.OrderId,
+			&order.Created,
 			&firstName,
 			&lastName,
 			&client.Email,
@@ -267,6 +269,79 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 	}
 
 	return orders, nil
+}
+
+func (s *MySql) OrderSearchId(orderId int64) (*entity.CheckoutParams, error) {
+	stmt, err := s.stmtSelectOrderId()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := stmt.Query(orderId)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+
+	var order entity.CheckoutParams
+	if rows.Next() {
+
+		var client entity.ClientDetails
+		var customField string
+		var firstName, lastName string
+		var total float64
+
+		if err = rows.Scan(
+			&order.OrderId,
+			&order.Created,
+			&firstName,
+			&lastName,
+			&client.Email,
+			&client.Phone,
+			&customField,
+			&client.Country,
+			&client.ZipCode,
+			&client.City,
+			&client.Street,
+			&order.Currency,
+			&order.CurrencyValue,
+			&order.InvoiceId,
+			&order.InvoiceFile,
+			&order.ProformaId,
+			&order.ProformaFile,
+			&total,
+		); err != nil {
+			return nil, err
+		}
+
+		// client data
+		_ = client.ParseTaxId(s.nipId, customField)
+		client.Name = firstName + " " + lastName
+		order.ClientDetails = &client
+		// order summary
+		order.Total = int64(math.Round(total * order.CurrencyValue * 100))
+		order.Created = time.Now().In(s.loc)
+		order.Source = entity.SourceOpenCart
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// add line items and shipping costs to each order
+	order.LineItems, err = s.OrderProducts(orderId, order.CurrencyValue)
+	if err != nil {
+		return nil, fmt.Errorf("get order products: %w", err)
+	}
+	title, value, err := s.OrderShipping(orderId, order.CurrencyValue)
+	if err != nil {
+		return nil, fmt.Errorf("get order shipping: %w", err)
+	}
+	if value > 0 {
+		order.AddShipping(title, value)
+	}
+	order.RecalcWithDiscount()
+
+	return &order, nil
 }
 
 func (s *MySql) ChangeOrderStatus(orderId int64, orderStatusId int, comment string) error {

@@ -26,7 +26,8 @@ API response always has the following structure
 
 #### Wfirma Endpoints
 
-- `GET /v1/wf/invoice/{id}` - Download an invoice from Wfirma by ID
+- `GET /v1/wf/invoice/{id}` - Download an invoice from Wfirma by ID in PDF format
+- `GET /v1/wf/order/{id}` - Create a Wfirma invoice from an OpenCart Order with given ID
 
 #### Stripe Endpoints
 
