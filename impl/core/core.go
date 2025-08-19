@@ -146,7 +146,7 @@ func (c *Core) WFirmaOrderToInvoice(ctx context.Context, orderId int64) (*entity
 	if params == nil {
 		return nil, fmt.Errorf("order not found")
 	}
-	params.Paid = true
+	params.Paid = false
 
 	payment, err := c.inv.RegisterInvoice(ctx, params)
 	if err != nil {
