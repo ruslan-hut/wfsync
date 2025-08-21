@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,6 +16,8 @@ import (
 	"wfsync/entity"
 	"wfsync/internal/config"
 	"wfsync/lib/sl"
+
+	"github.com/google/uuid"
 )
 
 type invoiceType string
@@ -454,7 +455,11 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			log.Error("save invoice",
 				sl.Err(err))
 		}
-		params.InvoiceId = invID
+		if invType == invoiceProforma {
+			params.ProformaId = invID
+		} else {
+			params.InvoiceId = invID
+		}
 		err = c.db.UpdateCheckoutParams(params)
 		if err != nil {
 			log.Error("update checkout params",

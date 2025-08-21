@@ -63,6 +63,7 @@ func (c *CheckoutParams) ValidateTotal() error {
 	return fmt.Errorf("total amount %d does not match sum of line items %d", c.Total, total)
 }
 
+// Validate ensures that CheckoutParams has at least one line item and client details provided, returning an error if not.
 func (c *CheckoutParams) Validate() error {
 	if len(c.LineItems) == 0 {
 		return fmt.Errorf("no line items")

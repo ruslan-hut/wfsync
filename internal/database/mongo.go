@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 	"time"
 	"wfsync/entity"
 	"wfsync/internal/config"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
@@ -155,6 +156,7 @@ func (m *MongoDB) UpdateCheckoutParams(params *entity.CheckoutParams) error {
 	filter := bson.D{{"order_id", params.OrderId}}
 	update := bson.D{{"$set", bson.D{
 		{"invoice_id", params.InvoiceId},
+		{"proforma_id", params.ProformaId},
 		{"closed", time.Now()},
 	}}}
 	opts := options.Update().SetUpsert(true)
