@@ -275,7 +275,10 @@ func (c *Core) StripePayAmount(params *entity.CheckoutParams) (*entity.Payment, 
 		).Warn("invalid order total")
 		err = params.RefineTotal(0)
 		if err != nil {
-			return nil, err
+			c.log.With(
+				slog.String("order_id", params.OrderId),
+				sl.Err(err),
+			).Warn("refine total")
 		}
 	}
 	return c.sc.PayAmount(params)
