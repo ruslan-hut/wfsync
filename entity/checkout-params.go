@@ -3,12 +3,13 @@ package entity
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/biter777/countries"
-	"github.com/stripe/stripe-go/v76"
 	"math"
 	"net/http"
 	"time"
 	"wfsync/lib/validate"
+
+	"github.com/biter777/countries"
+	"github.com/stripe/stripe-go/v76"
 )
 
 type Source string
@@ -81,7 +82,7 @@ func (c *CheckoutParams) RefineTotal(count int) error {
 	if linesTotal == c.Total {
 		return nil
 	}
-	if count > 10 {
+	if count > 50 {
 		return fmt.Errorf("too many refinements")
 	}
 	diff := c.Total - linesTotal
