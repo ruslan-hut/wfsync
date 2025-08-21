@@ -82,7 +82,7 @@ func (c *CheckoutParams) RefineTotal(count int) error {
 	if linesTotal == c.Total {
 		return nil
 	}
-	if count > 50 {
+	if count > 10 {
 		return fmt.Errorf("too many refinements")
 	}
 	diff := c.Total - linesTotal
