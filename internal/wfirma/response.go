@@ -37,3 +37,14 @@ type ErrorMethod struct {
 type Status struct {
 	Code string `json:"code"`
 }
+
+type InvoiceResponse struct {
+	Invoices InvoicesWrapper `json:"invoices"`
+	Status   Status          `json:"status"`
+}
+
+type InvoicesWrapper map[string]InvoiceWrapper
+
+type InvoiceWrapper struct {
+	Invoice Invoice `json:"invoice"`
+}
