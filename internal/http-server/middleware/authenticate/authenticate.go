@@ -46,11 +46,16 @@ func New(log *slog.Logger, auth Authenticate) func(next http.Handler) http.Handl
 
 			t1 := time.Now()
 			defer func() {
-				logger.With(
+				logger = logger.With(
 					slog.Int("status", ww.Status()),
 					slog.Int("size", ww.BytesWritten()),
 					slog.Float64("duration", time.Since(t1).Seconds()),
-				).Debug("incoming request")
+				)
+				if ww.Status() >= 400 {
+					logger.Error("request failed")
+				} else {
+					logger.Debug("request completed")
+				}
 			}()
 
 			token := ""
