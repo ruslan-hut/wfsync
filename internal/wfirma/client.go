@@ -433,7 +433,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			sl.Err(err))
 		return nil, err
 	}
-	var resultInvoice Invoice
+	var resultInvoice InvoiceData
 	if wrapper, ok := addResp.Invoices["0"]; ok {
 		resultInvoice = wrapper.Invoice
 	}

@@ -46,5 +46,18 @@ type InvoiceResponse struct {
 type InvoicesWrapper map[string]InvoiceWrapper
 
 type InvoiceWrapper struct {
-	Invoice Invoice `json:"invoice"`
+	Invoice InvoiceData `json:"invoice"`
+}
+
+type InvoiceData struct {
+	Id          string                  `json:"id,omitempty" bson:"id"`
+	Contractor  *Contractor             `json:"contractor" bson:"contractor"`
+	Type        string                  `json:"type" bson:"type"`
+	PriceType   string                  `json:"price_type" bson:"price_type"`
+	Total       string                  `json:"total" bson:"total"`
+	IdExternal  string                  `json:"id_external" bson:"id_external"`
+	Description string                  `json:"description" bson:"description"`
+	Date        string                  `json:"date" bson:"date"`
+	Currency    string                  `json:"currency" bson:"currency"`
+	Errors      map[string]ErrorWrapper `json:"errors,omitempty" bson:"errors,omitempty"`
 }
