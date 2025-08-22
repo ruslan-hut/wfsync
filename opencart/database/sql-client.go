@@ -118,7 +118,8 @@ func (s *MySql) OrderProducts(orderId int64, currencyValue float64) ([]*entity.L
 		}
 		if product.Qty > 0 && total > 0 {
 			// divide by quantity because 'total' contains row total value
-			price := (total + tax*float64(product.Qty)) / float64(product.Qty)
+			//price := (total + tax*float64(product.Qty)) / float64(product.Qty)
+			price := (total + tax) / float64(product.Qty)
 			product.Price = int64(math.Round(price * currencyValue * 100))
 			products = append(products, &product)
 		}
