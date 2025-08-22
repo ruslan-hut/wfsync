@@ -438,9 +438,9 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		resultInvoice = wrapper.Invoice
 	}
 	if errWrap, ok := resultInvoice.Errors["0"]; ok {
+		log.Error(errWrap.Error.Message)
 		return nil, fmt.Errorf("invoice creation error: %s", errWrap.Error.Message)
 	}
-
 	if resultInvoice.Id == "" {
 		log.Error("no invoice ID returned from wFirma")
 		return nil, fmt.Errorf("no invoice id returned from wFirma")
@@ -452,15 +452,15 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 
 	invoice.Id = resultInvoice.Id
 	if c.db != nil {
-		err = c.db.SaveInvoice(resultInvoice.Id, invoice)
+		err = c.db.SaveInvoice(invoice.Id, invoice)
 		if err != nil {
 			log.Error("save invoice",
 				sl.Err(err))
 		}
 		if invType == invoiceProforma {
-			params.ProformaId = resultInvoice.Id
+			params.ProformaId = invoice.Id
 		} else {
-			params.InvoiceId = resultInvoice.Id
+			params.InvoiceId = invoice.Id
 		}
 		err = c.db.UpdateCheckoutParams(params)
 		if err != nil {
@@ -471,12 +471,12 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 
 	payment := &entity.Payment{
 		Amount:  int64(invoice.Total * 100),
-		Id:      resultInvoice.Id,
+		Id:      invoice.Id,
 		OrderId: params.OrderId,
 	}
 
 	c.log.With(
-		slog.String("wfirma_id", resultInvoice.Id),
+		slog.String("wfirma_id", invoice.Id),
 		slog.String("order_id", params.OrderId),
 		slog.String("total", fmt.Sprintf("%.2f", total)),
 		slog.String("email", params.ClientDetails.Email),
@@ -489,7 +489,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		err = c.addPayment(ctx, *invoice)
 		if err != nil {
 			log.Error("add payment",
-				slog.String("wfirma_id", resultInvoice.Id),
+				slog.String("wfirma_id", invoice.Id),
 				sl.Err(err))
 		}
 	}
