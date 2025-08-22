@@ -2,12 +2,13 @@ package authenticate
 
 import (
 	"fmt"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/render"
 	"wfsync/entity"
 	"wfsync/lib/api/cont"
 	"wfsync/lib/api/response"
 	"wfsync/lib/sl"
+
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/render"
 
 	"log/slog"
 	"net/http"
@@ -49,7 +50,7 @@ func New(log *slog.Logger, auth Authenticate) func(next http.Handler) http.Handl
 					slog.Int("status", ww.Status()),
 					slog.Int("size", ww.BytesWritten()),
 					slog.Float64("duration", time.Since(t1).Seconds()),
-				).Info("incoming request")
+				).Debug("incoming request")
 			}()
 
 			token := ""
