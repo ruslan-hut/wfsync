@@ -432,8 +432,6 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		log.With(
 			slog.Any("response", addRes),
 		).Debug("invoice creation response")
-		log.Error("parse invoice creation response",
-			sl.Err(err))
 		return nil, err
 	}
 	var resultInvoice InvoiceData
@@ -450,7 +448,6 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		return nil, fmt.Errorf("invoice creation error: %s", errWrap.Error.Message)
 	}
 	if resultInvoice.Id == "" {
-		log.Error("no invoice ID returned from wFirma")
 		return nil, fmt.Errorf("no invoice id returned from wFirma")
 	}
 
