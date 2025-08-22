@@ -154,13 +154,13 @@ func (c *Core) WFirmaOrderToInvoice(ctx context.Context, orderId int64) (*entity
 			slog.Int64("lines_total", linesTotal),
 			slog.Int64("diff", params.Total-linesTotal),
 		).Warn("order total mismatch")
-		err = params.RefineTotal(0)
-		if err != nil {
-			c.log.With(
-				slog.String("order_id", params.OrderId),
-				sl.Err(err),
-			).Warn("refine total")
-		}
+		//err = params.RefineTotal(0)
+		//if err != nil {
+		//	c.log.With(
+		//		slog.String("order_id", params.OrderId),
+		//		sl.Err(err),
+		//	).Warn("refine total")
+		//}
 	}
 
 	params.Paid = false
