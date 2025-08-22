@@ -441,6 +441,9 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			sl.Err(err))
 		return nil, err
 	}
+	log.With(
+		slog.Any("response", addRes),
+	).Debug("create invoice")
 
 	invID := addResp.Invoices.Element0.Invoice.ID
 	if invID == "" {
