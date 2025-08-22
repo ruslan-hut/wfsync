@@ -146,6 +146,13 @@ func (c *Core) WFirmaOrderToInvoice(ctx context.Context, orderId int64) (*entity
 	if params == nil {
 		return nil, fmt.Errorf("order not found")
 	}
+	err = params.RefineTotal(0)
+	if err != nil {
+		c.log.With(
+			slog.String("order_id", params.OrderId),
+			sl.Err(err),
+		).Warn("refine total")
+	}
 	params.Paid = false
 
 	payment, err := c.inv.RegisterInvoice(ctx, params)
