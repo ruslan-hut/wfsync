@@ -452,7 +452,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	}
 
 	log.With(
-		slog.Any("invoice", resultInvoice),
+		slog.Any("invoice", addRes),
 	).Debug("invoice created")
 
 	invoice.Id = resultInvoice.Id
