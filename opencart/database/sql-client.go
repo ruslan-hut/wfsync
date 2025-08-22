@@ -238,7 +238,6 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 		order.ClientDetails = &client
 		// order summary
 		order.Total = int64(math.Round(total * order.CurrencyValue * 100))
-		order.Created = time.Now().In(s.loc)
 		order.Source = entity.SourceOpenCart
 
 		orders = append(orders, &order)
@@ -319,7 +318,6 @@ func (s *MySql) OrderSearchId(orderId int64) (*entity.CheckoutParams, error) {
 		order.ClientDetails = &client
 		// order summary
 		order.Total = int64(math.Round(total * order.CurrencyValue * 100))
-		order.Created = time.Now().In(s.loc)
 		order.Source = entity.SourceOpenCart
 	}
 
