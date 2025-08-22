@@ -81,6 +81,7 @@ func (s *MySql) stmtSelectOrderProducts() (*sql.Stmt, error) {
 		`SELECT
 			pd.name,
 			op.total,
+			op.price,
 			op.tax,
 			op.quantity,
 			op.model

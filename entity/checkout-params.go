@@ -83,7 +83,7 @@ func (c *CheckoutParams) RefineTotal(count int) error {
 	if linesTotal == c.Total {
 		return nil
 	}
-	if count > 10 {
+	if count > 100 {
 		return fmt.Errorf("too many refinements")
 	}
 	diff := c.Total - linesTotal
@@ -115,7 +115,7 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 	if linesTotal == 0 {
 		return
 	}
-	k := float64(c.Total) / float64(linesTotal)
+	k := float64(c.Total-c.Shipping) / float64(linesTotal-c.Shipping)
 	if k == 0 || k == 1 {
 		return
 	}
