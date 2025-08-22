@@ -265,7 +265,7 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 		if value > 0 {
 			order.AddShipping(title, value)
 		}
-		order.RecalcWithDiscount()
+		//order.RecalcWithDiscount()
 	}
 
 	return orders, nil
@@ -339,7 +339,7 @@ func (s *MySql) OrderSearchId(orderId int64) (*entity.CheckoutParams, error) {
 	if value > 0 {
 		order.AddShipping(title, value)
 	}
-	order.RecalcWithDiscount()
+	//order.RecalcWithDiscount()
 
 	return &order, nil
 }

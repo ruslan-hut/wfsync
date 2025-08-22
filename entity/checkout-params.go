@@ -115,8 +115,8 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 	if linesTotal == 0 {
 		return
 	}
-	k := float64(c.Total-c.Shipping) / float64(linesTotal)
-	if k == 0 {
+	k := float64(c.Total) / float64(linesTotal)
+	if k == 0 || k == 1 {
 		return
 	}
 	for _, item := range c.LineItems {
