@@ -96,7 +96,7 @@ func OrderToInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 			render.JSON(w, r, response.Error(fmt.Sprintf("Request failed: %v", err)))
 			return
 		}
-		logger.With(
+		log.With(
 			slog.String("invoice_id", params.InvoiceId),
 		).Debug("invoice created")
 
