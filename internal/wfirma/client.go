@@ -451,9 +451,9 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		return nil, fmt.Errorf("no invoice id returned from wFirma")
 	}
 
-	log.With(
-		slog.Any("invoice", addRes),
-	).Debug("invoice created")
+	//log.With(
+	//	slog.Any("invoice", addRes),
+	//).Debug("invoice created")
 
 	invoice.Id = resultInvoice.Id
 	if c.db != nil {
@@ -482,6 +482,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 
 	c.log.With(
 		slog.String("wfirma_id", invoice.Id),
+		slog.String("wfirma_number", resultInvoice.Number),
 		slog.String("order_id", params.OrderId),
 		slog.String("total", fmt.Sprintf("%.2f", total)),
 		slog.String("email", params.ClientDetails.Email),

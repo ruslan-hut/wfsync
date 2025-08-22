@@ -51,6 +51,7 @@ type InvoiceWrapper struct {
 
 type InvoiceData struct {
 	Id          string                  `json:"id,omitempty" bson:"id"`
+	Number      string                  `json:"fullnumber" bson:"number"`
 	Contractor  *Contractor             `json:"contractor" bson:"contractor"`
 	Type        string                  `json:"type" bson:"type"`
 	PriceType   string                  `json:"price_type" bson:"price_type"`
