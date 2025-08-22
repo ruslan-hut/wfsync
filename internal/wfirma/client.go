@@ -429,6 +429,9 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 
 	var addResp InvoiceResponse
 	if err = json.Unmarshal(addRes, &addResp); err != nil {
+		log.With(
+			slog.Any("response", addRes),
+		).Debug("invoice creation response")
 		log.Error("parse invoice creation response",
 			sl.Err(err))
 		return nil, err
