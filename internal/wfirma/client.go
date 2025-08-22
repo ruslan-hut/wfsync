@@ -438,7 +438,12 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		resultInvoice = wrapper.Invoice
 	}
 	if errWrap, ok := resultInvoice.Errors["0"]; ok {
-		log.Error(errWrap.Error.Message)
+		log.With(
+			slog.String("error", errWrap.Error.Message),
+			slog.String("field", errWrap.Error.Field),
+			slog.String("method", errWrap.Error.Method.Name),
+			slog.String("parameters", errWrap.Error.Method.Parameters),
+		).Warn("invoice creation")
 		return nil, fmt.Errorf("invoice creation error: %s", errWrap.Error.Message)
 	}
 	if resultInvoice.Id == "" {
