@@ -303,7 +303,7 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string,
 
 	ext := ".pdf"
 	if !strings.Contains(meta.ContentType, "pdf") {
-		ext = ""
+		return "", nil, fmt.Errorf("unsupported content type: %s", meta.ContentType)
 	}
 	fileName := uuid.New().String() + ext
 	filePath := filepath.Join(c.filePath, fileName)
