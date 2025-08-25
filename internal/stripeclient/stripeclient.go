@@ -5,8 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"github.com/stripe/stripe-go/v76"
-	"github.com/stripe/stripe-go/v76/client"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -15,6 +13,9 @@ import (
 	"wfsync/entity"
 	"wfsync/internal/config"
 	"wfsync/lib/sl"
+
+	"github.com/stripe/stripe-go/v76"
+	"github.com/stripe/stripe-go/v76/client"
 )
 
 type Database interface {
@@ -300,6 +301,6 @@ func (s *StripeClient) sessionParamsFromCheckout(pm *entity.CheckoutParams) *str
 		LineItems:     lineItems,
 		Metadata:      map[string]string{"order_id": pm.OrderId},
 		SuccessURL:    stripe.String(s.successUrl),
-		CustomerEmail: stripe.String(pm.ClientDetails.Email),
+		CustomerEmail: stripe.String(strings.TrimSpace(pm.ClientDetails.Email)),
 	}
 }
