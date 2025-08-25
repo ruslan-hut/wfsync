@@ -214,7 +214,7 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 
 		if err = rows.Scan(
 			&order.OrderId,
-			&order.Created,
+			&order.Created, // replaced by Now()
 			&firstName,
 			&lastName,
 			&client.Email,
@@ -242,6 +242,7 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 		// order summary
 		order.Total = int64(math.Round(total * order.CurrencyValue * 100))
 		order.Source = entity.SourceOpenCart
+		order.Created = time.Now().In(s.loc)
 
 		orders = append(orders, &order)
 	}
@@ -294,7 +295,7 @@ func (s *MySql) OrderSearchId(orderId int64) (*entity.CheckoutParams, error) {
 
 		if err = rows.Scan(
 			&order.OrderId,
-			&order.Created,
+			&order.Created, // replaced by Now()
 			&firstName,
 			&lastName,
 			&client.Email,
@@ -322,6 +323,7 @@ func (s *MySql) OrderSearchId(orderId int64) (*entity.CheckoutParams, error) {
 		// order summary
 		order.Total = int64(math.Round(total * order.CurrencyValue * 100))
 		order.Source = entity.SourceOpenCart
+		order.Created = time.Now().In(s.loc)
 	}
 
 	if err = rows.Err(); err != nil {
