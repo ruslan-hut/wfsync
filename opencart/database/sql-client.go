@@ -110,7 +110,7 @@ func (s *MySql) OrderProducts(orderId int64, currencyValue float64) ([]*entity.L
 		var price float64
 		if err = rows.Scan(
 			&product.Name,
-			&total, //here using the field 'total' - it's calculated with discount
+			&total,
 			&price,
 			&tax,
 			&product.Qty,
@@ -118,11 +118,15 @@ func (s *MySql) OrderProducts(orderId int64, currencyValue float64) ([]*entity.L
 		); err != nil {
 			return nil, err
 		}
-		if product.Qty > 0 && total > 0 {
-			// divide by quantity because 'total' contains row total value
-			//price := (total + tax*float64(product.Qty)) / float64(product.Qty)
-			priceVAT := (total + tax) / float64(product.Qty)
-			//product.Price = int64(math.Round((price + tax) * currencyValue * 100))
+		if product.Qty > 0 && price > 0 {
+			// standard OpenCart logic
+			priceVAT := price + tax
+			// OpenCart module 'OrderPRO' contains defected logic of tax calculation, so try to detect variants
+			vatCheck := tax / price
+			if vatCheck > 0.25 {
+				// 'tax' contains row total VAT
+				priceVAT = price + tax/float64(product.Qty)
+			}
 			product.Price = int64(math.Round(priceVAT * currencyValue * 100))
 			products = append(products, &product)
 		}
