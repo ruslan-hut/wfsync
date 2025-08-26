@@ -491,14 +491,15 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		slog.String("currency", params.Currency),
 	).Info("invoice created")
 
-	if params.Paid {
-		err = c.addPayment(ctx, *invoice)
-		if err != nil {
-			log.Error("add payment",
-				slog.String("wfirma_id", invoice.Id),
-				sl.Err(err))
-		}
-	}
+	// *** payment creation is disabled ***
+	//if params.Paid {
+	//	err = c.addPayment(ctx, *invoice)
+	//	if err != nil {
+	//		log.Error("add payment",
+	//			slog.String("wfirma_id", invoice.Id),
+	//			sl.Err(err))
+	//	}
+	//}
 
 	return payment, nil
 }
