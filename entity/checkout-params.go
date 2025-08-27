@@ -102,17 +102,16 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 	if diff == 0 {
 		return
 	}
-	diffA := absInt64(diff)
 	for _, item := range c.LineItems {
-		if diffA < item.Qty {
+		if absInt64(diff) < item.Qty {
 			continue
 		}
 		if diff < 0 {
 			item.Price--
-			diff = diff - item.Qty
+			diff = diff + item.Qty
 		} else {
 			item.Price++
-			diff = diff + item.Qty
+			diff = diff - item.Qty
 		}
 		if diff == 0 {
 			break
