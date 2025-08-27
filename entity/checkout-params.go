@@ -3,6 +3,7 @@ package entity
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"time"
@@ -91,11 +92,13 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 		return
 	}
 	k := float64(c.Total) / float64(itemsTotal)
+	log.Printf("k=%f; total=%d; lines_total=%d", k, c.Total, itemsTotal)
 	for _, item := range c.LineItems {
 		item.Price = int64(math.Round(float64(item.Price) * k))
 	}
 	itemsTotal = c.ItemsTotal()
 	diff := c.Total - itemsTotal
+	log.Printf("diff=%d", diff)
 	if diff == 0 {
 		return
 	}
@@ -111,6 +114,9 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 			break
 		}
 	}
+	itemsTotal = c.ItemsTotal()
+	diff = c.Total - itemsTotal
+	log.Printf("exit diff=%d", diff)
 }
 
 type LineItem struct {
