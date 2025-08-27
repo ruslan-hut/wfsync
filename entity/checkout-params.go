@@ -3,6 +3,7 @@ package entity
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"time"
 	"wfsync/lib/validate"
@@ -82,147 +83,34 @@ func (c *CheckoutParams) AddShipping(title string, amount int64) {
 }
 
 func (c *CheckoutParams) RecalcWithDiscount() {
-	// Привести сумму по НЕ-shipping строкам к (c.Total - сумма shipping-строк),
-	// распределив скидку/надбавку построчно по товарам, не трогая shipping.
 	if len(c.LineItems) == 0 {
 		return
 	}
-
-	var shippingTotal int64
-	var nonShipIdxs []int
-	var nonShipQtySum int64
-	var nonShipTotal int64
-
-	for i, it := range c.LineItems {
-		if it.Shipping {
-			shippingTotal += it.Price * it.Qty
-			continue
-		}
-		nonShipIdxs = append(nonShipIdxs, i)
-		nonShipQtySum += it.Qty
-		nonShipTotal += it.Price * it.Qty
-	}
-
-	if len(nonShipIdxs) == 0 || nonShipQtySum == 0 {
+	itemsTotal := c.ItemsTotal()
+	if c.Total == itemsTotal || itemsTotal == 0 {
 		return
 	}
-
-	targetNonShip := c.Total - shippingTotal
-	diff := targetNonShip - nonShipTotal
+	k := float64(c.Total) / float64(itemsTotal)
+	for _, item := range c.LineItems {
+		item.Price = int64(math.Round(float64(item.Price) * k))
+	}
+	itemsTotal = c.ItemsTotal()
+	diff := c.Total - itemsTotal
 	if diff == 0 {
 		return
 	}
-
-	// Равномерная базовая корректировка unit-price по количеству.
-	base := diff / nonShipQtySum
-	remainder := diff % nonShipQtySum
-
-	// Применяем base к каждой не-shipping строке (с ограничением price >= 1).
-	for _, idx := range nonShipIdxs {
-		if base == 0 {
-			continue
-		}
-		it := c.LineItems[idx] // ВАЖНО: работаем с указателем
-		newPrice := it.Price + base
-		if newPrice < 1 {
-			// максимально допустимое изменение цены (отрицательное или ноль)
-			appliedDelta := int64(1) - it.Price // ≤ 0
-			it.Price = 1
-			// Неприменённую часть возвращаем в остаток с учётом Qty
-			unappliedDelta := base - appliedDelta // может быть отрицательным или положительным
-			remainder += unappliedDelta * it.Qty
+	for _, item := range c.LineItems {
+		if diff > 0 {
+			item.Price--
+			diff = diff - item.Qty
 		} else {
-			it.Price = newPrice
+			item.Price++
+			diff = diff + item.Qty
+		}
+		if diff == 0 {
+			break
 		}
 	}
-
-	if remainder == 0 {
-		return
-	}
-
-	// Готовим порядок по возрастанию Qty для уменьшения "квантования".
-	type idxQty struct {
-		idx int
-		q   int64
-	}
-	order := make([]idxQty, 0, len(nonShipIdxs))
-	for _, idx := range nonShipIdxs {
-		order = append(order, idxQty{idx: idx, q: c.LineItems[idx].Qty})
-	}
-	// Простая сортировка по возрастанию Qty (без импортов).
-	for i := 0; i < len(order); i++ {
-		for j := i + 1; j < len(order); j++ {
-			if order[j].q < order[i].q {
-				order[i], order[j] = order[j], order[i]
-			}
-		}
-	}
-
-	// До двух проходов: сначала крупными шагами, затем по 1.
-	passes := 0
-	for remainder != 0 && passes < 2 {
-		progress := false
-
-		// Крупные шаги
-		for _, iq := range order {
-			if remainder == 0 {
-				break
-			}
-			it := c.LineItems[iq.idx]
-			q := iq.q
-
-			if remainder > 0 {
-				// +1 к цене даёт +Qty к итогу
-				steps := remainder / q
-				if steps <= 0 {
-					continue
-				}
-				it.Price += steps
-				remainder -= steps * q
-				progress = true
-			} else { // remainder < 0
-				// -1 к цене даёт -Qty к итогу, но не ниже 1
-				maxDec := it.Price - 1
-				if maxDec <= 0 {
-					continue
-				}
-				needed := (-remainder) / q
-				if needed <= 0 {
-					continue
-				}
-				if needed > maxDec {
-					needed = maxDec
-				}
-				it.Price -= needed
-				remainder += needed * q
-				progress = true
-			}
-		}
-
-		// Одиночные шаги, если крупными не продвинулись
-		if !progress {
-			for _, iq := range order {
-				if remainder == 0 {
-					break
-				}
-				it := c.LineItems[iq.idx]
-				q := iq.q
-
-				if remainder > 0 {
-					it.Price += 1
-					remainder -= q
-				} else {
-					if it.Price > 1 {
-						it.Price -= 1
-						remainder += q
-					}
-				}
-			}
-		}
-		passes++
-	}
-
-	// Если remainder != 0 — точное совпадение недостижимо при данных Qty и ограничении price>=1.
 }
 
 type LineItem struct {
