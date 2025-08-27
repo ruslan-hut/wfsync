@@ -92,7 +92,7 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 		return
 	}
 	k := float64(c.Total) / float64(itemsTotal)
-	log.Printf("k=%f; total=%d; lines_total=%d", k, c.Total, itemsTotal)
+	log.Printf("--- start k=%f; total=%d; lines_total=%d", k, c.Total, itemsTotal)
 	for _, item := range c.LineItems {
 		item.Price = int64(math.Round(float64(item.Price) * k))
 	}
@@ -102,7 +102,11 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 	if diff == 0 {
 		return
 	}
+	diffA := absInt64(diff)
 	for _, item := range c.LineItems {
+		if diffA < item.Qty {
+			continue
+		}
 		if diff < 0 {
 			item.Price--
 			diff = diff - item.Qty
@@ -116,7 +120,7 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 	}
 	itemsTotal = c.ItemsTotal()
 	diff = c.Total - itemsTotal
-	log.Printf("exit diff=%d", diff)
+	log.Printf("--- exit diff=%d", diff)
 }
 
 type LineItem struct {
@@ -290,4 +294,11 @@ func NewFromInvoice(inv *stripe.Invoice) *CheckoutParams {
 		params.OrderId = inv.ID
 	}
 	return params
+}
+
+func absInt64(i int64) int64 {
+	if i < 0 {
+		return -i
+	}
+	return i
 }
