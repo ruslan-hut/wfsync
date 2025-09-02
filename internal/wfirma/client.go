@@ -131,6 +131,11 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 		taxIdType = "custom"
 	}
 
+	countryCode := customer.CountryCode()
+	if countryCode == "PL" {
+		customer.ZipCode = customer.NormalizeZipCode()
+	}
+
 	// If not found, create a new contractor.
 	payload := map[string]interface{}{
 		"api": map[string]interface{}{
@@ -139,7 +144,7 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 					"contractor": map[string]interface{}{
 						"name":        customer.Name,
 						"email":       customer.Email,
-						"country":     customer.CountryCode(),
+						"country":     countryCode,
 						"zip":         customer.ZipCode,
 						"city":        customer.City,
 						"street":      customer.Street,
@@ -314,12 +319,12 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string,
 		return "", nil, fmt.Errorf("create file: %w", err)
 	}
 	if _, err = io.Copy(f, resp.Body); err != nil {
-		f.Close()
+		_ = f.Close()
 		resp.Body.Close()
-		os.Remove(filePath)
+		_ = os.Remove(filePath)
 		return "", nil, fmt.Errorf("save file: %w", err)
 	}
-	f.Close()
+	_ = f.Close()
 	resp.Body.Close()
 
 	log.With(

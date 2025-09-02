@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
+	"unicode"
 	"wfsync/lib/validate"
 
 	"github.com/biter777/countries"
@@ -164,6 +167,34 @@ func (c *ClientDetails) CountryCode() string {
 		return code
 	}
 	return ""
+}
+
+func (c *ClientDetails) NormalizeZipCode() string {
+	// Проверка на формат 00-000
+	match, _ := regexp.MatchString(`^\d{2}-\d{3}$`, c.ZipCode)
+	if match {
+		return c.ZipCode
+	}
+
+	// Достаем только цифры
+	var digits strings.Builder
+	for _, r := range c.ZipCode {
+		if unicode.IsDigit(r) {
+			digits.WriteRune(r)
+		}
+	}
+
+	code := digits.String()
+
+	// Дополняем/обрезаем до 5 символов
+	if len(code) < 5 {
+		code = strings.Repeat("0", 5-len(code)) + code
+	} else if len(code) > 5 {
+		code = code[:5]
+	}
+
+	// Преобразуем к виду 00-000
+	return code[:2] + "-" + code[2:]
 }
 
 // ParseTaxId extracts a tax ID from a JSON-formatted string based on the given field ID and assigns it to the ClientDetails.
