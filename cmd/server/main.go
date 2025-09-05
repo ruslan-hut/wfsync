@@ -55,6 +55,8 @@ func main() {
 			go func() {
 				if err = tgBot.Start(); err != nil {
 					log.Error("telegram bot", sl.Err(err))
+				} else {
+					log.Info("telegram bot started")
 				}
 			}()
 		}
