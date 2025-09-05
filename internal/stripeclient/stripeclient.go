@@ -257,6 +257,7 @@ func (s *StripeClient) PayAmount(params *entity.CheckoutParams) (*entity.Payment
 	if params.ClientDetails.Email == "" {
 		return nil, fmt.Errorf("missing email address")
 	}
+	log = log.With(slog.String("email", params.ClientDetails.Email))
 
 	csParams := s.sessionParamsFromCheckout(params)
 
