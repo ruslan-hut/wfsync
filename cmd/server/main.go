@@ -50,15 +50,13 @@ func main() {
 		} else {
 			// Set up Telegram handler for the logger
 			log = logger.SetupTelegramHandler(log, tgBot, slog.LevelDebug)
-
 			// Start the bot in a goroutine
 			go func() {
 				if err = tgBot.Start(); err != nil {
 					log.Error("telegram bot", sl.Err(err))
-				} else {
-					log.Info("telegram bot started")
 				}
 			}()
+			log.Info("telegram bot started")
 		}
 	}
 

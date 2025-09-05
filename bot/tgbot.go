@@ -2,14 +2,15 @@ package bot
 
 import (
 	"fmt"
-	tgbotapi "github.com/PaulSonOfLars/gotgbot/v2"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext"
-	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
 	"log/slog"
 	"strings"
 	"time"
 	"wfsync/entity"
 	"wfsync/lib/sl"
+
+	tgbotapi "github.com/PaulSonOfLars/gotgbot/v2"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
 )
 
 type Database interface {
