@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 	"wfsync/entity"
 	"wfsync/internal/config"
@@ -87,14 +88,18 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 	}
 	// try to read invoice items from the site database
 	if c.oc != nil && params.OrderId != "" {
-		items, err := c.oc.OrderLines(params.OrderId)
+		orderId, _ := strconv.ParseInt(params.OrderId, 10, 64)
+		order, err := c.oc.GetOrder(orderId)
 		if err != nil {
 			c.log.With(
 				sl.Err(err),
-			).Error("get order lines")
+			).Error("get order")
 		}
-		if items != nil && len(items) > 0 {
-			params.LineItems = items
+		if order != nil && len(order.LineItems) > 0 {
+			params.LineItems = order.LineItems
+			// tax parameters needed for invoice calculation in Wfirma
+			params.TaxValue = order.TaxValue
+			params.TaxTitle = order.TaxTitle
 		}
 	}
 	// register new invoice
