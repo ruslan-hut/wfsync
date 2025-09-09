@@ -19,6 +19,7 @@ type Content struct {
 	Count int64   `json:"count" bson:"count"`
 	Price float64 `json:"price" bson:"price"`
 	Unit  string  `json:"unit" bson:"unit"`
+	Vat   int     `json:"vat" bson:"vat"` // vat in percents: 0%, 23%
 }
 
 type ContentLine struct {

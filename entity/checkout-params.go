@@ -28,6 +28,8 @@ type CheckoutParams struct {
 	LineItems     []*LineItem    `json:"line_items" bson:"line_items" validate:"required,min=1,dive"`
 	Total         int64          `json:"total" bson:"total" validate:"required,min=1"`
 	Shipping      int64          `json:"shipping,omitempty" bson:"shipping,omitempty"`
+	TaxTitle      string         `json:"tax_title,omitempty" bson:"tax_title,omitempty"`
+	TaxValue      int64          `json:"tax_value,omitempty" bson:"tax_value,omitempty"`
 	Currency      string         `json:"currency" bson:"currency" validate:"required,oneof=PLN EUR"`
 	CurrencyValue float64        `json:"currency_value,omitempty" bson:"currency_value,omitempty"`
 	OrderId       string         `json:"order_id" bson:"order_id" validate:"required,min=1,max=32"`
@@ -119,6 +121,15 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 	}
 	itemsTotal = c.ItemsTotal()
 	diff = c.Total - itemsTotal
+}
+
+// TaxRate determines the tax rate based on the TaxValue field. Returns 23 if TaxValue is non-zero, otherwise returns 0.
+func (c *CheckoutParams) TaxRate() int {
+	if c.TaxValue == 0 {
+		return 0
+	} else {
+		return 23
+	}
 }
 
 type LineItem struct {

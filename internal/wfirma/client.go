@@ -397,6 +397,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 				Count: line.Qty,
 				Price: float64(line.Price) / 100.0,
 				Unit:  "szt.",
+				Vat:   params.TaxRate(),
 			},
 		})
 	}
@@ -490,6 +491,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		slog.String("wfirma_number", resultInvoice.Number),
 		slog.String("order_id", params.OrderId),
 		slog.String("total", fmt.Sprintf("%.2f", total)),
+		slog.String("tax", params.TaxTitle),
 		slog.String("email", params.ClientDetails.Email),
 		slog.String("name", params.ClientDetails.Name),
 		slog.String("country", params.ClientDetails.Country),

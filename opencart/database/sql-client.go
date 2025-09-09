@@ -15,8 +15,8 @@ import (
 
 const (
 	totalCodeShipping = "shipping"
-	totalCodeDiscount = "discount"
-	//totalCodeTax      = "tax"
+	//totalCodeDiscount = "discount"
+	totalCodeTax = "tax"
 	//totalCodeTotal    = "total"
 )
 
@@ -91,7 +91,7 @@ func (s *MySql) Close() {
 	_ = s.db.Close()
 }
 
-func (s *MySql) OrderProducts(orderId int64, currencyValue float64) ([]*entity.LineItem, error) {
+func (s *MySql) OrderProducts(orderId int64, currencyValue float64, ignoreTax bool) ([]*entity.LineItem, error) {
 	stmt, err := s.stmtSelectOrderProducts()
 	if err != nil {
 		return nil, err
@@ -118,6 +118,9 @@ func (s *MySql) OrderProducts(orderId int64, currencyValue float64) ([]*entity.L
 		); err != nil {
 			return nil, err
 		}
+		if ignoreTax {
+			tax = 0
+		}
 		if product.Qty > 0 && price > 0 {
 			// standard OpenCart logic
 			priceVAT := price + tax
@@ -139,23 +142,23 @@ func (s *MySql) OrderProducts(orderId int64, currencyValue float64) ([]*entity.L
 	return products, nil
 }
 
-func (s *MySql) OrderShipping(orderId int64, currencyValue float64) (string, int64, error) {
+func (s *MySql) OrderTotal(orderId int64, code string, currencyValue float64) (string, int64, error) {
 	stmt, err := s.stmtSelectOrderTotals()
 	if err != nil {
 		return "", 0, err
 	}
-	rows, err := stmt.Query(orderId, totalCodeShipping)
+	rows, err := stmt.Query(orderId, code)
 	if err != nil {
 		return "", 0, err
 	}
 	defer rows.Close()
 
 	var title string
-	var shipping float64
+	var value float64
 	for rows.Next() {
 		if err = rows.Scan(
 			&title,
-			&shipping,
+			&value,
 		); err != nil {
 			return "", 0, err
 		}
@@ -165,36 +168,7 @@ func (s *MySql) OrderShipping(orderId int64, currencyValue float64) (string, int
 		return "", 0, err
 	}
 
-	return title, int64(math.Round(shipping * currencyValue * 100)), nil
-}
-
-func (s *MySql) OrderDiscount(orderId int64, currencyValue float64) (int64, error) {
-	stmt, err := s.stmtSelectOrderTotals()
-	if err != nil {
-		return 0, err
-	}
-	rows, err := stmt.Query(orderId, totalCodeDiscount)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-
-	var title string
-	var discount float64
-	for rows.Next() {
-		if err = rows.Scan(
-			&title,
-			&discount,
-		); err != nil {
-			return 0, err
-		}
-	}
-
-	if err = rows.Err(); err != nil {
-		return 0, err
-	}
-
-	return int64(math.Round(discount * currencyValue * 100)), nil
+	return title, int64(math.Round(value * currencyValue * 100)), nil
 }
 
 func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error) {
@@ -262,18 +236,10 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 		if err != nil {
 			return nil, fmt.Errorf("invalid order id: %s", order.OrderId)
 		}
-		order.LineItems, err = s.OrderProducts(id, order.CurrencyValue)
+		_, err = s.addOrderData(id, order)
 		if err != nil {
-			return nil, fmt.Errorf("get order products: %w", err)
+			return nil, fmt.Errorf("add order data: %w", err)
 		}
-		title, value, err := s.OrderShipping(id, order.CurrencyValue)
-		if err != nil {
-			return nil, fmt.Errorf("get order shipping: %w", err)
-		}
-		if value > 0 {
-			order.AddShipping(title, value)
-		}
-		order.RecalcWithDiscount()
 	}
 
 	return orders, nil
@@ -335,12 +301,24 @@ func (s *MySql) OrderSearchId(orderId int64) (*entity.CheckoutParams, error) {
 		return nil, err
 	}
 
+	return s.addOrderData(orderId, &order)
+}
+
+// addOrderData retrieves and calculates tax, line items, and shipping costs for a specific order and updates its details.
+func (s *MySql) addOrderData(orderId int64, order *entity.CheckoutParams) (*entity.CheckoutParams, error) {
+	var err error
+	// before adding line items and shipping costs to each order, get order tax
+	order.TaxTitle, order.TaxValue, err = s.OrderTotal(orderId, totalCodeTax, order.CurrencyValue)
+	if err != nil {
+		return nil, fmt.Errorf("get order tax: %w", err)
+	}
+
 	// add line items and shipping costs to each order
-	order.LineItems, err = s.OrderProducts(orderId, order.CurrencyValue)
+	order.LineItems, err = s.OrderProducts(orderId, order.CurrencyValue, order.TaxValue == 0)
 	if err != nil {
 		return nil, fmt.Errorf("get order products: %w", err)
 	}
-	title, value, err := s.OrderShipping(orderId, order.CurrencyValue)
+	title, value, err := s.OrderTotal(orderId, totalCodeShipping, order.CurrencyValue)
 	if err != nil {
 		return nil, fmt.Errorf("get order shipping: %w", err)
 	}
@@ -349,7 +327,7 @@ func (s *MySql) OrderSearchId(orderId int64) (*entity.CheckoutParams, error) {
 	}
 	order.RecalcWithDiscount()
 
-	return &order, nil
+	return order, nil
 }
 
 func (s *MySql) ChangeOrderStatus(orderId int64, orderStatusId int, comment string) error {
