@@ -3,12 +3,13 @@ package stripehandler
 import (
 	"context"
 	"encoding/json"
-	"github.com/stripe/stripe-go/v76"
 	"io"
 	"log/slog"
 	"net/http"
 	"time"
 	"wfsync/lib/sl"
+
+	"github.com/stripe/stripe-go/v76"
 )
 
 type Core interface {

@@ -150,8 +150,8 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 			continue
 		}
 
-		// control order total and try to refine if needed
 		linesTotal := order.ItemsTotal()
+		// warn if the order total does not match a sum of line items (for debugging)
 		if order.Total != linesTotal {
 			log.With(
 				slog.String("order_id", order.OrderId),
@@ -159,12 +159,6 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 				slog.Int64("lines_total", linesTotal),
 				slog.Int64("diff", order.Total-linesTotal),
 			).Warn("order total mismatch")
-			//err = order.RefineTotal(0)
-			//if err != nil {
-			//	log.With(
-			//		sl.Err(err),
-			//	).Warn("refine order total")
-			//}
 		}
 
 		orderId, err := strconv.ParseInt(order.OrderId, 10, 64)

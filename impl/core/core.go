@@ -82,10 +82,12 @@ func (c *Core) StripeVerifySignature(payload []byte, header string, tolerance ti
 }
 
 func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
+	// create checkout params from the stripe event
 	params := c.sc.HandleEvent(evt)
 	if params == nil {
 		return
 	}
+
 	// try to read invoice items from the site database
 	if c.oc != nil && params.OrderId != "" {
 		orderId, _ := strconv.ParseInt(params.OrderId, 10, 64)
@@ -102,6 +104,7 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 			params.TaxTitle = order.TaxTitle
 		}
 	}
+
 	// register new invoice
 	payment, err := c.inv.RegisterInvoice(ctx, params)
 	if err != nil {
