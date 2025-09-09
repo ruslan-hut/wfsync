@@ -164,6 +164,19 @@ func (m *MongoDB) UpdateCheckoutParams(params *entity.CheckoutParams) error {
 	return err
 }
 
+func (m *MongoDB) GetCheckoutParamsForEvent(eventId string) (*entity.CheckoutParams, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
+	filter := bson.D{{"event_id", eventId}}
+	var params entity.CheckoutParams
+	err = collection.FindOne(m.ctx, filter).Decode(&params)
+	return &params, err
+}
+
 func (m *MongoDB) SaveInvoice(id string, invoice interface{}) error {
 	connection, err := m.connect()
 	if err != nil {

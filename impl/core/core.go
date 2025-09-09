@@ -105,6 +105,14 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 		}
 	}
 
+	if params.InvoiceId != "" {
+		c.log.With(
+			slog.String("invoice_id", params.InvoiceId),
+			slog.String("order_id", params.OrderId),
+		).Warn("invoice already registered")
+		return
+	}
+
 	// register new invoice
 	payment, err := c.inv.RegisterInvoice(ctx, params)
 	if err != nil {

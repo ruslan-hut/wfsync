@@ -28,8 +28,8 @@ type CheckoutParams struct {
 	LineItems     []*LineItem    `json:"line_items" bson:"line_items" validate:"required,min=1,dive"`
 	Total         int64          `json:"total" bson:"total" validate:"required,min=1"`
 	Shipping      int64          `json:"shipping,omitempty" bson:"shipping,omitempty"`
-	TaxTitle      string         `json:"tax_title,omitempty" bson:"tax_title,omitempty"`
-	TaxValue      int64          `json:"tax_value,omitempty" bson:"tax_value,omitempty"`
+	TaxTitle      string         `json:"tax_title" bson:"tax_title"`
+	TaxValue      int64          `json:"tax_value" bson:"tax_value"`
 	Currency      string         `json:"currency" bson:"currency" validate:"required,oneof=PLN EUR"`
 	CurrencyValue float64        `json:"currency_value,omitempty" bson:"currency_value,omitempty"`
 	OrderId       string         `json:"order_id" bson:"order_id" validate:"required,min=1,max=32"`
@@ -38,6 +38,7 @@ type CheckoutParams struct {
 	Closed        time.Time      `json:"closed,omitempty" bson:"closed"`
 	Status        string         `json:"status" bson:"status"`
 	SessionId     string         `json:"session_id,omitempty" bson:"session_id,omitempty"`
+	EventId       string         `json:"event_id,omitempty" bson:"event_id,omitempty"`
 	InvoiceId     string         `json:"invoice_id,omitempty" bson:"invoice_id,omitempty"`
 	InvoiceFile   string         `json:"invoice_file,omitempty" bson:"invoice_file,omitempty"`
 	ProformaId    string         `json:"proforma_id,omitempty" bson:"proforma_id,omitempty"`

@@ -21,6 +21,7 @@ import (
 type Database interface {
 	Save(key string, value interface{}) error
 	SaveCheckoutParams(params *entity.CheckoutParams) error
+	GetCheckoutParamsForEvent(eventId string) (*entity.CheckoutParams, error)
 }
 
 type StripeClient struct {
@@ -119,6 +120,14 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 		slog.String("session_id", invID),
 	)
 
+	params, _ := s.db.GetCheckoutParamsForEvent(invID)
+	if params != nil {
+		log.With(
+			slog.String("order_id", params.OrderId),
+		).Info("checkout params found in database")
+		return params
+	}
+
 	sess, err := s.sc.CheckoutSessions.Get(invID, &stripe.CheckoutSessionParams{
 		Expand: []*string{
 			stripe.String("line_items"),
@@ -139,7 +148,10 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 
 	s.checkCustomer(sess)
 
-	return entity.NewFromCheckoutSession(sess)
+	params = entity.NewFromCheckoutSession(sess)
+	params.EventId = invID
+
+	return params
 }
 
 func (s *StripeClient) handleInvoiceFinalized(evt *stripe.Event) *entity.CheckoutParams {
