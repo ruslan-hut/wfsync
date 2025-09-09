@@ -104,15 +104,13 @@ func (oc *Opencart) OrderLines(orderId string) ([]*entity.LineItem, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid order id: %s", orderId)
 	}
-	items, err := oc.db.OrderProducts(id, 1.0)
+
+	order, err := oc.db.OrderSearchId(id)
 	if err != nil {
 		return nil, fmt.Errorf("database query: %w", err)
 	}
-	title, value, err := oc.db.OrderShipping(id, 1.0)
-	if value > 0 {
-		items = append(items, entity.ShippingLineItem(title, value))
-	}
-	return items, nil
+
+	return order.LineItems, nil
 }
 
 func (oc *Opencart) ProcessOrders() {
