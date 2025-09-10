@@ -104,7 +104,9 @@ func (m *MongoDB) GetTelegramUsers() ([]*entity.User, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(m.ctx)
+	defer func(cursor *mongo.Cursor, ctx context.Context) {
+		_ = cursor.Close(ctx)
+	}(cursor, m.ctx)
 
 	var users []*entity.User
 	err = cursor.All(m.ctx, &users)
@@ -174,7 +176,10 @@ func (m *MongoDB) GetCheckoutParamsForEvent(eventId string) (*entity.CheckoutPar
 	filter := bson.D{{"event_id", eventId}}
 	var params entity.CheckoutParams
 	err = collection.FindOne(m.ctx, filter).Decode(&params)
-	return &params, err
+	if err != nil {
+		return nil, err
+	}
+	return &params, nil
 }
 
 func (m *MongoDB) SaveInvoice(id string, invoice interface{}) error {
