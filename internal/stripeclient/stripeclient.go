@@ -117,10 +117,11 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 	invID := evt.GetObjectValue("id")
 	log := s.log.With(
 		slog.Any("event_type", evt.Type),
+		slog.String("event_id", evt.ID),
 		slog.String("session_id", invID),
 	)
 
-	params, _ := s.db.GetCheckoutParamsForEvent(invID)
+	params, _ := s.db.GetCheckoutParamsForEvent(evt.ID)
 	if params != nil {
 		log.With(
 			slog.String("order_id", params.OrderId),
@@ -149,7 +150,7 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 	s.checkCustomer(sess)
 
 	params = entity.NewFromCheckoutSession(sess)
-	params.EventId = invID
+	params.EventId = evt.ID
 
 	return params
 }

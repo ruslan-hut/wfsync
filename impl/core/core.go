@@ -105,10 +105,11 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 		}
 	}
 
-	if params.InvoiceId != "" {
+	if params.InvoiceId != "" && params.OrderId != "" {
 		c.log.With(
 			slog.String("invoice_id", params.InvoiceId),
 			slog.String("order_id", params.OrderId),
+			slog.String("event_id", evt.ID),
 		).Warn("invoice already registered")
 		return
 	}
