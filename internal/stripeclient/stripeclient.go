@@ -122,7 +122,7 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 	)
 
 	params, _ := s.db.GetCheckoutParamsForEvent(evt.ID)
-	if params != nil {
+	if params != nil && params.OrderId != "" {
 		log.With(
 			slog.String("order_id", params.OrderId),
 		).Info("checkout params found in database")
