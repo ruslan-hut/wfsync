@@ -96,8 +96,11 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 	if c.Total == itemsTotal || itemsTotal == 0 {
 		return
 	}
-	k := float64(c.Total) / float64(itemsTotal)
+	k := float64(c.Total-c.Shipping) / float64(itemsTotal-c.Shipping)
 	for _, item := range c.LineItems {
+		if item.Shipping {
+			continue
+		}
 		item.Price = int64(math.Round(float64(item.Price) * k))
 	}
 	itemsTotal = c.ItemsTotal()
@@ -106,6 +109,9 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 		return
 	}
 	for _, item := range c.LineItems {
+		if item.Shipping {
+			continue
+		}
 		if absInt64(diff) < item.Qty {
 			continue
 		}
