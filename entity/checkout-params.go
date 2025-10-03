@@ -130,12 +130,12 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 	diff = c.Total - itemsTotal
 }
 
-// TaxRate determines the tax rate based on the TaxValue field. Returns 23 if TaxValue is non-zero, otherwise returns 0.
+// TaxRate calculates the tax rate as a percentage based on the tax value and total amount. Returns 0 if not applicable.
 func (c *CheckoutParams) TaxRate() int {
-	if c.TaxValue == 0 {
+	if c.TaxValue == 0 || c.Total <= c.TaxValue {
 		return 0
 	} else {
-		return 23
+		return int(c.TaxValue * 100 / (c.Total - c.TaxValue))
 	}
 }
 

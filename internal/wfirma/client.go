@@ -389,6 +389,8 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		ID: contractorID,
 	}
 
+	vat := params.TaxRate()
+
 	var contents []*ContentLine
 	for _, line := range params.LineItems {
 		contents = append(contents, &ContentLine{
@@ -397,7 +399,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 				Count: line.Qty,
 				Price: float64(line.Price) / 100.0,
 				Unit:  "szt.",
-				Vat:   params.TaxRate(),
+				Vat:   vat,
 			},
 		})
 	}
