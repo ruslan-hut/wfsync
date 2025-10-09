@@ -33,21 +33,6 @@ func Download(logger *slog.Logger, handler Core) http.HandlerFunc {
 			slog.String("invoice_id", invoiceId),
 		)
 
-		user := cont.GetUser(r.Context())
-		if user == nil {
-			log.Error("user not found")
-			render.Status(r, 401)
-			render.JSON(w, r, response.Error("User not found"))
-			return
-		}
-
-		if user.WFirmaAllowInvoice == false {
-			log.Error("invoice not allowed")
-			render.Status(r, 403)
-			render.JSON(w, r, response.Error("Invoice not allowed"))
-			return
-		}
-
 		if handler == nil {
 			log.Error("invoice service not available")
 			render.JSON(w, r, response.Error("Invoice search not available"))
@@ -91,6 +76,21 @@ func OrderToInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 			slog.String("request_id", middleware.GetReqID(r.Context())),
 			slog.String("order_id", orderId),
 		)
+
+		user := cont.GetUser(r.Context())
+		if user == nil {
+			log.Error("user not found")
+			render.Status(r, 401)
+			render.JSON(w, r, response.Error("User not found"))
+			return
+		}
+
+		if user.WFirmaAllowInvoice == false {
+			log.Error("invoice not allowed")
+			render.Status(r, 403)
+			render.JSON(w, r, response.Error("Invoice not allowed"))
+			return
+		}
 
 		if handler == nil {
 			log.Error("invoice service not available")
