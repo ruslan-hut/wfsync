@@ -107,7 +107,7 @@ func Capture(log *slog.Logger, handler Core) http.HandlerFunc {
 			slog.Int64("amount", pm.Amount),
 		).Debug("amount captured")
 
-		render.JSON(w, r, response.Ok(nil))
+		render.JSON(w, r, response.Ok(pm))
 	}
 }
 
