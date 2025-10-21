@@ -289,6 +289,14 @@ func (c *Core) StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment,
 	return c.sc.HoldAmount(params)
 }
 
+func (c *Core) StripeCaptureAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
+	err := params.Validate()
+	if err != nil {
+		return nil, err
+	}
+	return c.sc.CaptureAmount(params)
+}
+
 func (c *Core) StripePayAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
 	err := params.Validate()
 	if err != nil {

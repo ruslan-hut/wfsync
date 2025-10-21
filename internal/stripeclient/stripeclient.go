@@ -222,10 +222,7 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 	cs, err := s.sc.CheckoutSessions.New(csParams)
 	if err != nil {
 		err = s.parseErr(err)
-		log.With(
-			sl.Err(err),
-		).Error("create checkout session")
-		return nil, fmt.Errorf("create checkout session: %w", err)
+		return nil, fmt.Errorf("stripe response: %w", err)
 	}
 	//log = log.With(slog.String("session_id", cs.ID))
 
@@ -241,6 +238,41 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 	}
 
 	log.Info("hold link created")
+	return payment, nil
+}
+
+func (s *StripeClient) CaptureAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
+	log := s.log.With(
+		slog.Int64("total", params.Total),
+		slog.String("currency", params.Currency),
+		slog.String("order_id", params.OrderId),
+	)
+	defer func() {
+		err := s.db.SaveCheckoutParams(params)
+		if err != nil {
+			s.log.With(
+				sl.Err(err),
+			).Error("save checkout params to database")
+		}
+	}()
+
+	captureParams := &stripe.PaymentIntentCaptureParams{
+		AmountToCapture: stripe.Int64(params.Total),
+	}
+
+	result, err := s.sc.PaymentIntents.Capture(params.PaymentId, captureParams)
+	if err != nil {
+		err = s.parseErr(err)
+		return nil, fmt.Errorf("stripe response: %w", err)
+	}
+
+	payment := &entity.Payment{
+		Id:      result.ID,
+		OrderId: params.OrderId,
+		Amount:  result.Amount,
+	}
+
+	log.Info("capture amount successful")
 	return payment, nil
 }
 

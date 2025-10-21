@@ -38,6 +38,7 @@ type CheckoutParams struct {
 	Closed        time.Time      `json:"closed,omitempty" bson:"closed"`
 	Status        string         `json:"status" bson:"status"`
 	SessionId     string         `json:"session_id,omitempty" bson:"session_id,omitempty"`
+	PaymentId     string         `json:"payment_id,omitempty" bson:"payment_id,omitempty"`
 	EventId       string         `json:"event_id,omitempty" bson:"event_id,omitempty"`
 	InvoiceId     string         `json:"invoice_id,omitempty" bson:"invoice_id,omitempty"`
 	InvoiceFile   string         `json:"invoice_file,omitempty" bson:"invoice_file,omitempty"`

@@ -2,18 +2,20 @@ package payment
 
 import (
 	"fmt"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/render"
 	"log/slog"
 	"net/http"
 	"wfsync/entity"
 	"wfsync/lib/api/response"
 	"wfsync/lib/sl"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/render"
 )
 
 type Core interface {
 	StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment, error)
+	StripeCaptureAmount(params *entity.CheckoutParams) (*entity.Payment, error)
 	StripePayAmount(params *entity.CheckoutParams) (*entity.Payment, error)
 }
 
@@ -53,6 +55,7 @@ func Hold(log *slog.Logger, handler Core) http.HandlerFunc {
 
 		pm, err := handler.StripeHoldAmount(&checkoutParams)
 		if err != nil {
+			logger.Error("hold amount", sl.Err(err))
 			render.Status(r, 400)
 			render.JSON(w, r, response.Error(fmt.Sprintf("Get link: %v", err)))
 			return
@@ -91,14 +94,18 @@ func Capture(log *slog.Logger, handler Core) http.HandlerFunc {
 			slog.Int64("total", checkoutParams.Total),
 		)
 
-		//pm, err := handler.StripeHoldAmount(&checkoutParams)
-		//if err != nil {
-		//	logger.Error("get payment link", sl.Err(err))
-		//	render.Status(r, 400)
-		//	render.JSON(w, r, response.Error(fmt.Sprintf("Get link: %v", err)))
-		//	return
-		//}
-		logger.Debug("payment captured")
+		checkoutParams.PaymentId = id
+
+		pm, err := handler.StripeCaptureAmount(&checkoutParams)
+		if err != nil {
+			logger.Error("capture amount", sl.Err(err))
+			render.Status(r, 400)
+			render.JSON(w, r, response.Error(fmt.Sprintf("Capture: %v", err)))
+			return
+		}
+		logger.With(
+			slog.Int64("amount", pm.Amount),
+		).Debug("amount captured")
 
 		render.JSON(w, r, response.Ok(nil))
 	}
