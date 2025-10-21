@@ -33,7 +33,7 @@ API response always has the following structure
 
 - `POST /v1/st/hold` - Create a payment hold in Stripe
 - `POST /v1/st/pay` - Create a direct payment in Stripe
-- `POST /v1/st/capture/{id}` - Capture a previously held payment (see details below)
+- `POST /v1/st/capture/{id}` - Capture a previously held payment
 - `POST /v1/st/cancel/{id}` - Cancel a payment
 
 ### Public Endpoints
