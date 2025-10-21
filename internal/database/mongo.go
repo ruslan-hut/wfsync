@@ -182,6 +182,22 @@ func (m *MongoDB) GetCheckoutParamsForEvent(eventId string) (*entity.CheckoutPar
 	return &params, nil
 }
 
+func (m *MongoDB) GetCheckoutParamsSession(sessionId string) (*entity.CheckoutParams, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
+	filter := bson.D{{"session_id", sessionId}}
+	var params entity.CheckoutParams
+	err = collection.FindOne(m.ctx, filter).Decode(&params)
+	if err != nil {
+		return nil, err
+	}
+	return &params, nil
+}
+
 func (m *MongoDB) SaveInvoice(id string, invoice interface{}) error {
 	connection, err := m.connect()
 	if err != nil {

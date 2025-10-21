@@ -15,7 +15,7 @@ import (
 
 type Core interface {
 	StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment, error)
-	StripeCaptureAmount(params *entity.CheckoutParams) (*entity.Payment, error)
+	StripeCaptureAmount(sessionId string, amount int64) (*entity.Payment, error)
 	StripePayAmount(params *entity.CheckoutParams) (*entity.Payment, error)
 }
 
@@ -74,8 +74,20 @@ func Capture(log *slog.Logger, handler Core) http.HandlerFunc {
 		logger := log.With(
 			mod,
 			slog.String("request_id", middleware.GetReqID(r.Context())),
-			slog.String("payment_id", id),
+			slog.String("session_id", id),
 		)
+
+		//amountStr := r.URL.Query().Get("amount")
+		//var amount int64
+		//if amountStr != "" {
+		//	v, err := strconv.ParseInt(amountStr, 10, 64)
+		//	if err != nil || v < 0 {
+		//		render.Status(r, 400)
+		//		render.JSON(w, r, response.Error(fmt.Sprintf("Invalid amount: %v", err)))
+		//		return
+		//	}
+		//	amount = v
+		//}
 
 		if handler == nil {
 			logger.Error("stripe service not available")
@@ -91,21 +103,17 @@ func Capture(log *slog.Logger, handler Core) http.HandlerFunc {
 			return
 		}
 		logger = logger.With(
-			slog.Int64("total", checkoutParams.Total),
+			slog.Int64("amount", checkoutParams.Total),
 		)
 
-		checkoutParams.PaymentId = id
-
-		pm, err := handler.StripeCaptureAmount(&checkoutParams)
+		pm, err := handler.StripeCaptureAmount(id, checkoutParams.Total)
 		if err != nil {
 			logger.Error("capture amount", sl.Err(err))
 			render.Status(r, 400)
 			render.JSON(w, r, response.Error(fmt.Sprintf("Capture: %v", err)))
 			return
 		}
-		logger.With(
-			slog.Int64("amount", pm.Amount),
-		).Debug("amount captured")
+		logger.Debug("amount captured")
 
 		render.JSON(w, r, response.Ok(pm))
 	}

@@ -285,6 +285,9 @@ func NewFromCheckoutSession(sess *stripe.CheckoutSession) *CheckoutParams {
 	if params.OrderId == "" {
 		params.OrderId = sess.ID
 	}
+	if sess.PaymentIntent != nil {
+		params.PaymentId = sess.PaymentIntent.ID
+	}
 	return params
 }
 

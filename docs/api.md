@@ -87,48 +87,61 @@ Response on Successful Payment Creation
 ### Capture a Held Payment
 
 - Endpoint: `POST /v1/st/capture/{id}`
-- Description: Capture the funds from a previously authorized (held) Stripe payment.
+- Description: Capture funds for a previously authorized (held) payment created via Stripe Checkout in manual-capture mode.
 - Path parameter:
-  - `id` — Stripe PaymentIntent ID (format: `pi_...`). Note: this is NOT the Checkout Session ID.
-- Authentication: required (send Bearer token in Authorization header).
+  - `id` — Stripe Checkout Session ID (format `cs_...`).
+- Authentication: required (send Bearer token in the Authorization header).
+
+How it works
+
+- The API looks up your original checkout record in the database by the provided Checkout Session ID (`cs_...`).
+- That record is written when you created the hold (`POST /v1/st/hold`) and later enriched when your Stripe webhook processes `checkout.session.completed` (it stores the `payment_id` for capture).
+- The handler captures against the stored Stripe PaymentIntent ID (`pi_...`).
 
 Request body
 
-The body uses the same schema as payment creation and must pass validation. For capture, only these fields affect processing:
-- `total` — amount to capture in the smallest currency unit (e.g., cents). Can be equal to or less than the authorized amount to perform a partial capture.
-- `order_id` — your internal order identifier, saved for bookkeeping.
+The body uses the same schema as payment creation and must pass validation. During capture, only the `total` is used for the capture amount; the other fields are validated but ignored by the capture logic.
 
-Other fields are required by validation and should mirror the original authorization context:
-- `currency` — must match the currency of the original authorization (one of: PLN, EUR).
-- `client_details`, `line_items`, `success_url` — included for validation; not used during capture.
+- Required fields (validation):
+  - `client_details` — object
+  - `line_items` — non-empty array
+  - `total` — integer > 0; amount to capture in the smallest currency unit (e.g., cents)
+  - `currency` — one of: `PLN`, `EUR` (validated but not used during capture)
+  - `order_id` — string (persisted for bookkeeping)
+  - `success_url` — URL (validated but not used during capture)
+
+Important:
+- Partial capture: set `total` to a value less than or equal to the originally authorized amount.
+- Full capture: set `total` equal to the originally authorized amount.
+- Zero amount is not allowed by validation (even though the lower layer can default 0 to full amount, the HTTP validation requires `total >= 1`).
 
 Example request body
 
 ```json
 {
-"client_details": {
-  "name": "Contractor",
-  "email": "test@example.com",
-  "phone": "0005544688",
-  "country": "PL",
-  "zip_code": "01-120",
-  "city": "Warszawa",
-  "street": ""
-},
-"line_items": [
-  {"name": "DARK Top Bez Wycierania, 30 ml", "qty": 1, "price": 8500},
-  {"name": "DARK Scotch Base (ulepszona formuła), 15 ml", "qty": 1, "price": 6500}
-],
-"total": 15000,
-"currency": "PLN",
-"order_id": "123456",
-"success_url": "https://example.com/after-payment"
+  "client_details": {
+    "name": "Contractor",
+    "email": "test@example.com",
+    "phone": "0005544688",
+    "country": "PL",
+    "zip_code": "01-120",
+    "city": "Warszawa",
+    "street": ""
+  },
+  "line_items": [
+    {"name": "DARK Top Bez Wycierania, 30 ml", "qty": 1, "price": 8500},
+    {"name": "DARK Scotch Base (ulepszona formuła), 15 ml", "qty": 1, "price": 6500}
+  ],
+  "total": 15000,
+  "currency": "PLN",
+  "order_id": "123456",
+  "success_url": "https://example.com/after-payment"
 }
 ```
 
 Successful response
 
-On successful capture the API returns an OK envelope with `data` containing the captured amount, the original PaymentIntent ID, and the order ID.
+On success, `data.id` contains the Stripe PaymentIntent ID (`pi_...`) that was captured, and `amount` is the captured amount in minor units.
 
 ```json
 {
@@ -144,11 +157,10 @@ On successful capture the API returns an OK envelope with `data` containing the 
 ```
 
 Error responses
-
-- 400 Bad Request — invalid body, validation failed, or Stripe returned an error (message in `status_message`).
+- 400 Bad Request — invalid body (fails validation); unknown session ID; missing `payment_id` in stored checkout; or Stripe returned an error (see `status_message`).
 - 401 Unauthorized — missing/invalid token.
 
 Notes
-
-- Partial capture: set `total` to the amount you want to capture (<= authorized). The remaining authorization will follow Stripe’s standard behavior for uncaptured amounts.
-- Ensure the `id` is the PaymentIntent ID (`pi_...`). Using a Checkout Session ID (`cs_...`) will fail.
+- The Checkout Session must have been created with manual capture via the hold flow.
+- Your Stripe webhook for `checkout.session.completed` must be active and able to update the database with the `payment_id` for the session.
+- Ensure the `id` is the Checkout Session ID (`cs_...`). Using a PaymentIntent ID (`pi_...`) will fail.

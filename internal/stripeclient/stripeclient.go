@@ -22,6 +22,7 @@ type Database interface {
 	Save(key string, value interface{}) error
 	SaveCheckoutParams(params *entity.CheckoutParams) error
 	GetCheckoutParamsForEvent(eventId string) (*entity.CheckoutParams, error)
+	GetCheckoutParamsSession(sessionId string) (*entity.CheckoutParams, error)
 }
 
 type StripeClient struct {
@@ -152,6 +153,13 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 	params = entity.NewFromCheckoutSession(sess)
 	params.EventId = evt.ID
 
+	err = s.db.SaveCheckoutParams(params)
+	if err != nil {
+		log.With(
+			sl.Err(err),
+		).Error("save checkout params to database")
+	}
+
 	return params
 }
 
@@ -241,23 +249,33 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 	return payment, nil
 }
 
-func (s *StripeClient) CaptureAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
+func (s *StripeClient) CaptureAmount(sessionId string, amount int64) (*entity.Payment, error) {
 	log := s.log.With(
-		slog.Int64("total", params.Total),
+		slog.Int64("amount", amount),
+		slog.String("session_id", sessionId),
+	)
+
+	params, err := s.db.GetCheckoutParamsSession(sessionId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get checkout params from database: %w", err)
+	}
+	if params == nil {
+		return nil, fmt.Errorf("checkout params not found in database")
+	}
+	if params.PaymentId == "" {
+		return nil, fmt.Errorf("payment id not found in checkout params")
+	}
+	if amount == 0 {
+		amount = params.Total
+	}
+
+	log = log.With(
 		slog.String("currency", params.Currency),
 		slog.String("order_id", params.OrderId),
 	)
-	defer func() {
-		err := s.db.SaveCheckoutParams(params)
-		if err != nil {
-			s.log.With(
-				sl.Err(err),
-			).Error("save checkout params to database")
-		}
-	}()
 
 	captureParams := &stripe.PaymentIntentCaptureParams{
-		AmountToCapture: stripe.Int64(params.Total),
+		AmountToCapture: stripe.Int64(amount),
 	}
 
 	result, err := s.sc.PaymentIntents.Capture(params.PaymentId, captureParams)
