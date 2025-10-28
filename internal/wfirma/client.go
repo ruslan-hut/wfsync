@@ -121,7 +121,7 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 		customer.Name = "Kontrahent " + customer.Email
 	}
 	if customer.ZipCode == "" {
-		customer.ZipCode = "01-249"
+		customer.ZipCode = "01-001"
 	}
 	if customer.City == "" {
 		customer.City = "Warszawa"
