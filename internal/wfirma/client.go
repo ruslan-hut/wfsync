@@ -54,7 +54,7 @@ type Config struct {
 func NewClient(conf *config.Config, logger *slog.Logger) *Client {
 	return &Client{
 		enabled:   conf.WFirma.Enabled,
-		hc:        &http.Client{Timeout: 10 * time.Second},
+		hc:        &http.Client{Timeout: 20 * time.Second},
 		baseURL:   "https://api2.wfirma.pl",
 		accessKey: conf.WFirma.AccessKey,
 		secretKey: conf.WFirma.SecretKey,
