@@ -19,6 +19,9 @@ func Secret(key, value string) slog.Attr {
 	if len(value) > 5 {
 		r = fmt.Sprintf("%s***", value[0:5])
 	}
+	if len(value) > 20 {
+		r = fmt.Sprintf("%s***", value[0:10])
+	}
 	if value == "" {
 		r = "?"
 	}

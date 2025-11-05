@@ -105,8 +105,6 @@ func (s *StripeClient) VerifySignature(payload []byte, header string, tolerance 
 	if !isValid {
 		s.log.With(
 			sl.Secret("secret", secret),
-			slog.String("expected", expected),
-			slog.String("actual", sig),
 		).Warn("signature mismatch")
 	}
 	return isValid
