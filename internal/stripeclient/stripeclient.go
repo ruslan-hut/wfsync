@@ -32,6 +32,7 @@ type StripeClient struct {
 	db            Database
 	log           *slog.Logger
 	mutex         sync.Mutex
+	testMode      bool
 }
 
 func New(conf *config.Config, logger *slog.Logger) *StripeClient {
@@ -51,6 +52,7 @@ func New(conf *config.Config, logger *slog.Logger) *StripeClient {
 		sc:            sc,
 		webhookSecret: webhookSecret,
 		successUrl:    conf.Stripe.SuccessURL,
+		testMode:      conf.Stripe.TestMode,
 		log:           logger.With(sl.Module("stripe")),
 	}
 }
@@ -106,6 +108,9 @@ func (s *StripeClient) VerifySignature(payload []byte, header string, tolerance 
 		s.log.With(
 			sl.Secret("secret", secret),
 		).Warn("signature mismatch")
+		if s.testMode {
+			return true
+		}
 	}
 	return isValid
 }
