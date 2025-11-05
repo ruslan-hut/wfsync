@@ -19,7 +19,7 @@ jobs:
           sed -i 's|${STRIPE_API_KEY}|'"$STRIPE_API_KEY"'|g' wfsync-dev.yml
           sed -i 's|${STRIPE_TEST_KEY}|'"$STRIPE_TEST_KEY"'|g' wfsync-dev.yml
           sed -i 's|${STRIPE_WH_SECRET}|'"$STRIPE_WH_SECRET"'|g' wfsync-dev.yml
-          sed -i 's|${STRIPE_TEST_WH_SECRET}|'"$STRIPE_TEST_WH_SECRET"'|g' wfsync.yml
+          sed -i 's|${STRIPE_TEST_WH_SECRET}|'"$STRIPE_TEST_WH_SECRET"'|g' wfsync-dev.yml
           sed -i 's|${STRIPE_SUCCESS_URL}|'"$STRIPE_SUCCESS_URL"'|g' wfsync-dev.yml
           sed -i 's|${WF_ACCESS_KEY}|'"$WF_ACCESS_KEY"'|g' wfsync-dev.yml
           sed -i 's|${WF_SECRET_KEY}|'"$WF_SECRET_KEY"'|g' wfsync-dev.yml
