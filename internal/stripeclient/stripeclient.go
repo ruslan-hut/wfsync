@@ -167,12 +167,7 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 	params = entity.NewFromCheckoutSession(sess)
 	params.EventId = evt.ID
 
-	err = s.db.SaveCheckoutParams(params)
-	if err != nil {
-		log.With(
-			sl.Err(err),
-		).Error("save checkout params to database")
-	}
+	s.saveCheckoutParams(params)
 
 	return params
 }
@@ -241,12 +236,7 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 		slog.String("order_id", params.OrderId),
 	)
 	defer func() {
-		err := s.db.SaveCheckoutParams(params)
-		if err != nil {
-			s.log.With(
-				sl.Err(err),
-			).Error("save checkout params to database")
-		}
+		s.saveCheckoutParams(params)
 	}()
 
 	successUrl := params.SuccessUrl
@@ -336,12 +326,7 @@ func (s *StripeClient) PayAmount(params *entity.CheckoutParams) (*entity.Payment
 		slog.String("order_id", params.OrderId),
 	)
 	defer func() {
-		err := s.db.SaveCheckoutParams(params)
-		if err != nil {
-			s.log.With(
-				sl.Err(err),
-			).Error("save checkout params to database")
-		}
+		s.saveCheckoutParams(params)
 	}()
 
 	successUrl := params.SuccessUrl
@@ -401,5 +386,19 @@ func (s *StripeClient) sessionParamsFromCheckout(pm *entity.CheckoutParams) *str
 		Metadata:      map[string]string{"order_id": pm.OrderId},
 		SuccessURL:    stripe.String(s.successUrl),
 		CustomerEmail: stripe.String(strings.TrimSpace(pm.ClientDetails.Email)),
+	}
+}
+
+func (s *StripeClient) saveCheckoutParams(params *entity.CheckoutParams) {
+	if s.testMode {
+		if !strings.HasPrefix(params.OrderId, "test_") {
+			params.OrderId = "test_" + params.OrderId
+		}
+	}
+	err := s.db.SaveCheckoutParams(params)
+	if err != nil {
+		s.log.With(
+			sl.Err(err),
+		).Error("save checkout params to database")
 	}
 }

@@ -8,10 +8,6 @@ Flow at a glance
 - Webhook receives checkout.session.completed → your server stores the PaymentIntent ID (pi_...) for that session.
 - Capture later: POST /v1/st/capture/{cs_id} with a validated body; total defines full or partial capture.
 
-- Hold endpoint: POST /v1/st/hold
-- Capture endpoint: POST /v1/st/capture/{id}
-- Webhook used: POST /webhook/event (Stripe → your server)
-
 All /v1 endpoints require authentication via Bearer token.
 
 ## Prerequisites
