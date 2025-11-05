@@ -121,6 +121,8 @@ func (s *StripeClient) HandleEvent(evt *stripe.Event) *entity.CheckoutParams {
 		return s.handleCheckoutCompleted(evt)
 	case stripe.EventTypeInvoiceFinalized:
 		return s.handleInvoiceFinalized(evt)
+	case stripe.EventTypePaymentIntentAmountCapturableUpdated:
+		return s.handleAmountCapturable(evt)
 	default:
 		return nil
 	}
@@ -190,6 +192,27 @@ func (s *StripeClient) handleInvoiceFinalized(evt *stripe.Event) *entity.Checkou
 		return nil
 	}
 	return entity.NewFromInvoice(inv)
+}
+
+func (s *StripeClient) handleAmountCapturable(evt *stripe.Event) *entity.CheckoutParams {
+	invID := evt.GetObjectValue("id")
+	log := s.log.With(
+		slog.Any("event_type", evt.Type),
+		slog.String("event_id", evt.ID),
+		slog.String("id", invID),
+	)
+	pi, err := s.sc.PaymentIntents.Get(invID, nil)
+	if err != nil {
+		log.With(
+			sl.Err(err),
+		).Error("get payment intent from stripe")
+	}
+	log.With(
+		slog.Int64("amount", pi.Amount),
+		slog.String("currency", string(pi.Currency)),
+		slog.String("status", string(pi.Status)),
+	).Debug("fetching payment intent from stripe")
+	return nil
 }
 
 func (s *StripeClient) checkCustomer(sess *stripe.CheckoutSession) {
