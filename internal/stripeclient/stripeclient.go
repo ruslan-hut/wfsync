@@ -36,15 +36,20 @@ type StripeClient struct {
 
 func New(conf *config.Config, logger *slog.Logger) *StripeClient {
 	stripeKey := conf.Stripe.APIKey
+	webhookSecret := conf.Stripe.WebhookSecret
 	if conf.Stripe.TestMode {
 		stripeKey = conf.Stripe.TestKey
-		logger.Info("using test mode for stripe", sl.Secret("key", stripeKey))
+		webhookSecret = conf.Stripe.TestWebhookSecret
+		logger.With(
+			sl.Secret("api_key", stripeKey),
+			sl.Secret("webhook_secret", webhookSecret),
+		).Info("using test mode for stripe")
 	}
 	sc := &client.API{}
 	sc.Init(stripeKey, nil)
 	return &StripeClient{
 		sc:            sc,
-		webhookSecret: conf.Stripe.WebhookSecret,
+		webhookSecret: webhookSecret,
 		successUrl:    conf.Stripe.SuccessURL,
 		log:           logger.With(sl.Module("stripe")),
 	}

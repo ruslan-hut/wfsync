@@ -12,6 +12,7 @@ stripe:
   api_key: your-stripe-api-key
   test_key: your-test-api-key
   webhook_secret: your-stripe-webhook-secret
+  webhook_test_secret: your-stripe-webhook-test-secret
 wfirma:
   enabled: false
   access_key: your-wfirma-access-key

@@ -12,6 +12,7 @@ stripe:
   api_key: ${STRIPE_API_KEY}
   test_key: ${STRIPE_TEST_KEY}
   webhook_secret: ${STRIPE_WH_SECRET}
+  webhook_test_secret: ${STRIPE_TEST_WH_SECRET}
   success_url: ${STRIPE_SUCCESS_URL}
 wfirma:
   enabled: true

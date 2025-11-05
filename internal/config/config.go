@@ -2,9 +2,10 @@ package config
 
 import (
 	"fmt"
-	"github.com/ilyakaznacheev/cleanenv"
 	"log"
 	"sync"
+
+	"github.com/ilyakaznacheev/cleanenv"
 )
 
 type Listen struct {
@@ -13,11 +14,12 @@ type Listen struct {
 }
 
 type StripeConfig struct {
-	TestMode      bool   `yaml:"test_mode" env-default:"false"`
-	APIKey        string `yaml:"api_key" env-default:""`
-	WebhookSecret string `yaml:"webhook_secret" env-default:""`
-	TestKey       string `yaml:"test_key" env-default:""`
-	SuccessURL    string `yaml:"success_url" env-default:""`
+	TestMode          bool   `yaml:"test_mode" env-default:"false"`
+	APIKey            string `yaml:"api_key" env-default:""`
+	WebhookSecret     string `yaml:"webhook_secret" env-default:""`
+	TestKey           string `yaml:"test_key" env-default:""`
+	TestWebhookSecret string `yaml:"webhook_test_secret" env-default:""`
+	SuccessURL        string `yaml:"success_url" env-default:""`
 }
 
 type WfirmaConfig struct {
