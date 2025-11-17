@@ -347,8 +347,13 @@ func (s *StripeClient) CancelPayment(sessionId, reason string) (*entity.Payment,
 		slog.String("order_id", params.OrderId),
 	)
 
+	// Stripe supports one of the following reasons: duplicate, fraudulent, requested_by_customer, abandoned
 	if reason == "" {
 		reason = "requested_by_customer"
+	} else {
+		if reason != "duplicate" && reason != "fraudulent" && reason != "requested_by_customer" && reason != "abandoned" {
+			return nil, fmt.Errorf("invalid cancellation reason; must be one of duplicate, fraudulent, requested_by_customer, abandoned")
+		}
 	}
 
 	cancelParams := &stripe.PaymentIntentCancelParams{
