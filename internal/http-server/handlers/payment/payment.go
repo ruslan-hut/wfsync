@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"wfsync/entity"
 	"wfsync/lib/api/response"
 	"wfsync/lib/sl"
@@ -16,6 +17,7 @@ import (
 type Core interface {
 	StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment, error)
 	StripeCaptureAmount(sessionId string, amount int64) (*entity.Payment, error)
+	StripeCancelPayment(sessionId, reason string) (*entity.Payment, error)
 	StripePayAmount(params *entity.CheckoutParams) (*entity.Payment, error)
 }
 
@@ -123,11 +125,19 @@ func Cancel(log *slog.Logger, handler Core) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		mod := sl.Module("http.handlers.payment")
 		id := chi.URLParam(r, "id")
+		reason := r.URL.Query().Get("reason")
+
+		if !isValidReason(reason) {
+			render.Status(r, 400)
+			render.JSON(w, r, response.Error("Invalid reason"))
+			return
+		}
 
 		logger := log.With(
 			mod,
 			slog.String("request_id", middleware.GetReqID(r.Context())),
 			slog.String("payment_id", id),
+			slog.String("reason", reason),
 		)
 
 		if handler == nil {
@@ -136,16 +146,16 @@ func Cancel(log *slog.Logger, handler Core) http.HandlerFunc {
 			return
 		}
 
-		//pm, err := handler.StripeHoldAmount(&checkoutParams)
-		//if err != nil {
-		//	logger.Error("get payment link", sl.Err(err))
-		//	render.Status(r, 400)
-		//	render.JSON(w, r, response.Error(fmt.Sprintf("Get link: %v", err)))
-		//	return
-		//}
+		pm, err := handler.StripeCancelPayment(id, reason)
+		if err != nil {
+			logger.Error("cancel payment", sl.Err(err))
+			render.Status(r, 400)
+			render.JSON(w, r, response.Error(fmt.Sprintf("Cancel payment: %v", err)))
+			return
+		}
 		logger.Debug("payment canceled")
 
-		render.JSON(w, r, response.Ok(nil))
+		render.JSON(w, r, response.Ok(pm))
 	}
 }
 
@@ -193,4 +203,13 @@ func Pay(log *slog.Logger, handler Core) http.HandlerFunc {
 
 		render.JSON(w, r, response.Ok(pm))
 	}
+}
+
+func isValidReason(s string) bool {
+	if len(s) > 255 {
+		return false
+	}
+	// Разрешаем буквы, цифры, пробелы и базовую пунктуацию
+	re := regexp.MustCompile(`^[a-zA-Z0-9\s.,;:!?'"()$begin:math:display$$end:math:display$\-_/\\]*$`)
+	return re.MatchString(s)
 }

@@ -297,6 +297,10 @@ func (c *Core) StripeCaptureAmount(sessionId string, amount int64) (*entity.Paym
 	return c.sc.CaptureAmount(sessionId, amount)
 }
 
+func (c *Core) StripeCancelPayment(sessionId, reason string) (*entity.Payment, error) {
+	return c.sc.CancelPayment(sessionId, reason)
+}
+
 func (c *Core) StripePayAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
 	err := params.Validate()
 	if err != nil {

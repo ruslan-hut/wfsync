@@ -319,6 +319,52 @@ func (s *StripeClient) CaptureAmount(sessionId string, amount int64) (*entity.Pa
 	return payment, nil
 }
 
+func (s *StripeClient) CancelPayment(sessionId, reason string) (*entity.Payment, error) {
+	log := s.log.With(
+		slog.String("session_id", sessionId),
+	)
+
+	params, err := s.db.GetCheckoutParamsSession(sessionId)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get checkout params from database: %w", err)
+	}
+	if params == nil {
+		return nil, fmt.Errorf("checkout params not found in database")
+	}
+	if params.PaymentId == "" {
+		return nil, fmt.Errorf("payment id not found in checkout params")
+	}
+
+	log = log.With(
+		slog.Int64("amount", params.Total),
+		slog.String("currency", params.Currency),
+		slog.String("order_id", params.OrderId),
+	)
+
+	if reason == "" {
+		reason = "order cancelled"
+	}
+
+	cancelParams := &stripe.PaymentIntentCancelParams{
+		CancellationReason: stripe.String(reason),
+	}
+
+	result, err := s.sc.PaymentIntents.Cancel(params.PaymentId, cancelParams)
+	if err != nil {
+		err = s.parseErr(err)
+		return nil, fmt.Errorf("stripe response: %w", err)
+	}
+
+	payment := &entity.Payment{
+		Id:      result.ID,
+		OrderId: params.OrderId,
+		Amount:  result.Amount,
+	}
+
+	log.Info("payment cancelled")
+	return payment, nil
+}
+
 func (s *StripeClient) PayAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
 	log := s.log.With(
 		slog.Int64("total", params.Total),
