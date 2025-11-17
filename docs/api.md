@@ -29,12 +29,16 @@ API response always has the following structure
 - `GET /v1/wf/invoice/{id}` - Download an invoice from Wfirma by ID in PDF format
 - `GET /v1/wf/order/{id}` - Create a Wfirma invoice from an OpenCart Order with given ID
 
+For detailed documentation on Wfirma endpoints, see the descriptions below.
+
 #### Stripe Endpoints
 
 - `POST /v1/st/hold` - Create a payment hold in Stripe
 - `POST /v1/st/pay` - Create a direct payment in Stripe
 - `POST /v1/st/capture/{id}` - Capture a previously held payment
 - `POST /v1/st/cancel/{id}` - Cancel a payment
+
+For detailed documentation on Stripe hold, capture, and cancel operations, see [Stripe Hold → Capture Flow](stripe-hold-capture.md).
 
 ### Public Endpoints
 
@@ -84,71 +88,83 @@ Response on Successful Payment Creation
 }
 ```
 
-### Capture a Held Payment
+### Download Invoice from Wfirma
 
-- Endpoint: `POST /v1/st/capture/{id}`
-- Description: Capture funds for a previously authorized (held) payment created via Stripe Checkout in manual-capture mode.
+- Endpoint: `GET /v1/wf/invoice/{id}`
+- Description: Downloads an invoice PDF from Wfirma by invoice ID. The invoice must exist in the Wfirma system.
 - Path parameter:
-  - `id` — Stripe Checkout Session ID (format `cs_...`).
+  - `id` — Wfirma invoice ID (numeric string).
 - Authentication: required (send Bearer token in the Authorization header).
 
 How it works
 
-- The API looks up your original checkout record in the database by the provided Checkout Session ID (`cs_...`).
-- That record is written when you created the hold (`POST /v1/st/hold`) and later enriched when your Stripe webhook processes `checkout.session.completed` (it stores the `payment_id` for capture).
-- The handler captures against the stored Stripe PaymentIntent ID (`pi_...`).
+- The API retrieves the invoice from Wfirma by the provided invoice ID.
+- The invoice is downloaded and returned as a PDF file with appropriate Content-Type headers.
+- The response is a direct file download (binary PDF content).
 
-Request body
+Example request
 
-The body uses the same schema as payment creation and must pass validation. During capture, only the `total` is used for the capture amount; the other fields are validated but ignored by the capture logic.
+```bash
+curl -X GET "https://api.example.com/v1/wf/invoice/12345" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  --output invoice.pdf
+```
 
-- Required fields (validation):
-  - `client_details` — object
-  - `line_items` — non-empty array
-  - `total` — integer > 0; amount to capture in the smallest currency unit (e.g., cents)
-  - `currency` — one of: `PLN`, `EUR` (validated but not used during capture)
-  - `order_id` — string (persisted for bookkeeping)
-  - `success_url` — URL (validated but not used during capture)
+Response
 
-Important:
-- Partial capture: set `total` to a value less than or equal to the originally authorized amount.
-- Full capture: set `total` equal to the originally authorized amount.
-- Zero amount is not allowed by validation (even though the lower layer can default 0 to full amount, the HTTP validation requires `total >= 1`).
+- On success: Returns the PDF file with `Content-Type: application/pdf` header.
+- On error: Returns JSON error response with standard API error structure.
 
-Example request body
+Error responses
+- 400 Bad Request — invalid invoice ID format.
+- 401 Unauthorized — missing/invalid token.
+- 500 Internal Server Error — invoice not found in Wfirma, download failed, or Wfirma service unavailable.
 
-```json
-{
-  "client_details": {
-    "name": "Contractor",
-    "email": "test@example.com",
-    "phone": "0005544688",
-    "country": "PL",
-    "zip_code": "01-120",
-    "city": "Warszawa",
-    "street": ""
-  },
-  "line_items": [
-    {"name": "DARK Top Bez Wycierania, 30 ml", "qty": 1, "price": 8500},
-    {"name": "DARK Scotch Base (ulepszona formuła), 15 ml", "qty": 1, "price": 6500}
-  ],
-  "total": 15000,
-  "currency": "PLN",
-  "order_id": "123456",
-  "success_url": "https://example.com/after-payment"
-}
+### Create Invoice from OpenCart Order
+
+- Endpoint: `GET /v1/wf/order/{id}`
+- Description: Creates a Wfirma invoice from an OpenCart order. The order must exist in the OpenCart database. This endpoint requires the authenticated user to have invoice creation permissions.
+- Path parameter:
+  - `id` — OpenCart order ID (numeric).
+- Authentication: required (send Bearer token in the Authorization header).
+- Permission: The authenticated user must have `WFirmaAllowInvoice` permission enabled.
+
+How it works
+
+- The API retrieves the order from OpenCart by the provided order ID.
+- Order details (line items, customer information, totals) are extracted.
+- A new invoice is created in Wfirma with the order information.
+- The invoice ID is returned in the response.
+
+Example request
+
+```bash
+curl -X GET "https://api.example.com/v1/wf/order/123456" \
+  -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
 Successful response
 
-On success, `data.id` contains the Stripe PaymentIntent ID (`pi_...`) that was captured, and `amount` is the captured amount in minor units.
-
 ```json
 {
   "data": {
-    "amount": 15000,
-    "id": "pi_...b1ELPMpzHCbEuE9ab",
-    "order_id": "123456"
+    "client_details": {
+      "name": "Contractor",
+      "email": "test@example.com",
+      "phone": "0005544688",
+      "country": "PL",
+      "zip_code": "01-120",
+      "city": "Warszawa",
+      "street": ""
+    },
+    "line_items": [
+      {"name": "DARK Top Bez Wycierania, 30 ml", "qty": 1, "price": 8500},
+      {"name": "DARK Scotch Base (ulepszona formuła), 15 ml", "qty": 1, "price": 6500}
+    ],
+    "total": 15000,
+    "currency": "PLN",
+    "order_id": "123456",
+    "invoice_id": "98765"
   },
   "success": true,
   "status_message": "Success",
@@ -156,11 +172,10 @@ On success, `data.id` contains the Stripe PaymentIntent ID (`pi_...`) that was c
 }
 ```
 
-Error responses
-- 400 Bad Request — invalid body (fails validation); unknown session ID; missing `payment_id` in stored checkout; or Stripe returned an error (see `status_message`).
-- 401 Unauthorized — missing/invalid token.
+- `data.invoice_id` contains the newly created Wfirma invoice ID.
 
-Notes
-- The Checkout Session must have been created with manual capture via the hold flow.
-- Your Stripe webhook for `checkout.session.completed` must be active and able to update the database with the `payment_id` for the session.
-- Ensure the `id` is the Checkout Session ID (`cs_...`). Using a PaymentIntent ID (`pi_...`) will fail.
+Error responses
+- 400 Bad Request — invalid order ID format or order not found.
+- 401 Unauthorized — missing/invalid token.
+- 403 Forbidden — user does not have permission to create invoices (`WFirmaAllowInvoice` is false).
+- 500 Internal Server Error — OpenCart service unavailable, Wfirma service unavailable, or invoice creation failed.
