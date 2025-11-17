@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"wfsync/entity"
 	"wfsync/lib/api/response"
 	"wfsync/lib/sl"
@@ -209,7 +208,11 @@ func isValidReason(s string) bool {
 	if len(s) > 255 {
 		return false
 	}
-	// Разрешаем буквы, цифры, пробелы и базовую пунктуацию
-	re := regexp.MustCompile(`^[a-zA-Z0-9\s.,;:!?'"()$begin:math:display$$end:math:display$\-_/\\]*$`)
-	return re.MatchString(s)
+	for _, r := range s {
+		// Запрещаем управляющие символы (всё до пробела, кроме \n и \t)
+		if r < 32 && r != '\n' && r != '\t' {
+			return false
+		}
+	}
+	return true
 }
