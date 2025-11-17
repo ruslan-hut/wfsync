@@ -7,6 +7,7 @@ Flow at a glance
 - Customer pays in Stripe Checkout → funds are authorized (held), not captured.
 - Webhook receives checkout.session.completed → your server stores the PaymentIntent ID (pi_...) for that session.
 - Capture later: POST /v1/st/capture/{cs_id} with a validated body; total defines full or partial capture.
+- Cancel later: POST /v1/st/cancel/{cs_id} with optional reason query parameter; releases the held funds without capturing.
 
 All /v1 endpoints require authentication via Bearer token.
 
@@ -241,10 +242,98 @@ Error responses (examples)
 }
 ```
 
+---
+
+## 4) Cancel the Held Amount
+
+Endpoint: POST /v1/st/cancel/{id}
+
+Description: Cancels a payment authorization (hold) that was created via the hold endpoint. This releases the held funds back to the customer without capturing them. The payment authorization must exist and have been completed (webhook must have processed checkout.session.completed).
+
+- Path parameter id: the Checkout Session ID returned by the hold step (format cs_...).
+- Query parameter reason (optional): cancellation reason. Must be one of:
+  - `duplicate` — duplicate payment
+  - `fraudulent` — fraudulent payment
+  - `requested_by_customer` — customer requested cancellation (default if not provided)
+  - `abandoned` — payment was abandoned
+- Authentication: required.
+- Request body: not required.
+
+Curl example (with reason)
+
+```bash
+curl -X POST "https://api.example.com/v1/st/cancel/cs_...b1ELPMpzHCbEuE9ab?reason=requested_by_customer" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Curl example (without reason, defaults to requested_by_customer)
+
+```bash
+curl -X POST "https://api.example.com/v1/st/cancel/cs_...b1ELPMpzHCbEuE9ab" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+Successful response
+
+```json
+{
+  "data": {
+    "amount": 15000,
+    "id": "pi_...b1ELPMpzHCbEuE9ab",
+    "order_id": "123456"
+  },
+  "success": true,
+  "status_message": "Success",
+  "timestamp": "2025-07-07T11:41:40Z"
+}
+```
+
+- data.id is the PaymentIntent ID (starts with pi_...).
+- data.amount is the canceled amount in minor units.
+
+Error responses (examples)
+
+- 400 Bad Request — invalid reason or business errors:
+
+```json
+{
+  "success": false,
+  "status_message": "Invalid reason",
+  "timestamp": "2025-07-07T11:41:40Z"
+}
+```
+
+```json
+{
+  "success": false,
+  "status_message": "Cancel payment: session not found",
+  "timestamp": "2025-07-07T11:41:40Z"
+}
+```
+
+```json
+{
+  "success": false,
+  "status_message": "Cancel payment: payment id not found",
+  "timestamp": "2025-07-07T11:41:40Z"
+}
+```
+
+- 401 Unauthorized — missing/invalid token:
+
+```json
+{
+  "success": false,
+  "status_message": "Unauthorized",
+  "timestamp": "2025-07-07T11:41:40Z"
+}
+```
+
 ## Tips and Notes
 
-- Use the Checkout Session ID (cs_...) in the capture path parameter, not a PaymentIntent ID.
-- The webhook must have successfully processed checkout.session.completed for the session (it stores payment_id used for capture).
+- Use the Checkout Session ID (cs_...) in the capture and cancel path parameters, not a PaymentIntent ID.
+- The webhook must have successfully processed checkout.session.completed for the session (it stores payment_id used for capture and cancel).
 - Partial captures are allowed as long as total <= authorized amount.
 - Zero amount is not allowed by HTTP validation.
+- Cancel releases the held funds back to the customer without capturing them.
 - For direct payments (no hold/capture), use POST /v1/st/pay (see docs/api.md).
