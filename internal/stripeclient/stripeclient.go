@@ -348,7 +348,7 @@ func (s *StripeClient) CancelPayment(sessionId, reason string) (*entity.Payment,
 	)
 
 	if reason == "" {
-		reason = "order cancelled"
+		reason = "requested_by_customer"
 	}
 
 	cancelParams := &stripe.PaymentIntentCancelParams{
