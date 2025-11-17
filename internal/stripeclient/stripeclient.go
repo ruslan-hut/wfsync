@@ -282,13 +282,16 @@ func (s *StripeClient) CaptureAmount(sessionId string, amount int64) (*entity.Pa
 
 	params, err := s.db.GetCheckoutParamsSession(sessionId)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get checkout params from database: %w", err)
+		log.With(
+			sl.Err(err),
+		).Warn("failed to get checkout params from database")
+		return nil, fmt.Errorf("session not found")
 	}
 	if params == nil {
-		return nil, fmt.Errorf("checkout params not found in database")
+		return nil, fmt.Errorf("session not found")
 	}
 	if params.PaymentId == "" {
-		return nil, fmt.Errorf("payment id not found in checkout params")
+		return nil, fmt.Errorf("payment id not found")
 	}
 	if amount == 0 {
 		amount = params.Total
@@ -326,13 +329,16 @@ func (s *StripeClient) CancelPayment(sessionId, reason string) (*entity.Payment,
 
 	params, err := s.db.GetCheckoutParamsSession(sessionId)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get checkout params from database: %w", err)
+		log.With(
+			sl.Err(err),
+		).Warn("failed to get checkout params from database")
+		return nil, fmt.Errorf("session not found")
 	}
 	if params == nil {
-		return nil, fmt.Errorf("checkout params not found in database")
+		return nil, fmt.Errorf("session not found")
 	}
 	if params.PaymentId == "" {
-		return nil, fmt.Errorf("payment id not found in checkout params")
+		return nil, fmt.Errorf("payment id not found")
 	}
 
 	log = log.With(
