@@ -49,7 +49,7 @@ func New(log *slog.Logger, auth Authenticate) func(next http.Handler) http.Handl
 				logger = logger.With(
 					slog.Int("status", ww.Status()),
 					slog.Int("size", ww.BytesWritten()),
-					slog.Float64("duration", time.Since(t1).Seconds()),
+					slog.String("duration", time.Since(t1).String()),
 				)
 				if ww.Status() >= 400 {
 					logger.Error("request failed")
