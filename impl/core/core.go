@@ -318,7 +318,7 @@ func (c *Core) StripePayAmount(params *entity.CheckoutParams) (*entity.Payment, 
 	return c.sc.PayAmount(params)
 }
 
-func (c *Core) WFirmaOrderFileProforma(ctx context.Context, orderId int64) (*entity.Payment, error) {
+func (c *Core) WFirmaOrderFileProforma(_ context.Context, orderId int64) (*entity.Payment, error) {
 	if c.inv == nil {
 		return nil, fmt.Errorf("invoice service not connected")
 	}
@@ -334,10 +334,17 @@ func (c *Core) WFirmaOrderFileProforma(ctx context.Context, orderId int64) (*ent
 		return nil, fmt.Errorf("order not found")
 	}
 
-	return c.WFirmaRegisterProforma(params)
+	payment, err := c.WFirmaRegisterProforma(params)
+	if err != nil {
+		return nil, err
+	}
+	if c.oc != nil {
+		_ = c.oc.UpdateOrderWithProforma(orderId, payment.Id, payment.InvoiceFile)
+	}
+	return payment, nil
 }
 
-func (c *Core) WFirmaOrderFileInvoice(ctx context.Context, orderId int64) (*entity.Payment, error) {
+func (c *Core) WFirmaOrderFileInvoice(_ context.Context, orderId int64) (*entity.Payment, error) {
 	if c.inv == nil {
 		return nil, fmt.Errorf("invoice service not connected")
 	}
@@ -353,5 +360,12 @@ func (c *Core) WFirmaOrderFileInvoice(ctx context.Context, orderId int64) (*enti
 		return nil, fmt.Errorf("order not found")
 	}
 
-	return c.WFirmaRegisterInvoice(params)
+	payment, err := c.WFirmaRegisterInvoice(params)
+	if err != nil {
+		return nil, err
+	}
+	if c.oc != nil {
+		_ = c.oc.UpdateOrderWithInvoice(orderId, payment.Id, payment.InvoiceFile)
+	}
+	return payment, nil
 }

@@ -217,7 +217,7 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 		}
 
 		if jobName == JobProforma {
-			err = oc.db.UpdateProforma(orderId, payment.Id, payment.InvoiceFile)
+			err = oc.UpdateOrderWithProforma(orderId, payment.Id, payment.InvoiceFile)
 			if err != nil {
 				log.With(
 					slog.String("order_id", order.OrderId),
@@ -226,7 +226,7 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 			}
 		}
 		if jobName == JobInvoice {
-			err = oc.db.UpdateInvoice(orderId, payment.Id, payment.InvoiceFile)
+			err = oc.UpdateOrderWithInvoice(orderId, payment.Id, payment.InvoiceFile)
 			if err != nil {
 				log.With(
 					slog.String("order_id", order.OrderId),
@@ -257,4 +257,12 @@ func (oc *Opencart) SaveInvoiceId(orderId string, invoiceId, invoiceFile string)
 		return fmt.Errorf("invalid order id: %s", orderId)
 	}
 	return oc.db.UpdateInvoice(id, invoiceId, invoiceFile)
+}
+
+func (oc *Opencart) UpdateOrderWithProforma(orderId int64, proformaId, proformaFile string) error {
+	return oc.db.UpdateProforma(orderId, proformaId, proformaFile)
+}
+
+func (oc *Opencart) UpdateOrderWithInvoice(orderId int64, proformaId, proformaFile string) error {
+	return oc.db.UpdateInvoice(orderId, proformaId, proformaFile)
 }
