@@ -55,6 +55,8 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) error {
 		rootApi.Route("/wf", func(wf chi.Router) {
 			wf.Get("/invoice/{id}", wfinvoice.Download(log, handler))
 			wf.Get("/order/{id}", wfinvoice.OrderToInvoice(log, handler))
+			wf.Get("/file/proforma/{id}", wfinvoice.FileProforma(log, handler))
+			wf.Get("/file/invoice/{id}", wfinvoice.FileInvoice(log, handler))
 		})
 		rootApi.Route("/st", func(st chi.Router) {
 			st.Post("/hold", payment.Hold(log, handler))
