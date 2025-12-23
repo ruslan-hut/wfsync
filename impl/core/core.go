@@ -369,3 +369,11 @@ func (c *Core) WFirmaOrderFileInvoice(_ context.Context, orderId int64) (*entity
 	}
 	return payment, nil
 }
+
+func (c *Core) WFirmaCreateProforma(params *entity.CheckoutParams) (*entity.Payment, error) {
+	return c.WFirmaRegisterProforma(params)
+}
+
+func (c *Core) WFirmaCreateInvoice(params *entity.CheckoutParams) (*entity.Payment, error) {
+	return c.WFirmaRegisterInvoice(params)
+}

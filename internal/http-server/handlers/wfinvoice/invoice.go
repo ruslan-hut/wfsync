@@ -22,6 +22,8 @@ type Core interface {
 	WFirmaOrderToInvoice(ctx context.Context, orderId int64) (*entity.CheckoutParams, error)
 	WFirmaOrderFileProforma(ctx context.Context, orderId int64) (*entity.Payment, error)
 	WFirmaOrderFileInvoice(ctx context.Context, orderId int64) (*entity.Payment, error)
+	WFirmaCreateProforma(params *entity.CheckoutParams) (*entity.Payment, error)
+	WFirmaCreateInvoice(params *entity.CheckoutParams) (*entity.Payment, error)
 }
 
 func Download(logger *slog.Logger, handler Core) http.HandlerFunc {
@@ -203,6 +205,100 @@ func FileInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 		}
 
 		payment, err := handler.WFirmaOrderFileInvoice(context.Background(), id)
+		if err != nil {
+			log.Error("invoice creation", sl.Err(err))
+			render.JSON(w, r, response.Error(fmt.Sprintf("Request failed: %v", err)))
+			return
+		}
+		log.With(
+			slog.String("invoice_id", payment.Id),
+		).Debug("invoice created")
+
+		render.JSON(w, r, response.Ok(payment))
+	}
+}
+
+func CreateProforma(logger *slog.Logger, handler Core) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		mod := sl.Module("http.handlers.wfinvoice")
+
+		log := logger.With(
+			mod,
+			slog.String("request_id", middleware.GetReqID(r.Context())),
+		)
+
+		user := cont.GetUser(r.Context())
+		if user == nil {
+			log.Error("user not found")
+			render.Status(r, 401)
+			render.JSON(w, r, response.Error("User not found"))
+			return
+		}
+
+		if handler == nil {
+			log.Error("invoice service not available")
+			render.JSON(w, r, response.Error("Invoice service not available"))
+			return
+		}
+
+		var params entity.CheckoutParams
+		if err := render.Bind(r, &params); err != nil {
+			log.Warn("invalid request body", sl.Err(err))
+			render.Status(r, 400)
+			render.JSON(w, r, response.Error(fmt.Sprintf("Invalid request: %v", err)))
+			return
+		}
+
+		log = log.With(slog.String("order_id", params.OrderId))
+
+		payment, err := handler.WFirmaCreateProforma(&params)
+		if err != nil {
+			log.Error("proforma creation", sl.Err(err))
+			render.JSON(w, r, response.Error(fmt.Sprintf("Request failed: %v", err)))
+			return
+		}
+		log.With(
+			slog.String("proforma_id", payment.Id),
+		).Debug("proforma created")
+
+		render.JSON(w, r, response.Ok(payment))
+	}
+}
+
+func CreateInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		mod := sl.Module("http.handlers.wfinvoice")
+
+		log := logger.With(
+			mod,
+			slog.String("request_id", middleware.GetReqID(r.Context())),
+		)
+
+		user := cont.GetUser(r.Context())
+		if user == nil {
+			log.Error("user not found")
+			render.Status(r, 401)
+			render.JSON(w, r, response.Error("User not found"))
+			return
+		}
+
+		if handler == nil {
+			log.Error("invoice service not available")
+			render.JSON(w, r, response.Error("Invoice service not available"))
+			return
+		}
+
+		var params entity.CheckoutParams
+		if err := render.Bind(r, &params); err != nil {
+			log.Warn("invalid request body", sl.Err(err))
+			render.Status(r, 400)
+			render.JSON(w, r, response.Error(fmt.Sprintf("Invalid request: %v", err)))
+			return
+		}
+
+		log = log.With(slog.String("order_id", params.OrderId))
+
+		payment, err := handler.WFirmaCreateInvoice(&params)
 		if err != nil {
 			log.Error("invoice creation", sl.Err(err))
 			render.JSON(w, r, response.Error(fmt.Sprintf("Request failed: %v", err)))

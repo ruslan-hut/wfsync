@@ -70,6 +70,8 @@ All `/v1/*` endpoints require `Authorization: Bearer TOKEN`
 - `GET /v1/wf/order/{id}` - Create invoice from OpenCart order
 - `GET /v1/wf/file/proforma/{id}` - Get proforma file for OpenCart order
 - `GET /v1/wf/file/invoice/{id}` - Get invoice file for OpenCart order
+- `POST /v1/wf/proforma` - Create proforma from CheckoutParams payload
+- `POST /v1/wf/invoice` - Create invoice from CheckoutParams payload
 
 ### Webhook
 - `POST /webhook/event` - Stripe webhook (signature-verified)

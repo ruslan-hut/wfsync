@@ -263,6 +263,158 @@ curl -X GET "https://api.example.com/v1/wf/file/invoice/123456" \
 
 ---
 
+### Create Proforma from Payload
+
+Creates a proforma invoice in Wfirma using provided checkout data (without requiring OpenCart).
+
+```
+POST /v1/wf/proforma
+```
+
+#### Request Body (CheckoutParams)
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `client_details` | object | Yes | Customer information |
+| `line_items` | array | Yes | Order line items (min: 1) |
+| `total` | integer | Yes | Total amount in minor units (min: 1) |
+| `currency` | string | Yes | Currency code: `PLN` or `EUR` |
+| `order_id` | string | Yes | Unique order identifier (1-32 chars) |
+| `success_url` | string | Yes | URL (required for validation) |
+
+#### Example Request
+
+```bash
+curl -X POST "https://api.example.com/v1/wf/proforma" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_details": {
+      "name": "Customer Name",
+      "email": "customer@example.com",
+      "phone": "123456789",
+      "country": "PL",
+      "zip_code": "01-120",
+      "city": "Warszawa",
+      "street": "ul. Example 1",
+      "tax_id": "1234567890"
+    },
+    "line_items": [
+      {"name": "Product A", "qty": 1, "price": 8500},
+      {"name": "Product B", "qty": 2, "price": 3250}
+    ],
+    "total": 15000,
+    "currency": "PLN",
+    "order_id": "ORD-123456",
+    "success_url": "https://example.com"
+  }'
+```
+
+#### Response
+
+Returns `Payment` object:
+
+```json
+{
+  "success": true,
+  "data": {
+    "amount": 15000,
+    "id": "wfirma_proforma_id",
+    "order_id": "ORD-123456",
+    "link": "https://files.example.com/uuid.pdf",
+    "invoice_file": "uuid.pdf"
+  },
+  "status_message": "Success",
+  "timestamp": "2025-07-07T11:41:40Z"
+}
+```
+
+#### Errors
+
+| Code | Description |
+|------|-------------|
+| 400 | Invalid request body or validation error |
+| 401 | Unauthorized |
+| 500 | Wfirma service unavailable |
+
+---
+
+### Create Invoice from Payload
+
+Creates an invoice in Wfirma using provided checkout data (without requiring OpenCart).
+
+```
+POST /v1/wf/invoice
+```
+
+#### Request Body (CheckoutParams)
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `client_details` | object | Yes | Customer information |
+| `line_items` | array | Yes | Order line items (min: 1) |
+| `total` | integer | Yes | Total amount in minor units (min: 1) |
+| `currency` | string | Yes | Currency code: `PLN` or `EUR` |
+| `order_id` | string | Yes | Unique order identifier (1-32 chars) |
+| `success_url` | string | Yes | URL (required for validation) |
+
+#### Example Request
+
+```bash
+curl -X POST "https://api.example.com/v1/wf/invoice" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_details": {
+      "name": "Customer Name",
+      "email": "customer@example.com",
+      "phone": "123456789",
+      "country": "PL",
+      "zip_code": "01-120",
+      "city": "Warszawa",
+      "street": "ul. Example 1",
+      "tax_id": "1234567890"
+    },
+    "line_items": [
+      {"name": "Product A", "qty": 1, "price": 8500},
+      {"name": "Product B", "qty": 2, "price": 3250}
+    ],
+    "total": 15000,
+    "currency": "PLN",
+    "order_id": "ORD-123456",
+    "success_url": "https://example.com"
+  }'
+```
+
+#### Response
+
+Returns `Payment` object:
+
+```json
+{
+  "success": true,
+  "data": {
+    "amount": 15000,
+    "id": "wfirma_invoice_id",
+    "order_id": "ORD-123456",
+    "link": "https://files.example.com/uuid.pdf",
+    "invoice_file": "uuid.pdf"
+  },
+  "status_message": "Success",
+  "timestamp": "2025-07-07T11:41:40Z"
+}
+```
+
+#### Errors
+
+| Code | Description |
+|------|-------------|
+| 400 | Invalid request body or validation error |
+| 401 | Unauthorized |
+| 500 | Wfirma service unavailable |
+
+---
+
 ## Data Structures
 
 ### ClientDetails
