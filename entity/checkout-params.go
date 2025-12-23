@@ -36,6 +36,7 @@ type CheckoutParams struct {
 	SuccessUrl    string         `json:"success_url" bson:"success_url" validate:"required,url"`
 	Created       time.Time      `json:"created" bson:"created"`
 	Closed        time.Time      `json:"closed,omitempty" bson:"closed"`
+	Modified      time.Time      `json:"modified,omitempty" bson:"modified"`
 	Status        string         `json:"status" bson:"status"`
 	SessionId     string         `json:"session_id,omitempty" bson:"session_id,omitempty"`
 	PaymentId     string         `json:"payment_id,omitempty" bson:"payment_id,omitempty"`

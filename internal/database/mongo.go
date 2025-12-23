@@ -139,11 +139,13 @@ func (m *MongoDB) SaveCheckoutParams(params *entity.CheckoutParams) error {
 	}
 	defer m.disconnect(connection)
 
+	if params.Created.IsZero() {
+		params.Created = time.Now()
+	}
+	params.Modified = time.Now()
+
 	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
-	filter := bson.D{{"order_id", params.OrderId}}
-	update := bson.D{{"$set", params}}
-	opts := options.Update().SetUpsert(true)
-	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	_, err = collection.InsertOne(m.ctx, params)
 	return err
 }
 
