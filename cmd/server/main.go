@@ -1,8 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log/slog"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 	"wfsync/bot"
 	"wfsync/impl/auth"
 	"wfsync/impl/core"
@@ -79,11 +84,25 @@ func main() {
 	authenticate := auth.New(mongo)
 	handler.SetAuthService(authenticate)
 
-	// *** blocking start with http server ***
-	err = api.New(conf, log, &handler)
+	server, err := api.New(conf, log, &handler)
 	if err != nil {
 		log.Error("server start", sl.Err(err))
 		return
 	}
-	log.Error("service stopped")
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-quit
+	log.Info("received shutdown signal", slog.String("signal", sig.String()))
+
+	// Graceful shutdown with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Error("server shutdown", sl.Err(err))
+	}
+
+	log.Info("service stopped")
 }
