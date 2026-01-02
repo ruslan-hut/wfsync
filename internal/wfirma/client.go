@@ -318,14 +318,24 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string,
 		resp.Body.Close()
 		return "", nil, fmt.Errorf("create file: %w", err)
 	}
-	if _, err = io.Copy(f, resp.Body); err != nil {
-		_ = f.Close()
-		resp.Body.Close()
-		_ = os.Remove(filePath)
-		return "", nil, fmt.Errorf("save file: %w", err)
-	}
-	_ = f.Close()
+
+	_, copyErr := io.Copy(f, resp.Body)
 	resp.Body.Close()
+
+	// Sync to ensure data is flushed to disk before closing
+	if copyErr == nil {
+		copyErr = f.Sync()
+	}
+
+	closeErr := f.Close()
+	if copyErr != nil {
+		_ = os.Remove(filePath)
+		return "", nil, fmt.Errorf("save file: %w", copyErr)
+	}
+	if closeErr != nil {
+		_ = os.Remove(filePath)
+		return "", nil, fmt.Errorf("close file: %w", closeErr)
+	}
 
 	log.With(
 		slog.String("file", fileName),

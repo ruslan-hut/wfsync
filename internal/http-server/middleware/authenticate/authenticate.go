@@ -1,7 +1,11 @@
 package authenticate
 
 import (
-	"fmt"
+	"log/slog"
+	"net/http"
+	"strings"
+	"time"
+
 	"wfsync/entity"
 	"wfsync/lib/api/cont"
 	"wfsync/lib/api/response"
@@ -9,12 +13,6 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/render"
-
-	"log/slog"
-	"net/http"
-
-	"strings"
-	"time"
 )
 
 type Authenticate interface {
@@ -61,7 +59,7 @@ func New(log *slog.Logger, auth Authenticate) func(next http.Handler) http.Handl
 			token := ""
 			header := r.Header.Get("Authorization")
 			if len(header) == 0 {
-				logger = logger.With(sl.Err(fmt.Errorf("authorization header not found")))
+				logger = logger.With(slog.String("reason", "authorization header not found"))
 				authFailed(ww, r, "Authorization header not found")
 				return
 			}
@@ -69,7 +67,7 @@ func New(log *slog.Logger, auth Authenticate) func(next http.Handler) http.Handl
 				token = strings.Split(header, " ")[1]
 			}
 			if len(token) == 0 {
-				logger = logger.With(sl.Err(fmt.Errorf("token not found")))
+				logger = logger.With(slog.String("reason", "token not found"))
 				authFailed(ww, r, "Token not found")
 				return
 			}

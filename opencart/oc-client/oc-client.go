@@ -1,11 +1,13 @@
 package oc_client
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"sync"
 	"time"
+
 	"wfsync/entity"
 	"wfsync/internal/config"
 	"wfsync/lib/sl"
@@ -20,7 +22,7 @@ const (
 	JobInvoice    JobType = "wfirma-invoice"
 )
 
-type CheckoutHandler func(params *entity.CheckoutParams) (*entity.Payment, error)
+type CheckoutHandler func(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 
 type Opencart struct {
 	db                    *database.MySql
@@ -35,6 +37,8 @@ type Opencart struct {
 	handlerProforma       CheckoutHandler
 	handlerInvoice        CheckoutHandler
 	mutex                 sync.Mutex
+	done                  chan struct{}
+	stopped               chan struct{}
 }
 
 func New(conf *config.Config, log *slog.Logger) (*Opencart, error) {
@@ -49,36 +53,60 @@ func New(conf *config.Config, log *slog.Logger) (*Opencart, error) {
 		db:  db,
 		log: log.With(sl.Module("opencart")),
 	}
-	if conf.OpenCart.StatusUrlRequest != "" {
-		oc.statusUrlRequest, _ = strconv.Atoi(conf.OpenCart.StatusUrlRequest)
+
+	parseStatus := func(name, value string) int {
+		if value == "" {
+			return 0
+		}
+		v, err := strconv.Atoi(value)
+		if err != nil {
+			oc.log.Warn("invalid status config value",
+				slog.String("field", name),
+				slog.String("value", value),
+				sl.Err(err))
+			return 0
+		}
+		return v
 	}
-	if conf.OpenCart.StatusUrlResult != "" {
-		oc.statusUrlResult, _ = strconv.Atoi(conf.OpenCart.StatusUrlResult)
-	}
-	if conf.OpenCart.StatusProformaRequest != "" {
-		oc.statusProformaRequest, _ = strconv.Atoi(conf.OpenCart.StatusProformaRequest)
-	}
-	if conf.OpenCart.StatusProformaResult != "" {
-		oc.statusProformaResult, _ = strconv.Atoi(conf.OpenCart.StatusProformaResult)
-	}
-	if conf.OpenCart.StatusInvoiceRequest != "" {
-		oc.statusInvoiceRequest, _ = strconv.Atoi(conf.OpenCart.StatusInvoiceRequest)
-	}
-	if conf.OpenCart.StatusInvoiceResult != "" {
-		oc.statusInvoiceResult, _ = strconv.Atoi(conf.OpenCart.StatusInvoiceResult)
-	}
+
+	oc.statusUrlRequest = parseStatus("status_url_request", conf.OpenCart.StatusUrlRequest)
+	oc.statusUrlResult = parseStatus("status_url_result", conf.OpenCart.StatusUrlResult)
+	oc.statusProformaRequest = parseStatus("status_proforma_request", conf.OpenCart.StatusProformaRequest)
+	oc.statusProformaResult = parseStatus("status_proforma_result", conf.OpenCart.StatusProformaResult)
+	oc.statusInvoiceRequest = parseStatus("status_invoice_request", conf.OpenCart.StatusInvoiceRequest)
+	oc.statusInvoiceResult = parseStatus("status_invoice_result", conf.OpenCart.StatusInvoiceResult)
+
 	return oc, nil
 }
 
 func (oc *Opencart) Start() {
+	oc.done = make(chan struct{})
+	oc.stopped = make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(3 * time.Minute)
 		defer ticker.Stop()
+		defer close(oc.stopped)
 		for {
 			oc.ProcessOrders()
-			<-ticker.C
+			select {
+			case <-oc.done:
+				oc.log.Info("order processor stopped")
+				return
+			case <-ticker.C:
+			}
 		}
 	}()
+}
+
+func (oc *Opencart) Stop() {
+	if oc.done != nil {
+		oc.log.Info("stopping order processor")
+		close(oc.done)
+		<-oc.stopped
+	}
+	if oc.db != nil {
+		oc.db.Close()
+	}
 }
 
 func (oc *Opencart) WithUrlHandler(handler CheckoutHandler) *Opencart {
@@ -188,7 +216,10 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 			).Warn("clear status history")
 		}
 
-		payment, err := handler(order)
+		// Use a context with timeout for background processing
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		payment, err := handler(ctx, order)
+		cancel()
 		if err != nil {
 			log.With(
 				slog.String("order_id", order.OrderId),

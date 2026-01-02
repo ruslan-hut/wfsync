@@ -100,8 +100,24 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// Stop HTTP server first
 	if err := server.Shutdown(ctx); err != nil {
 		log.Error("server shutdown", sl.Err(err))
+	}
+
+	// Stop background services
+	if oc != nil {
+		oc.Stop()
+	}
+
+	if tgBot != nil {
+		tgBot.Stop()
+	}
+
+	if mongo != nil {
+		if err := mongo.Close(ctx); err != nil {
+			log.Error("mongo close", sl.Err(err))
+		}
 	}
 
 	log.Info("service stopped")
