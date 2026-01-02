@@ -167,11 +167,16 @@ func (c *Core) WFirmaOrderToInvoice(ctx context.Context, orderId int64) (*entity
 	if params == nil {
 		return nil, fmt.Errorf("order not found")
 	}
+
+	log := c.log.With(
+		slog.String("order_id", params.OrderId),
+		slog.Int64("total", params.Total),
+		slog.String("date", params.Created.Format("2006-01-02")),
+	)
+
 	linesTotal := params.ItemsTotal()
 	if linesTotal != params.Total {
-		c.log.With(
-			slog.String("order_id", params.OrderId),
-			slog.Int64("total", params.Total),
+		log.With(
 			slog.Int64("lines_total", linesTotal),
 			slog.Int64("diff", params.Total-linesTotal),
 		).Warn("order total mismatch")
@@ -179,6 +184,8 @@ func (c *Core) WFirmaOrderToInvoice(ctx context.Context, orderId int64) (*entity
 	}
 
 	params.Paid = false
+
+	log.Debug("order to invoice")
 
 	payment, err := c.inv.RegisterInvoice(ctx, params)
 	if err != nil {
