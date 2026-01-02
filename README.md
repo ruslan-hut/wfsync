@@ -1,18 +1,58 @@
 # WFSync
 
-WFSync is a Go application designed to synchronize invoices between Stripe and Wfirma services. It provides a seamless integration between payment processing (Stripe) and invoice management (Wfirma).
+![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white)
+![Stripe](https://img.shields.io/badge/Stripe-API-635BFF?logo=stripe&logoColor=white)
+![MongoDB](https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-4479A1?logo=mysql&logoColor=white)
+![Chi](https://img.shields.io/badge/Chi-v5-red)
+![License](https://img.shields.io/badge/License-MIT-green)
+
+WFSync is a payment and invoice management service that bridges **OpenCart**, **Stripe**, and **Wfirma** into a unified workflow.
+
+```
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│  OpenCart   │◄────►│   WFSync    │◄────►│   Stripe    │
+│  (e-commerce)│      │  (service)  │      │  (payments) │
+└─────────────┘      └──────┬──────┘      └─────────────┘
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │   Wfirma    │
+                    │  (invoices) │
+                    └─────────────┘
+```
+
+### How It Works
+
+- **OpenCart → Stripe**: Generate payment links for orders, process payments with hold/capture flow
+- **Stripe → Wfirma**: Automatic invoice generation on successful payment via webhooks
+- **OpenCart → Wfirma**: Create proforma/invoice documents directly from order data
+- **Wfirma → OpenCart**: Download and attach invoice PDFs to orders
 
 ## Features
 
-- Stripe payment processing integration
-- Wfirma invoice management
-- Webhook handling for Stripe events
-- Invoice download from Wfirma
-- Payment operations (hold, capture, cancel)
-- Authentication system
-- MongoDB storage for data persistence
-- OpenCart integration. Users can download invoices from Wfirma to OpenCart
-- Telegram bot for notifications and logs
+### Payment Processing (Stripe)
+- Payment links generation for checkout
+- Hold/capture payment flow for delayed charges
+- Payment cancellation with reason tracking
+- Webhook handling for real-time payment events
+
+### Invoice Management (Wfirma)
+- Proforma and invoice creation from order data
+- Automatic invoice generation on payment completion
+- PDF download and delivery
+- VAT/NIP support for business customers
+
+### E-commerce Integration (OpenCart)
+- Order data synchronization
+- Invoice/proforma file attachment to orders
+- Custom order status workflows
+- Customer tax ID (NIP) field support
+
+### Infrastructure
+- MongoDB storage for transaction logging
+- Telegram bot for notifications and alerts
+- Configurable for development and production environments
 
 ## Installation
 
