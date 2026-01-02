@@ -12,7 +12,7 @@ import (
 func Timeout(timeout time.Duration) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		fn := func(w http.ResponseWriter, r *http.Request) {
-			ctx, cancel := context.WithTimeout(r.Context(), timeout*time.Second)
+			ctx, cancel := context.WithTimeout(r.Context(), timeout)
 			defer cancel()
 
 			r = r.WithContext(ctx)
