@@ -12,7 +12,7 @@ WFSync is a payment and invoice management service that bridges **OpenCart**, **
 ```
 ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
 │  OpenCart   │◄────►│   WFSync    │◄────►│   Stripe    │
-│  (e-commerce)│      │  (service)  │      │  (payments) │
+│ (e-commerce)│      │  (service)  │      │  (payments) │
 └─────────────┘      └──────┬──────┘      └─────────────┘
                            │
                            ▼
