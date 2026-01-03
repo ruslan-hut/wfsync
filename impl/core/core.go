@@ -193,6 +193,11 @@ func (c *Core) WFirmaOrderToInvoice(ctx context.Context, orderId int64) (*entity
 	}
 	params.InvoiceId = payment.Id
 
+	err = c.oc.SaveInvoiceId(params.OrderId, payment.Id, payment.InvoiceFile)
+	if err != nil {
+		log.Warn("save invoice id", sl.Err(err))
+	}
+
 	return params, nil
 }
 
