@@ -107,10 +107,8 @@ func (s *StripeClient) VerifySignature(payload []byte, header string, tolerance 
 	if !isValid {
 		s.log.With(
 			sl.Secret("secret", secret),
+			slog.Bool("test_mode", s.testMode),
 		).Warn("signature mismatch")
-		if s.testMode {
-			return true
-		}
 	}
 	return isValid
 }
@@ -449,8 +447,17 @@ func (s *StripeClient) sessionParamsFromCheckout(pm *entity.CheckoutParams) *str
 func (s *StripeClient) saveCheckoutParams(params *entity.CheckoutParams) {
 	if s.testMode {
 		if !strings.HasPrefix(params.OrderId, "test_") {
+			originalId := params.OrderId
 			params.OrderId = "test_" + params.OrderId
+			s.log.With(
+				slog.String("original_order_id", originalId),
+				slog.String("modified_order_id", params.OrderId),
+			).Debug("prefixed order ID with test_ in test mode")
 		}
+	}
+	if s.db == nil {
+		s.log.Warn("database not configured, skipping save checkout params")
+		return
 	}
 	err := s.db.SaveCheckoutParams(params)
 	if err != nil {

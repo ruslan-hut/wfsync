@@ -167,11 +167,16 @@ func (c *Core) WFirmaOrderToInvoice(ctx context.Context, orderId int64) (*entity
 	if params == nil {
 		return nil, fmt.Errorf("order not found")
 	}
+
+	log := c.log.With(
+		slog.String("order_id", params.OrderId),
+		slog.Int64("total", params.Total),
+		slog.String("date", params.Created.Format("2006-01-02")),
+	)
+
 	linesTotal := params.ItemsTotal()
 	if linesTotal != params.Total {
-		c.log.With(
-			slog.String("order_id", params.OrderId),
-			slog.Int64("total", params.Total),
+		log.With(
 			slog.Int64("lines_total", linesTotal),
 			slog.Int64("diff", params.Total-linesTotal),
 		).Warn("order total mismatch")
@@ -180,21 +185,27 @@ func (c *Core) WFirmaOrderToInvoice(ctx context.Context, orderId int64) (*entity
 
 	params.Paid = false
 
+	log.Debug("order to invoice")
+
 	payment, err := c.inv.RegisterInvoice(ctx, params)
 	if err != nil {
 		return nil, err
 	}
 	params.InvoiceId = payment.Id
 
+	err = c.oc.SaveInvoiceId(params.OrderId, payment.Id, payment.InvoiceFile)
+	if err != nil {
+		log.Warn("save invoice id", sl.Err(err))
+	}
+
 	return params, nil
 }
 
-func (c *Core) WFirmaRegisterProforma(params *entity.CheckoutParams) (*entity.Payment, error) {
+func (c *Core) WFirmaRegisterProforma(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
 	if c.inv == nil {
 		return nil, fmt.Errorf("invoice service not connected")
 	}
 
-	ctx := context.Background()
 	var payment *entity.Payment
 	var err error
 
@@ -234,12 +245,11 @@ func (c *Core) WFirmaRegisterProforma(params *entity.CheckoutParams) (*entity.Pa
 	return payment, nil
 }
 
-func (c *Core) WFirmaRegisterInvoice(params *entity.CheckoutParams) (*entity.Payment, error) {
+func (c *Core) WFirmaRegisterInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
 	if c.inv == nil {
 		return nil, fmt.Errorf("invoice service not connected")
 	}
 
-	ctx := context.Background()
 	var payment *entity.Payment
 	var err error
 
@@ -301,7 +311,7 @@ func (c *Core) StripeCancelPayment(sessionId, reason string) (*entity.Payment, e
 	return c.sc.CancelPayment(sessionId, reason)
 }
 
-func (c *Core) StripePayAmount(params *entity.CheckoutParams) (*entity.Payment, error) {
+func (c *Core) StripePayAmount(_ context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
 	err := params.Validate()
 	if err != nil {
 		return nil, err
@@ -318,7 +328,7 @@ func (c *Core) StripePayAmount(params *entity.CheckoutParams) (*entity.Payment, 
 	return c.sc.PayAmount(params)
 }
 
-func (c *Core) WFirmaOrderFileProforma(_ context.Context, orderId int64) (*entity.Payment, error) {
+func (c *Core) WFirmaOrderFileProforma(ctx context.Context, orderId int64) (*entity.Payment, error) {
 	if c.inv == nil {
 		return nil, fmt.Errorf("invoice service not connected")
 	}
@@ -334,7 +344,7 @@ func (c *Core) WFirmaOrderFileProforma(_ context.Context, orderId int64) (*entit
 		return nil, fmt.Errorf("order not found")
 	}
 
-	payment, err := c.WFirmaRegisterProforma(params)
+	payment, err := c.WFirmaRegisterProforma(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +354,7 @@ func (c *Core) WFirmaOrderFileProforma(_ context.Context, orderId int64) (*entit
 	return payment, nil
 }
 
-func (c *Core) WFirmaOrderFileInvoice(_ context.Context, orderId int64) (*entity.Payment, error) {
+func (c *Core) WFirmaOrderFileInvoice(ctx context.Context, orderId int64) (*entity.Payment, error) {
 	if c.inv == nil {
 		return nil, fmt.Errorf("invoice service not connected")
 	}
@@ -360,7 +370,7 @@ func (c *Core) WFirmaOrderFileInvoice(_ context.Context, orderId int64) (*entity
 		return nil, fmt.Errorf("order not found")
 	}
 
-	payment, err := c.WFirmaRegisterInvoice(params)
+	payment, err := c.WFirmaRegisterInvoice(ctx, params)
 	if err != nil {
 		return nil, err
 	}
@@ -370,12 +380,12 @@ func (c *Core) WFirmaOrderFileInvoice(_ context.Context, orderId int64) (*entity
 	return payment, nil
 }
 
-func (c *Core) WFirmaCreateProforma(params *entity.CheckoutParams) (*entity.Payment, error) {
-	return c.WFirmaRegisterProforma(params)
+func (c *Core) WFirmaCreateProforma(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
+	return c.WFirmaRegisterProforma(ctx, params)
 }
 
-func (c *Core) WFirmaCreateInvoice(params *entity.CheckoutParams) (*entity.Payment, error) {
-	return c.WFirmaRegisterInvoice(params)
+func (c *Core) WFirmaCreateInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
+	return c.WFirmaRegisterInvoice(ctx, params)
 }
 
 func (c *Core) B2BCreateProforma(order *entity.B2BOrder) (*entity.Payment, error) {

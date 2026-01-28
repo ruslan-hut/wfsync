@@ -1,5 +1,10 @@
 # CLAUDE.md - Project Guide for AI Assistants
 
+## Workflow Settings
+
+- **Never run builds or tests** - the user will build and test manually and report any errors
+- Do not run `go build`, `go test`, `go run`, or similar commands to verify changes
+
 ## Project Overview
 
 WFSync is a Go-based payment and invoice management service that integrates Stripe payment processing with Wfirma invoice management and OpenCart e-commerce platform.

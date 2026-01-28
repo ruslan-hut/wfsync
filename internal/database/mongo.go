@@ -58,6 +58,12 @@ func (m *MongoDB) disconnect(connection *mongo.Client) {
 	_ = connection.Disconnect(m.ctx)
 }
 
+// Close is a no-op since connections are created per-operation.
+// This method exists for interface consistency with other databases.
+func (m *MongoDB) Close(_ context.Context) error {
+	return nil
+}
+
 func (m *MongoDB) findError(err error) error {
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return nil
@@ -179,7 +185,7 @@ func (m *MongoDB) GetCheckoutParamsForEvent(eventId string) (*entity.CheckoutPar
 	var params entity.CheckoutParams
 	err = collection.FindOne(m.ctx, filter).Decode(&params)
 	if err != nil {
-		return nil, err
+		return nil, m.findError(err)
 	}
 	return &params, nil
 }
@@ -195,7 +201,7 @@ func (m *MongoDB) GetCheckoutParamsSession(sessionId string) (*entity.CheckoutPa
 	var params entity.CheckoutParams
 	err = collection.FindOne(m.ctx, filter).Decode(&params)
 	if err != nil {
-		return nil, err
+		return nil, m.findError(err)
 	}
 	return &params, nil
 }

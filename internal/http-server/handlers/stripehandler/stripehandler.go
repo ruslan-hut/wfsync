@@ -55,7 +55,7 @@ func Event(logger *slog.Logger, handler Core) http.HandlerFunc {
 			slog.Any("type", evt.Type),
 		)
 
-		handler.StripeEvent(context.Background(), &evt)
+		handler.StripeEvent(r.Context(), &evt)
 
 		w.WriteHeader(http.StatusOK)
 	}

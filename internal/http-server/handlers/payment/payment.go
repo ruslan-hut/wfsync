@@ -1,6 +1,7 @@
 package payment
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -17,7 +18,7 @@ type Core interface {
 	StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment, error)
 	StripeCaptureAmount(sessionId string, amount int64) (*entity.Payment, error)
 	StripeCancelPayment(sessionId, reason string) (*entity.Payment, error)
-	StripePayAmount(params *entity.CheckoutParams) (*entity.Payment, error)
+	StripePayAmount(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 }
 
 func Hold(log *slog.Logger, handler Core) http.HandlerFunc {
@@ -192,8 +193,9 @@ func Pay(log *slog.Logger, handler Core) http.HandlerFunc {
 		)
 		checkoutParams.Source = entity.SourceApi
 
-		pm, err := handler.StripePayAmount(&checkoutParams)
+		pm, err := handler.StripePayAmount(r.Context(), &checkoutParams)
 		if err != nil {
+			logger.Error("pay amount", sl.Err(err))
 			render.Status(r, 400)
 			render.JSON(w, r, response.Error(fmt.Sprintf("Get link: %v", err)))
 			return

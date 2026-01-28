@@ -22,8 +22,8 @@ type Core interface {
 	WFirmaOrderToInvoice(ctx context.Context, orderId int64) (*entity.CheckoutParams, error)
 	WFirmaOrderFileProforma(ctx context.Context, orderId int64) (*entity.Payment, error)
 	WFirmaOrderFileInvoice(ctx context.Context, orderId int64) (*entity.Payment, error)
-	WFirmaCreateProforma(params *entity.CheckoutParams) (*entity.Payment, error)
-	WFirmaCreateInvoice(params *entity.CheckoutParams) (*entity.Payment, error)
+	WFirmaCreateProforma(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
+	WFirmaCreateInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 }
 
 func Download(logger *slog.Logger, handler Core) http.HandlerFunc {
@@ -51,7 +51,7 @@ func Download(logger *slog.Logger, handler Core) http.HandlerFunc {
 			return
 		}
 
-		fileStream, meta, err := handler.WFirmaInvoiceDownload(context.Background(), invoiceId)
+		fileStream, meta, err := handler.WFirmaInvoiceDownload(r.Context(), invoiceId)
 		if err != nil {
 			log.Error("invoice download", sl.Err(err))
 			render.JSON(w, r, response.Error(fmt.Sprintf("Request failed: %v", err)))
@@ -110,7 +110,7 @@ func OrderToInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 			return
 		}
 
-		params, err := handler.WFirmaOrderToInvoice(context.Background(), id)
+		params, err := handler.WFirmaOrderToInvoice(r.Context(), id)
 		if err != nil {
 			log.Error("invoice creation", sl.Err(err))
 			render.JSON(w, r, response.Error(fmt.Sprintf("Request failed: %v", err)))
@@ -157,7 +157,7 @@ func FileProforma(logger *slog.Logger, handler Core) http.HandlerFunc {
 			return
 		}
 
-		payment, err := handler.WFirmaOrderFileProforma(context.Background(), id)
+		payment, err := handler.WFirmaOrderFileProforma(r.Context(), id)
 		if err != nil {
 			log.Error("proforma creation", sl.Err(err))
 			render.JSON(w, r, response.Error(fmt.Sprintf("Request failed: %v", err)))
@@ -204,7 +204,7 @@ func FileInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 			return
 		}
 
-		payment, err := handler.WFirmaOrderFileInvoice(context.Background(), id)
+		payment, err := handler.WFirmaOrderFileInvoice(r.Context(), id)
 		if err != nil {
 			log.Error("invoice creation", sl.Err(err))
 			render.JSON(w, r, response.Error(fmt.Sprintf("Request failed: %v", err)))
@@ -251,7 +251,7 @@ func CreateProforma(logger *slog.Logger, handler Core) http.HandlerFunc {
 
 		log = log.With(slog.String("order_id", params.OrderId))
 
-		payment, err := handler.WFirmaCreateProforma(&params)
+		payment, err := handler.WFirmaCreateProforma(r.Context(), &params)
 		if err != nil {
 			log.Error("proforma creation", sl.Err(err))
 			render.JSON(w, r, response.Error(fmt.Sprintf("Request failed: %v", err)))
@@ -298,7 +298,7 @@ func CreateInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 
 		log = log.With(slog.String("order_id", params.OrderId))
 
-		payment, err := handler.WFirmaCreateInvoice(&params)
+		payment, err := handler.WFirmaCreateInvoice(r.Context(), &params)
 		if err != nil {
 			log.Error("invoice creation", sl.Err(err))
 			render.JSON(w, r, response.Error(fmt.Sprintf("Request failed: %v", err)))

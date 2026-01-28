@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -36,15 +37,14 @@ type Handler interface {
 	b2b.Core
 }
 
-func New(conf *config.Config, log *slog.Logger, handler Handler) error {
-
-	server := Server{
+func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error) {
+	server := &Server{
 		conf: conf,
 		log:  log.With(sl.Module("api.server")),
 	}
 
 	router := chi.NewRouter()
-	router.Use(timeout.Timeout(5))
+	router.Use(timeout.Timeout(30 * time.Second)) // wfirma requests need long timeouts
 	router.Use(middleware.RequestID)
 	router.Use(middleware.Recoverer)
 	router.Use(render.SetContentType(render.ContentTypeJSON))
@@ -89,10 +89,21 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) error {
 	serverAddress := fmt.Sprintf("%s:%s", conf.Listen.BindIp, conf.Listen.Port)
 	listener, err := net.Listen("tcp", serverAddress)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	server.log.Info("starting api server", slog.String("address", serverAddress))
 
-	return server.httpServer.Serve(listener)
+	go func() {
+		if err := server.httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
+			server.log.Error("http server error", sl.Err(err))
+		}
+	}()
+
+	return server, nil
+}
+
+func (s *Server) Shutdown(ctx context.Context) error {
+	s.log.Info("shutting down api server")
+	return s.httpServer.Shutdown(ctx)
 }

@@ -24,6 +24,7 @@ type TgBot struct {
 	db          Database
 	users       map[int64]*entity.User
 	minLogLevel slog.Level
+	updater     *ext.Updater
 }
 
 func NewTgBot(apiKey string, db Database, log *slog.Logger) (*TgBot, error) {
@@ -54,14 +55,14 @@ func (t *TgBot) Start() error {
 		},
 		MaxRoutines: ext.DefaultMaxRoutines,
 	})
-	updater := ext.NewUpdater(dispatcher, nil)
+	t.updater = ext.NewUpdater(dispatcher, nil)
 
 	dispatcher.AddHandler(handlers.NewCommand("start", t.start))
 	dispatcher.AddHandler(handlers.NewCommand("stop", t.stop))
 	dispatcher.AddHandler(handlers.NewCommand("level", t.level))
 
 	// Start receiving updates.
-	err := updater.StartPolling(t.api, &ext.PollingOpts{
+	err := t.updater.StartPolling(t.api, &ext.PollingOpts{
 		DropPendingUpdates: true,
 		GetUpdatesOpts: &tgbotapi.GetUpdatesOpts{
 			Timeout: 9,
@@ -71,14 +72,20 @@ func (t *TgBot) Start() error {
 		},
 	})
 	if err != nil {
-		panic("failed to start polling: " + err.Error())
+		return fmt.Errorf("failed to start polling: %w", err)
 	}
 
 	// Idle, to keep updates coming in, and avoid bot stopping.
-	updater.Idle()
+	t.updater.Idle()
 
-	// Set up an update configuration
 	return nil
+}
+
+func (t *TgBot) Stop() {
+	if t.updater != nil {
+		t.log.Info("stopping telegram bot")
+		t.updater.Stop()
+	}
 }
 
 func (t *TgBot) loadUsers() {
