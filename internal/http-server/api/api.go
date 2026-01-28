@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 	"wfsync/internal/config"
+	"wfsync/internal/http-server/handlers/b2b"
 	"wfsync/internal/http-server/handlers/errors"
 	"wfsync/internal/http-server/handlers/payment"
 	"wfsync/internal/http-server/handlers/stripehandler"
@@ -32,6 +33,7 @@ type Handler interface {
 	stripehandler.Core
 	wfinvoice.Core
 	payment.Core
+	b2b.Core
 }
 
 func New(conf *config.Config, log *slog.Logger, handler Handler) error {
@@ -65,6 +67,10 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) error {
 			st.Post("/pay", payment.Pay(log, handler))
 			st.Post("/capture/{id}", payment.Capture(log, handler))
 			st.Post("/cancel/{id}", payment.Cancel(log, handler))
+		})
+		rootApi.Route("/b2b", func(b2bRouter chi.Router) {
+			b2bRouter.Post("/proforma", b2b.CreateProforma(log, handler))
+			b2bRouter.Post("/invoice", b2b.CreateInvoice(log, handler))
 		})
 	})
 	router.Route("/webhook", func(rootWH chi.Router) {

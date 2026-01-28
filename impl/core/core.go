@@ -377,3 +377,13 @@ func (c *Core) WFirmaCreateProforma(params *entity.CheckoutParams) (*entity.Paym
 func (c *Core) WFirmaCreateInvoice(params *entity.CheckoutParams) (*entity.Payment, error) {
 	return c.WFirmaRegisterInvoice(params)
 }
+
+func (c *Core) B2BCreateProforma(order *entity.B2BOrder) (*entity.Payment, error) {
+	params := order.ToCheckoutParams()
+	return c.WFirmaRegisterProforma(params)
+}
+
+func (c *Core) B2BCreateInvoice(order *entity.B2BOrder) (*entity.Payment, error) {
+	params := order.ToCheckoutParams()
+	return c.WFirmaRegisterInvoice(params)
+}
