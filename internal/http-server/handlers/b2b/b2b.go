@@ -1,6 +1,7 @@
 package b2b
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,8 +15,8 @@ import (
 )
 
 type Core interface {
-	B2BCreateProforma(order *entity.B2BOrder) (*entity.Payment, error)
-	B2BCreateInvoice(order *entity.B2BOrder) (*entity.Payment, error)
+	B2BCreateProforma(ctx context.Context, order *entity.B2BOrder) (*entity.Payment, error)
+	B2BCreateInvoice(ctx context.Context, order *entity.B2BOrder) (*entity.Payment, error)
 }
 
 func CreateProforma(logger *slog.Logger, handler Core) http.HandlerFunc {
@@ -58,7 +59,7 @@ func CreateProforma(logger *slog.Logger, handler Core) http.HandlerFunc {
 
 		log = log.With(slog.String("order_number", order.OrderNumber))
 
-		payment, err := handler.B2BCreateProforma(&order)
+		payment, err := handler.B2BCreateProforma(r.Context(), &order)
 		if err != nil {
 			log.Error("proforma creation", sl.Err(err))
 			render.JSON(w, r, response.Error(fmt.Sprintf("Request failed: %v", err)))
@@ -112,7 +113,7 @@ func CreateInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 
 		log = log.With(slog.String("order_number", order.OrderNumber))
 
-		payment, err := handler.B2BCreateInvoice(&order)
+		payment, err := handler.B2BCreateInvoice(r.Context(), &order)
 		if err != nil {
 			log.Error("invoice creation", sl.Err(err))
 			render.JSON(w, r, response.Error(fmt.Sprintf("Request failed: %v", err)))

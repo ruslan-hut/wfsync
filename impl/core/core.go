@@ -388,12 +388,12 @@ func (c *Core) WFirmaCreateInvoice(ctx context.Context, params *entity.CheckoutP
 	return c.WFirmaRegisterInvoice(ctx, params)
 }
 
-func (c *Core) B2BCreateProforma(order *entity.B2BOrder) (*entity.Payment, error) {
+func (c *Core) B2BCreateProforma(ctx context.Context, order *entity.B2BOrder) (*entity.Payment, error) {
 	params := order.ToCheckoutParams()
-	return c.WFirmaRegisterProforma(params)
+	return c.WFirmaRegisterProforma(ctx, params)
 }
 
-func (c *Core) B2BCreateInvoice(order *entity.B2BOrder) (*entity.Payment, error) {
+func (c *Core) B2BCreateInvoice(ctx context.Context, order *entity.B2BOrder) (*entity.Payment, error) {
 	params := order.ToCheckoutParams()
-	return c.WFirmaRegisterInvoice(params)
+	return c.WFirmaRegisterInvoice(ctx, params)
 }
