@@ -356,6 +356,7 @@ func (c *Client) resolveGoodId(ctx context.Context, sku string) *int64 {
 		return nil
 	}
 	if goodId == 0 {
+		log.Info("no good was found by sku")
 		return nil
 	}
 
