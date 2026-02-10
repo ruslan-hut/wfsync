@@ -20,11 +20,20 @@ import (
 	"github.com/google/uuid"
 )
 
+// invoiceType maps to the wFirma "type" field.
+// See entity.go header for all supported values.
 type invoiceType string
 
 const (
-	invoiceProforma invoiceType = "proforma"
-	invoiceNormal   invoiceType = "normal"
+	invoiceProforma invoiceType = "proforma" // proforma invoice (przedpłata)
+	invoiceNormal   invoiceType = "normal"   // standard VAT invoice (faktura VAT)
+
+	// defaultPaymentMethod is used for all created invoices.
+	// Supported values: "transfer", "cash", "compensation", "cod", "payment_card".
+	defaultPaymentMethod = "transfer"
+
+	// defaultPaymentDays is the number of days from the invoice date until payment is due.
+	defaultPaymentDays = 7
 )
 
 type Database interface {
@@ -68,7 +77,9 @@ func (c *Client) SetDatabase(db Database) {
 	c.db = db
 }
 
-// request sends a signed POST to wFirma API using Access/Secret key headers.
+// request sends a signed POST to the wFirma API (https://api2.wfirma.pl).
+// All endpoints use POST with JSON input/output.
+// Auth is via HTTP headers: appKey, accessKey, secretKey.
 func (c *Client) request(ctx context.Context, module, action string, payload interface{}) ([]byte, error) {
 	log := c.log.With(
 		slog.String("module", module),
@@ -112,7 +123,9 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 	return body, nil
 }
 
-// getOrCreateContractor returns contractor ID in wFirma for the invoice customer.
+// createContractor registers a new contractor in wFirma and returns its ID.
+// Contractor fields: name, email, country (ISO 3166 alpha-2), zip, city, street, nip, tax_id_type.
+// tax_id_type: "other" = no tax ID provided, "custom" = tax ID present.
 func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDetails) (string, error) {
 	if customer == nil {
 		return "", fmt.Errorf("no customer")
@@ -193,6 +206,7 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 	return contr.ID, nil
 }
 
+// getContractor searches for an existing contractor by email. Returns empty string if not found.
 func (c *Client) getContractor(ctx context.Context, email string) (string, error) {
 	if email == "" {
 		return "", nil
@@ -243,6 +257,8 @@ func (c *Client) getContractor(ctx context.Context, email string) (string, error
 	return "", nil
 }
 
+// DownloadInvoice fetches the PDF file for a given wFirma invoice ID.
+// Uses the invoices/download/{id} endpoint. Returns the saved filename and file metadata.
 func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string, *entity.FileMeta, error) {
 	if !c.enabled {
 		return "", nil, fmt.Errorf("wFirma is disabled")
@@ -346,6 +362,7 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string,
 	return fileName, meta, nil
 }
 
+// RegisterInvoice creates a standard VAT invoice (faktura VAT) in wFirma.
 func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
 	if !c.enabled {
 		return nil, fmt.Errorf("wFirma is disabled")
@@ -353,6 +370,7 @@ func (c *Client) RegisterInvoice(ctx context.Context, params *entity.CheckoutPar
 	return c.invoice(ctx, invoiceNormal, params)
 }
 
+// RegisterProforma creates a proforma invoice in wFirma.
 func (c *Client) RegisterProforma(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
 	if !c.enabled {
 		return nil, fmt.Errorf("wFirma is disabled")
@@ -360,6 +378,8 @@ func (c *Client) RegisterProforma(ctx context.Context, params *entity.CheckoutPa
 	return c.invoice(ctx, invoiceProforma, params)
 }
 
+// invoice builds and sends an invoices/add request to the wFirma API.
+// Flow: validate params → find/create contractor → build invoice with contents → POST to API → persist result.
 func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entity.CheckoutParams) (*entity.Payment, error) {
 	log := c.log.With(slog.String("session_id", params.SessionId), slog.String("order_id", params.OrderId))
 	defer func() {
@@ -414,19 +434,23 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		})
 	}
 
-	//iso := func(ts int64) string { return time.Unix(ts, 0).Format("2006-01-02") }
 	total := float64(params.Total) / 100.0
+	issueDate := params.Created.Format("2006-01-02")
+	paymentDate := params.Created.AddDate(0, 0, defaultPaymentDays).Format("2006-01-02")
 
 	invoice := &Invoice{
-		Contractor:  contractor,
-		Type:        string(invType),
-		PriceType:   "brutto",
-		Total:       total,
-		IdExternal:  params.OrderId,
-		Description: "Numer zamówienia: " + params.OrderId,
-		Date:        params.Created.Format("2006-01-02"),
-		Currency:    strings.ToUpper(params.Currency),
-		Contents:    contents,
+		Contractor:    contractor,
+		Type:          string(invType),
+		PriceType:     "brutto",
+		PaymentMethod: defaultPaymentMethod,
+		PaymentDate:   paymentDate,
+		DisposalDate:  issueDate, // date of sale defaults to the issue date
+		Total:         total,
+		IdExternal:    params.OrderId,
+		Description:   "Numer zamówienia: " + params.OrderId,
+		Date:          issueDate,
+		Currency:      strings.ToUpper(params.Currency),
+		Contents:      contents,
 	}
 
 	addPayload := map[string]interface{}{
@@ -523,6 +547,8 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	return payment, nil
 }
 
+// addPayment registers a payment against an existing invoice in wFirma (payments/add).
+// Currently disabled — see the commented-out call in invoice().
 func (c *Client) addPayment(ctx context.Context, invoice Invoice) error {
 	paymentData := map[string]interface{}{
 		"api": map[string]interface{}{
