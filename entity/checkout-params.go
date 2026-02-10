@@ -133,12 +133,16 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 }
 
 // TaxRate calculates the tax rate as a percentage based on the tax value and total amount. Returns 0 if not applicable.
+// Shipping is excluded from the denominator because OpenCart's tax total only covers product VAT, not shipping VAT.
 func (c *CheckoutParams) TaxRate() int {
 	if c.TaxValue == 0 || c.Total <= c.TaxValue {
 		return 0
-	} else {
-		return int(math.Round(float64(c.TaxValue) * 100 / (float64(c.Total) - float64(c.TaxValue))))
 	}
+	net := float64(c.Total) - float64(c.Shipping) - float64(c.TaxValue)
+	if net <= 0 {
+		return 0
+	}
+	return int(math.Round(float64(c.TaxValue) * 100 / net))
 }
 
 type LineItem struct {
