@@ -48,6 +48,10 @@ const (
 	// When empty, shipping uses the same VAT code as goods.
 	// Set to a specific code (e.g. "NP", "ZW", "23") to tax shipping differently.
 	shippingVatCode = ""
+
+	// shippingSku is the default SKU used for shipping line items when no SKU is set.
+	// Used to look up the wFirma good ID for shipping costs.
+	shippingSku = "Zwrot"
 )
 
 // euCountries contains EU member state codes (ISO 3166-1 alpha-2), excluding Poland.
@@ -570,8 +574,12 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			Unit:  "szt.",
 			Vat:   vatCode,
 		}
-		if line.Sku != "" {
-			content.Good = c.resolveGoodId(ctx, line.Sku)
+		sku := line.Sku
+		if sku == "" && line.Shipping {
+			sku = shippingSku
+		}
+		if sku != "" {
+			content.Good = c.resolveGoodId(ctx, sku)
 		}
 		contents = append(contents, &ContentLine{
 			Content: content,
