@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"wfsync/entity"
@@ -34,7 +35,31 @@ const (
 
 	// defaultPaymentDays is the number of days from the invoice date until payment is due.
 	defaultPaymentDays = 7
+
+	// VAT codes for cross-border transactions (passed in invoicecontent "vat" field).
+	// For domestic (PL) invoices, use numeric strings like "23", "8", "0".
+	vatWDT  = "WDT"  // 0% intra-community goods delivery (EU buyer with VAT number)
+	vatEXP  = "EXP"  // 0% export of goods (non-EU buyer)
+	vatNP   = "NP"   // not subject to Polish VAT (non-EU services)
+	vatNPUE = "NPUE" // not subject to Polish VAT, EU reverse charge (EU services)
+	vatZW   = "ZW"   // exempt from VAT
+
+	// shippingVatCode overrides the VAT code for shipping line items.
+	// When empty, shipping uses the same VAT code as goods.
+	// Set to a specific code (e.g. "NP", "ZW", "23") to tax shipping differently.
+	shippingVatCode = ""
 )
+
+// euCountries contains EU member state codes (ISO 3166-1 alpha-2), excluding Poland.
+// Used to determine whether a foreign contractor qualifies for intra-community (WDT) rates.
+var euCountries = map[string]bool{
+	"AT": true, "BE": true, "BG": true, "HR": true, "CY": true,
+	"CZ": true, "DK": true, "EE": true, "FI": true, "FR": true,
+	"DE": true, "GR": true, "HU": true, "IE": true, "IT": true,
+	"LV": true, "LT": true, "LU": true, "MT": true, "NL": true,
+	"PT": true, "RO": true, "SK": true, "SI": true, "ES": true,
+	"SE": true,
+}
 
 type Database interface {
 	SaveInvoice(id string, invoice interface{}) error
@@ -378,6 +403,24 @@ func (c *Client) RegisterProforma(ctx context.Context, params *entity.CheckoutPa
 	return c.invoice(ctx, invoiceProforma, params)
 }
 
+// resolveGoodsVatCode determines the correct VAT code for goods based on Polish tax rules:
+//   - PL or unknown country → numeric rate from the order (e.g. "23")
+//   - EU country + VAT number → "WDT" (intra-community delivery, 0%)
+//   - EU country without VAT number → standard domestic rate (buyer is a consumer)
+//   - Non-EU country → "EXP" (export, 0%)
+func resolveGoodsVatCode(taxRate int, countryCode string, hasTaxId bool) string {
+	if countryCode == "" || countryCode == "PL" {
+		return strconv.Itoa(taxRate)
+	}
+	if euCountries[countryCode] && hasTaxId {
+		return vatWDT
+	}
+	if !euCountries[countryCode] {
+		return vatEXP
+	}
+	return strconv.Itoa(taxRate)
+}
+
 // invoice builds and sends an invoices/add request to the wFirma API.
 // Flow: validate params → find/create contractor → build invoice with contents → POST to API → persist result.
 func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entity.CheckoutParams) (*entity.Payment, error) {
@@ -419,17 +462,23 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		ID: contractorID,
 	}
 
-	vat := params.TaxRate()
+	countryCode := params.ClientDetails.CountryCode()
+	hasTaxId := params.ClientDetails.TaxId != ""
+	goodsVat := resolveGoodsVatCode(params.TaxRate(), countryCode, hasTaxId)
 
 	var contents []*ContentLine
 	for _, line := range params.LineItems {
+		vatCode := goodsVat
+		if line.Shipping && shippingVatCode != "" {
+			vatCode = shippingVatCode
+		}
 		contents = append(contents, &ContentLine{
 			Content: &Content{
 				Name:  line.Name,
 				Count: line.Qty,
 				Price: float64(line.Price) / 100.0,
 				Unit:  "szt.",
-				Vat:   vat,
+				Vat:   vatCode,
 			},
 		})
 	}

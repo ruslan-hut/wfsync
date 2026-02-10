@@ -36,14 +36,19 @@ type Invoice struct {
 }
 
 // Content represents a single line item in an invoice (invoicecontent).
-// Vat is the tax rate as an integer percentage (e.g. 23 for 23%).
-// For exempt/not-applicable VAT use string-based vat_code_id instead (not yet supported).
+// Vat accepts both numeric rates ("23", "8", "5", "0") and special codes:
+//
+//	"WDT"  — 0% intra-community goods delivery (EU buyer with VAT number)
+//	"EXP"  — 0% export of goods (non-EU buyer)
+//	"NP"   — not subject to Polish VAT (non-EU services)
+//	"NPUE" — not subject to Polish VAT, EU (EU services, reverse charge)
+//	"ZW"   — exempt from VAT
 type Content struct {
 	Name  string  `json:"name" bson:"name"`
 	Count int64   `json:"count" bson:"count"`
 	Price float64 `json:"price" bson:"price"` // per-unit price in major currency units (e.g. PLN, not groszy)
 	Unit  string  `json:"unit" bson:"unit"`   // measurement unit, e.g. "szt." (pieces)
-	Vat   int     `json:"vat" bson:"vat"`     // VAT rate in percent: 0, 8, 23 etc.
+	Vat   string  `json:"vat" bson:"vat"`     // VAT code: "23", "8", "0", "WDT", "EXP", "NP", "NPUE", "ZW"
 }
 
 // ContentLine wraps Content for the wFirma API array structure.
