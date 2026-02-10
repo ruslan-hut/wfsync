@@ -45,6 +45,7 @@ type Invoice struct {
 //	"ZW"   — exempt from VAT
 type Content struct {
 	Name  string  `json:"name" bson:"name"`
+	Good  *int64  `json:"good,omitempty" bson:"good,omitempty"` // wFirma good ID — links line item to product catalog
 	Count int64   `json:"count" bson:"count"`
 	Price float64 `json:"price" bson:"price"` // per-unit price in major currency units (e.g. PLN, not groszy)
 	Unit  string  `json:"unit" bson:"unit"`   // measurement unit, e.g. "szt." (pieces)

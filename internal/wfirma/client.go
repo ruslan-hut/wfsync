@@ -65,6 +65,8 @@ type Database interface {
 	SaveInvoice(id string, invoice interface{}) error
 	SaveCheckoutParams(params *entity.CheckoutParams) error
 	UpdateCheckoutParams(params *entity.CheckoutParams) error
+	GetProductBySku(sku string) (*entity.Product, error)
+	SaveProduct(product *entity.Product) error
 }
 
 type Client struct {
@@ -282,6 +284,94 @@ func (c *Client) getContractor(ctx context.Context, email string) (string, error
 	return "", nil
 }
 
+// findGoodBySku searches the wFirma goods catalog by code (SKU).
+// Returns the good ID if found, 0 if not found or on error.
+func (c *Client) findGoodBySku(ctx context.Context, sku string) (int64, error) {
+	search := map[string]interface{}{
+		"api": map[string]interface{}{
+			"goods": map[string]interface{}{
+				"parameters": map[string]interface{}{
+					"conditions": []map[string]interface{}{
+						{
+							"condition": map[string]interface{}{
+								"field":    "code",
+								"operator": "eq",
+								"value":    sku,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	res, err := c.request(ctx, "goods", "find", search)
+	if err != nil {
+		return 0, err
+	}
+
+	var findResp struct {
+		Goods struct {
+			Element0 struct {
+				Good struct {
+					ID json.Number `json:"id"`
+				} `json:"good"`
+			} `json:"0"`
+		} `json:"goods"`
+	}
+	if err = json.Unmarshal(res, &findResp); err != nil {
+		return 0, err
+	}
+	idStr := findResp.Goods.Element0.Good.ID.String()
+	if idStr == "" || idStr == "0" {
+		return 0, nil
+	}
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse good id %q: %w", idStr, err)
+	}
+	return id, nil
+}
+
+// resolveGoodId looks up the wFirma good ID for a SKU: first from local DB, then from the wFirma API.
+// If found via API, the mapping is saved to local DB for future lookups.
+// Returns nil if not found or on any error (non-fatal).
+func (c *Client) resolveGoodId(ctx context.Context, sku string) *int64 {
+	log := c.log.With(slog.String("sku", sku))
+
+	// Try local DB first.
+	if c.db != nil {
+		product, err := c.db.GetProductBySku(sku)
+		if err != nil {
+			log.Warn("get product by sku", sl.Err(err))
+		} else if product != nil && product.WfirmaId > 0 {
+			return &product.WfirmaId
+		}
+	}
+
+	// Fall back to wFirma API.
+	goodId, err := c.findGoodBySku(ctx, sku)
+	if err != nil {
+		log.Warn("find good by sku", sl.Err(err))
+		return nil
+	}
+	if goodId == 0 {
+		return nil
+	}
+
+	// Cache the mapping locally.
+	if c.db != nil {
+		err = c.db.SaveProduct(&entity.Product{
+			Sku:      sku,
+			WfirmaId: goodId,
+		})
+		if err != nil {
+			log.Warn("save product", sl.Err(err))
+		}
+	}
+	return &goodId
+}
+
 // DownloadInvoice fetches the PDF file for a given wFirma invoice ID.
 // Uses the invoices/download/{id} endpoint. Returns the saved filename and file metadata.
 func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string, *entity.FileMeta, error) {
@@ -472,14 +562,18 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		if line.Shipping && shippingVatCode != "" {
 			vatCode = shippingVatCode
 		}
+		content := &Content{
+			Name:  line.Name,
+			Count: line.Qty,
+			Price: float64(line.Price) / 100.0,
+			Unit:  "szt.",
+			Vat:   vatCode,
+		}
+		if line.Sku != "" {
+			content.Good = c.resolveGoodId(ctx, line.Sku)
+		}
 		contents = append(contents, &ContentLine{
-			Content: &Content{
-				Name:  line.Name,
-				Count: line.Qty,
-				Price: float64(line.Price) / 100.0,
-				Unit:  "szt.",
-				Vat:   vatCode,
-			},
+			Content: content,
 		})
 	}
 

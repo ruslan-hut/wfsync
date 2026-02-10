@@ -17,6 +17,7 @@ const (
 	collectionUsers          = "users"
 	collectionCheckoutParams = "checkout_params"
 	collectionInvoice        = "wfirma_invoice"
+	collectionProducts       = "products"
 )
 
 type MongoDB struct {
@@ -204,6 +205,38 @@ func (m *MongoDB) GetCheckoutParamsSession(sessionId string) (*entity.CheckoutPa
 		return nil, m.findError(err)
 	}
 	return &params, nil
+}
+
+func (m *MongoDB) GetProductBySku(sku string) (*entity.Product, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionProducts)
+	filter := bson.D{{"sku", sku}}
+	var product entity.Product
+	err = collection.FindOne(m.ctx, filter).Decode(&product)
+	if err != nil {
+		return nil, m.findError(err)
+	}
+	return &product, nil
+}
+
+func (m *MongoDB) SaveProduct(product *entity.Product) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionProducts)
+	filter := bson.D{{"sku", product.Sku}}
+	update := bson.D{{"$set", product}}
+	opts := options.Update().SetUpsert(true)
+	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	return err
 }
 
 func (m *MongoDB) SaveInvoice(id string, invoice interface{}) error {
