@@ -65,3 +65,19 @@ func IsUserTopic(topic string) bool {
 	}
 	return false
 }
+
+// TopicsForRole returns available topics based on role: admins get all, users get user topics.
+func TopicsForRole(role TelegramRole) []string {
+	if role == RoleAdmin {
+		return AllTopics()
+	}
+	return UserTopics()
+}
+
+// IsTopicAllowedForRole checks if a topic is valid for the given role.
+func IsTopicAllowedForRole(topic string, role TelegramRole) bool {
+	if role == RoleAdmin {
+		return IsValidTopic(topic)
+	}
+	return IsUserTopic(topic)
+}

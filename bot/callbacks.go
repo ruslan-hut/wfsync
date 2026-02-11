@@ -25,8 +25,9 @@ const (
 // --- Keyboard builders ---
 
 // buildTopicsKeyboard creates an inline keyboard with toggle buttons for each topic.
+// Admins see all topics; regular users see only user topics.
 func buildTopicsKeyboard(user *entity.User) tgbotapi.InlineKeyboardMarkup {
-	allTopics := entity.UserTopics()
+	allTopics := entity.TopicsForRole(user.TelegramRole)
 	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(allTopics)/2+2)
 
 	// Topic buttons in rows of 2
@@ -177,7 +178,7 @@ func (t *TgBot) onTopicCallback(_ *tgbotapi.Bot, ctx *ext.Context) error {
 		answerText = "Unsubscribed from all topics"
 
 	default:
-		if !entity.IsUserTopic(topic) {
+		if !entity.IsTopicAllowedForRole(topic, user.TelegramRole) {
 			_, _ = cq.Answer(t.api, &tgbotapi.AnswerCallbackQueryOpts{Text: "Invalid topic"})
 			return nil
 		}
@@ -187,7 +188,7 @@ func (t *TgBot) onTopicCallback(_ *tgbotapi.Bot, ctx *ext.Context) error {
 			// Unsubscribe
 			currentTopics := user.TelegramTopics
 			if len(currentTopics) == 0 {
-				currentTopics = entity.UserTopics()
+				currentTopics = entity.TopicsForRole(user.TelegramRole)
 			}
 			filtered := make([]string, 0, len(currentTopics))
 			for _, ct := range currentTopics {

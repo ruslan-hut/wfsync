@@ -182,7 +182,7 @@ func (t *TgBot) subscribe(_ *tgbotapi.Bot, ctx *ext.Context) error {
 
 	args := strings.Fields(ctx.EffectiveMessage.Text)
 	if len(args) < 2 {
-		t.plainResponse(chatId, "Usage: `/subscribe <topic|all>`\nAvailable topics: "+Sanitize(strings.Join(entity.UserTopics(), ", ")))
+		t.plainResponse(chatId, "Usage: `/subscribe <topic|all>`\nAvailable topics: "+Sanitize(strings.Join(entity.TopicsForRole(user.TelegramRole), ", ")))
 		return nil
 	}
 
@@ -199,8 +199,8 @@ func (t *TgBot) subscribe(_ *tgbotapi.Bot, ctx *ext.Context) error {
 		return nil
 	}
 
-	if !entity.IsUserTopic(topic) {
-		t.plainResponse(chatId, "Invalid topic: `"+Sanitize(topic)+"`\nAvailable: "+Sanitize(strings.Join(entity.UserTopics(), ", ")))
+	if !entity.IsTopicAllowedForRole(topic, user.TelegramRole) {
+		t.plainResponse(chatId, "Invalid topic: `"+Sanitize(topic)+"`\nAvailable: "+Sanitize(strings.Join(entity.TopicsForRole(user.TelegramRole), ", ")))
 		return nil
 	}
 
@@ -243,7 +243,7 @@ func (t *TgBot) unsubscribe(_ *tgbotapi.Bot, ctx *ext.Context) error {
 
 	args := strings.Fields(ctx.EffectiveMessage.Text)
 	if len(args) < 2 {
-		t.plainResponse(chatId, "Usage: `/unsubscribe <topic|all>`\nAvailable topics: "+Sanitize(strings.Join(entity.UserTopics(), ", ")))
+		t.plainResponse(chatId, "Usage: `/unsubscribe <topic|all>`\nAvailable topics: "+Sanitize(strings.Join(entity.TopicsForRole(user.TelegramRole), ", ")))
 		return nil
 	}
 
@@ -260,15 +260,15 @@ func (t *TgBot) unsubscribe(_ *tgbotapi.Bot, ctx *ext.Context) error {
 		return nil
 	}
 
-	if !entity.IsUserTopic(topic) {
-		t.plainResponse(chatId, "Invalid topic: `"+Sanitize(topic)+"`\nAvailable: "+Sanitize(strings.Join(entity.UserTopics(), ", ")))
+	if !entity.IsTopicAllowedForRole(topic, user.TelegramRole) {
+		t.plainResponse(chatId, "Invalid topic: `"+Sanitize(topic)+"`\nAvailable: "+Sanitize(strings.Join(entity.TopicsForRole(user.TelegramRole), ", ")))
 		return nil
 	}
 
 	// If user currently has empty topics (subscribed to all), populate with all except the one being removed
 	currentTopics := user.TelegramTopics
 	if len(currentTopics) == 0 {
-		currentTopics = entity.UserTopics()
+		currentTopics = entity.TopicsForRole(user.TelegramRole)
 	}
 
 	filtered := make([]string, 0, len(currentTopics))
