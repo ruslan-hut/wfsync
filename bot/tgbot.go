@@ -103,6 +103,7 @@ func NewTgBot(apiKey string, db Database, log *slog.Logger, cfg BotConfig) (*TgB
 
 func (t *TgBot) Start() error {
 	t.loadUsers()
+	t.sanitizeUserTopics()
 
 	// Start digest buffer
 	interval := time.Duration(t.config.DigestIntervalMin) * time.Minute

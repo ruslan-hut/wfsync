@@ -343,19 +343,32 @@ func (t *TgBot) status(_ *tgbotapi.Bot, ctx *ext.Context) error {
 		enabled = "no"
 	}
 
-	msg := fmt.Sprintf(
-		"*Your Settings*\n"+
-			"Role: `%s`\n"+
-			"Enabled: `%s`\n"+
-			"Log level: `%s`\n"+
-			"Tier: `%s`\n"+
-			"Topics: `%s`",
-		Sanitize(string(user.TelegramRole)),
-		enabled,
-		Sanitize(slog.Level(user.LogLevel).String()),
-		Sanitize(tier),
-		Sanitize(topics),
-	)
+	var msg string
+	if user.IsAdmin() {
+		msg = fmt.Sprintf(
+			"*Your Settings*\n"+
+				"Role: `%s`\n"+
+				"Enabled: `%s`\n"+
+				"Log level: `%s`\n"+
+				"Tier: `%s`\n"+
+				"Topics: `%s`",
+			Sanitize(string(user.TelegramRole)),
+			enabled,
+			Sanitize(slog.Level(user.LogLevel).String()),
+			Sanitize(tier),
+			Sanitize(topics),
+		)
+	} else {
+		msg = fmt.Sprintf(
+			"*Your Settings*\n"+
+				"Enabled: `%s`\n"+
+				"Tier: `%s`\n"+
+				"Topics: `%s`",
+			enabled,
+			Sanitize(tier),
+			Sanitize(topics),
+		)
+	}
 	t.plainResponse(chatId, msg)
 	return nil
 }

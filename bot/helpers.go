@@ -154,6 +154,65 @@ func (t *TgBot) sendWithKeyboard(chatId int64, text string, keyboard tgbotapi.In
 	}
 }
 
+// sanitizeUserTopics removes topics that are no longer allowed for each user's role.
+// Called once on startup to clean up stale data after topic list changes.
+func (t *TgBot) sanitizeUserTopics() {
+	if t.db == nil {
+		return
+	}
+
+	t.mu.RLock()
+	users := make([]*entity.User, 0, len(t.users))
+	for _, u := range t.users {
+		users = append(users, u)
+	}
+	t.mu.RUnlock()
+
+	for _, user := range users {
+		if len(user.TelegramTopics) == 0 {
+			continue
+		}
+		allowed := entity.TopicsForRole(user.TelegramRole)
+		allowedSet := make(map[string]bool, len(allowed))
+		for _, t := range allowed {
+			allowedSet[t] = true
+		}
+
+		filtered := make([]string, 0, len(user.TelegramTopics))
+		changed := false
+		for _, topic := range user.TelegramTopics {
+			if topic == "none" || allowedSet[topic] {
+				filtered = append(filtered, topic)
+			} else {
+				changed = true
+			}
+		}
+
+		if !changed {
+			continue
+		}
+		if len(filtered) == 0 {
+			filtered = []string{"none"}
+		}
+		err := t.db.SetTelegramTopics(user.TelegramId, filtered)
+		if err != nil {
+			t.log.Warn("sanitizing topics",
+				slog.Int64("user_id", user.TelegramId),
+				sl.Err(err),
+			)
+		} else {
+			t.log.Info("sanitized topics",
+				slog.Int64("user_id", user.TelegramId),
+				slog.Any("removed_from", user.TelegramTopics),
+				slog.Any("kept", filtered),
+			)
+		}
+	}
+
+	// Reload after cleanup
+	t.loadUsers()
+}
+
 // reportError logs the error, notifies admins with details, and sends a neutral message to the user.
 func (t *TgBot) reportError(chatId int64, command string, err error) {
 	t.log.Error("bot command failed",
