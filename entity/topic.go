@@ -1,5 +1,10 @@
+// Package entity defines domain types shared across the application.
+
 package entity
 
+// Notification topics used to categorize bot messages.
+// Users subscribe to topics to filter which notifications they receive.
+// Log calls can tag messages with slog.String("tg_topic", entity.TopicXxx).
 const (
 	TopicPayment  = "payment"
 	TopicInvoice  = "invoice"

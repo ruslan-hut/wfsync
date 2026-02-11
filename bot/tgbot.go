@@ -1,3 +1,24 @@
+// Package bot implements a Telegram bot for managing user notifications.
+//
+// Architecture overview:
+//   - tgbot.go    — TgBot struct, lifecycle (Start/Stop), user cache, Database interface
+//   - commands.go  — User-facing commands: /start, /stop, /level, /topics, /tier, /status, /help
+//   - admin.go     — Admin commands: /users, /approve, /revoke, /admin, /invite
+//   - callbacks.go — Inline keyboard builders and callback query handlers
+//   - menus.go     — Per-user command menus via Telegram's BotCommandScope API
+//   - messaging.go — Notification routing: level filter → topic filter → tier dispatch
+//   - digest.go    — DigestBuffer for batched notification delivery
+//   - helpers.go   — Shared utilities: Sanitize, plainResponse, resolveUser, reportError
+//
+// Data flow for incoming notifications (e.g., from slog handler):
+//
+//	SendMessageWithTopic → for each user: check enabled/approved/level/topic → route by tier:
+//	  realtime → immediate send
+//	  critical → immediate send only if level >= ERROR
+//	  digest   → buffer in DigestBuffer, flushed on interval
+//
+// Thread safety: the users map and adminIds are protected by sync.RWMutex.
+// All commands and callbacks acquire RLock to read; loadUsers() acquires full Lock to refresh.
 package bot
 
 import (
@@ -11,8 +32,10 @@ import (
 	tgbotapi "github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
+	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers/filters/callbackquery"
 )
 
+// BotConfig holds Telegram-specific configuration loaded from the YAML config file.
 type BotConfig struct {
 	RequireApproval   bool
 	DigestIntervalMin int
@@ -20,6 +43,8 @@ type BotConfig struct {
 	InviteCodeLength  int
 }
 
+// Database defines the storage operations the bot depends on.
+// Implemented by internal/database/mongo.go.
 type Database interface {
 	GetTelegramUsers() ([]*entity.User, error)
 	GetAllTelegramUsers() ([]*entity.User, error)
@@ -35,16 +60,19 @@ type Database interface {
 	MigrateExistingTelegramUsers() error
 }
 
+// TgBot is the central Telegram bot instance.
+// It caches all users in memory (refreshed on every state change) and routes
+// notifications through the level → topic → tier pipeline.
 type TgBot struct {
 	log         *slog.Logger
 	api         *tgbotapi.Bot
 	db          Database
-	mu          sync.RWMutex
-	users       map[int64]*entity.User
+	mu          sync.RWMutex           // guards users and adminIds
+	users       map[int64]*entity.User // telegram_id → User; includes all roles
 	minLogLevel slog.Level
 	updater     *ext.Updater
 	digest      *DigestBuffer
-	adminIds    []int64
+	adminIds    []int64 // cached admin telegram IDs for quick notification
 	config      BotConfig
 }
 
@@ -108,6 +136,17 @@ func (t *TgBot) Start() error {
 	dispatcher.AddHandler(handlers.NewCommand("admin", t.adminCmd))
 	dispatcher.AddHandler(handlers.NewCommand("invite", t.invite))
 
+	// Callback query handlers
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(cbTopicToggle), t.onTopicCallback))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(cbTier), t.onTierCallback))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(cbLevel), t.onLevelCallback))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(cbApprove), t.onApproveCallback))
+	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(cbRevoke), t.onRevokeCallback))
+
+	// Set default bot command menu and sync per-user menus
+	t.setDefaultCommands()
+	t.syncAllUserMenus()
+
 	err := t.updater.StartPolling(t.api, &ext.PollingOpts{
 		DropPendingUpdates: true,
 		GetUpdatesOpts: &tgbotapi.GetUpdatesOpts{
@@ -135,6 +174,9 @@ func (t *TgBot) Stop() {
 	}
 }
 
+// loadUsers refreshes the in-memory user cache from the database.
+// Called on startup and after every state-changing operation (approve, topic change, etc.).
+// Rebuilds the adminIds list used by notifyAdmins.
 func (t *TgBot) loadUsers() {
 	if t.db == nil {
 		return

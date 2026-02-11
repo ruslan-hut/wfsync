@@ -2,6 +2,9 @@ package entity
 
 import "time"
 
+// InviteCode allows admins to generate one-time registration links.
+// Users open a deep link (t.me/bot?start=CODE) which auto-approves them.
+// UseInviteCode atomically increments UseCount and checks against MaxUses.
 type InviteCode struct {
 	Code      string    `bson:"code"`
 	CreatedBy int64     `bson:"created_by"`

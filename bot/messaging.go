@@ -5,6 +5,8 @@ import (
 	"wfsync/entity"
 )
 
+// SendMessage broadcasts a message at the bot's minimum log level with no topic.
+// Entry point for simple notifications that don't need topic filtering.
 func (t *TgBot) SendMessage(msg string) {
 	t.SendMessageWithLevel(msg, t.minLogLevel)
 }
@@ -19,7 +21,12 @@ func (t *TgBot) SendMessageWithLevel(msg string, level slog.Level) {
 	t.SendMessageWithTopic(msg, level, topic)
 }
 
-// SendMessageWithTopic sends a message with topic-based routing and tier handling.
+// SendMessageWithTopic is the core notification routing method.
+// For each cached user it checks: enabled → approved → log level ≥ user level → topic match.
+// Then dispatches based on the user's subscription tier:
+//   - realtime: immediate send
+//   - critical: immediate send only if level ≥ ERROR
+//   - digest:   buffer in DigestBuffer for periodic flush
 func (t *TgBot) SendMessageWithTopic(msg string, level slog.Level, topic string) {
 	t.mu.RLock()
 	users := make(map[int64]*entity.User, len(t.users))

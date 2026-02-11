@@ -10,6 +10,13 @@ import (
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 )
 
+// start handles the /start command. Three cases:
+//  1. Known approved user → re-enable notifications
+//  2. Known pending user → inform about awaiting approval
+//  3. Unknown user → register; auto-approve if valid invite code or approval not required,
+//     otherwise mark as pending and notify admins with approve/revoke buttons.
+//
+// Invite codes are passed via Telegram deep links: /start CODE
 func (t *TgBot) start(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if t.db == nil {
 		return nil
@@ -67,16 +74,30 @@ func (t *TgBot) start(_ *tgbotapi.Bot, ctx *ext.Context) error {
 		_ = t.db.SetTelegramTopics(chatId, []string{entity.TopicInvoice})
 
 		t.plainResponse(chatId, "Welcome\\! You have been approved\\. Notifications are now ENABLED\\.")
+		t.setUserCommands(chatId, entity.RoleUser)
 		t.notifyAdmins(fmt.Sprintf("New user auto\\-approved: @%s \\(%d\\)", Sanitize(username), chatId))
 	} else {
 		t.plainResponse(chatId, "Registration received\\. An admin will review your request\\.")
-		t.notifyAdmins(fmt.Sprintf("New pending registration: @%s \\(%d\\)\\. Use `/approve %d` to approve\\.", Sanitize(username), chatId, chatId))
+		t.setUserCommands(chatId, entity.RolePending)
+		// Notify admins with approve/revoke buttons
+		keyboard := buildPendingUserButtons(chatId)
+		t.mu.RLock()
+		adminIds := make([]int64, len(t.adminIds))
+		copy(adminIds, t.adminIds)
+		t.mu.RUnlock()
+		for _, adminId := range adminIds {
+			t.sendWithKeyboard(adminId,
+				fmt.Sprintf("New pending registration: @%s \\(%d\\)", Sanitize(username), chatId),
+				keyboard,
+			)
+		}
 	}
 
 	t.loadUsers()
 	return nil
 }
 
+// stop disables notifications for the calling user. Requires approved role.
 func (t *TgBot) stop(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if t.db == nil {
 		return nil
@@ -101,6 +122,7 @@ func (t *TgBot) stop(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	return nil
 }
 
+// level shows an inline keyboard to select the minimum log level for notifications.
 func (t *TgBot) level(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if t.db == nil {
 		return nil
@@ -116,39 +138,12 @@ func (t *TgBot) level(_ *tgbotapi.Bot, ctx *ext.Context) error {
 		return nil
 	}
 
-	args := strings.Fields(ctx.EffectiveMessage.Text)
-	if len(args) < 2 {
-		currentLevel := slog.Level(user.LogLevel).String()
-		t.plainResponse(chatId, fmt.Sprintf("Your current log level: %s\nAvailable levels: debug, info, warn, error", Sanitize(currentLevel)))
-		return nil
-	}
-
-	levelStr := strings.ToLower(args[1])
-	level := t.minLogLevel
-	switch levelStr {
-	case "debug":
-		level = slog.LevelDebug
-	case "info":
-		level = slog.LevelInfo
-	case "warn":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	default:
-		t.plainResponse(chatId, fmt.Sprintf("Invalid level: %s\nAvailable levels: debug, info, warn, error", Sanitize(levelStr)))
-		return nil
-	}
-
-	err := t.db.SetTelegramEnabled(user.TelegramId, true, int(level))
-	if err != nil {
-		t.reportError(chatId, "/level", err)
-		return nil
-	}
-	t.plainResponse(chatId, fmt.Sprintf("Log level set to: %s", Sanitize(level.String())))
-	t.loadUsers()
+	keyboard := buildLevelKeyboard(user.LogLevel)
+	t.sendWithKeyboard(chatId, "*Log level*\nSelect minimum level:", keyboard)
 	return nil
 }
 
+// topics shows an inline keyboard with toggle buttons for each notification topic.
 func (t *TgBot) topics(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if t.db == nil {
 		return nil
@@ -164,27 +159,12 @@ func (t *TgBot) topics(_ *tgbotapi.Bot, ctx *ext.Context) error {
 		return nil
 	}
 
-	allTopics := entity.AllTopics()
-	var sb strings.Builder
-	sb.WriteString("*Available topics:*\n")
-	for _, topic := range allTopics {
-		subscribed := user.HasTopic(topic)
-		marker := "  "
-		if subscribed {
-			marker = "\\+ "
-		}
-		sb.WriteString(fmt.Sprintf("%s`%s`\n", marker, topic))
-	}
-
-	if len(user.TelegramTopics) == 0 {
-		sb.WriteString("\nYou are subscribed to *all* topics\\.")
-	}
-
-	sb.WriteString("\nUse `/subscribe <topic>` or `/unsubscribe <topic>`")
-	t.plainResponse(chatId, sb.String())
+	keyboard := buildTopicsKeyboard(user)
+	t.sendWithKeyboard(chatId, "*Topic subscriptions*\nTap a topic to toggle:", keyboard)
 	return nil
 }
 
+// subscribe adds a topic to the user's subscription list. Text-based fallback for /topics.
 func (t *TgBot) subscribe(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if t.db == nil {
 		return nil
@@ -245,6 +225,7 @@ func (t *TgBot) subscribe(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	return nil
 }
 
+// unsubscribe removes a topic from the user's subscription list. Text-based fallback for /topics.
 func (t *TgBot) unsubscribe(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if t.db == nil {
 		return nil
@@ -310,6 +291,7 @@ func (t *TgBot) unsubscribe(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	return nil
 }
 
+// tier shows an inline keyboard to select the notification delivery mode (realtime/critical/digest).
 func (t *TgBot) tier(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if t.db == nil {
 		return nil
@@ -325,40 +307,12 @@ func (t *TgBot) tier(_ *tgbotapi.Bot, ctx *ext.Context) error {
 		return nil
 	}
 
-	args := strings.Fields(ctx.EffectiveMessage.Text)
-	if len(args) < 2 {
-		currentTier := string(user.SubscriptionTier)
-		if currentTier == "" {
-			currentTier = string(entity.TierRealtime)
-		}
-		t.plainResponse(chatId, fmt.Sprintf("Your current tier: `%s`\nAvailable: realtime, critical, digest", Sanitize(currentTier)))
-		return nil
-	}
-
-	tierStr := strings.ToLower(args[1])
-	var newTier entity.SubscriptionTier
-	switch tierStr {
-	case "realtime":
-		newTier = entity.TierRealtime
-	case "critical":
-		newTier = entity.TierCritical
-	case "digest":
-		newTier = entity.TierDigest
-	default:
-		t.plainResponse(chatId, "Invalid tier: `"+Sanitize(tierStr)+"`\nAvailable: realtime, critical, digest")
-		return nil
-	}
-
-	err := t.db.SetSubscriptionTier(chatId, newTier, "")
-	if err != nil {
-		t.reportError(chatId, "/tier", err)
-		return nil
-	}
-	t.plainResponse(chatId, "Subscription tier set to: `"+Sanitize(string(newTier))+"`")
-	t.loadUsers()
+	keyboard := buildTierKeyboard(user.SubscriptionTier)
+	t.sendWithKeyboard(chatId, "*Notification tier*\nSelect delivery mode:", keyboard)
 	return nil
 }
 
+// status displays the user's current settings: role, enabled, level, tier, topics.
 func (t *TgBot) status(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if t.db == nil {
 		return nil
@@ -406,6 +360,7 @@ func (t *TgBot) status(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	return nil
 }
 
+// help lists available commands, filtered by the caller's role.
 func (t *TgBot) help(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	chatId := ctx.EffectiveUser.Id
 	isAdmin := t.requireAdmin(chatId)
@@ -420,11 +375,9 @@ func (t *TgBot) help(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if isApproved {
 		sb.WriteString("\n*User Commands:*\n")
 		sb.WriteString("`/stop` \\- Disable notifications\n")
-		sb.WriteString("`/level <debug|info|warn|error>` \\- Set log level\n")
-		sb.WriteString("`/topics` \\- View topic subscriptions\n")
-		sb.WriteString("`/subscribe <topic|all>` \\- Subscribe to topic\n")
-		sb.WriteString("`/unsubscribe <topic|all>` \\- Unsubscribe from topic\n")
-		sb.WriteString("`/tier <realtime|critical|digest>` \\- Set notification tier\n")
+		sb.WriteString("`/level` \\- Set log level\n")
+		sb.WriteString("`/topics` \\- Manage topic subscriptions\n")
+		sb.WriteString("`/tier` \\- Set notification tier\n")
 		sb.WriteString("`/status` \\- Show your settings\n")
 	}
 

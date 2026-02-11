@@ -133,6 +133,27 @@ func userDisplayName(user *entity.User) string {
 	return fmt.Sprintf("%d", user.TelegramId)
 }
 
+// sendWithKeyboard sends a message with an inline keyboard attached.
+func (t *TgBot) sendWithKeyboard(chatId int64, text string, keyboard tgbotapi.InlineKeyboardMarkup) {
+	if text == "" {
+		return
+	}
+	_, err := t.api.SendMessage(chatId, text, &tgbotapi.SendMessageOpts{
+		ParseMode:   "MarkdownV2",
+		ReplyMarkup: keyboard,
+	})
+	if err != nil {
+		t.log.With(slog.Int64("id", chatId)).Warn("sending message with keyboard", sl.Err(err))
+		// Fallback: try without markdown
+		_, err = t.api.SendMessage(chatId, text, &tgbotapi.SendMessageOpts{
+			ReplyMarkup: keyboard,
+		})
+		if err != nil {
+			t.log.With(slog.Int64("id", chatId)).Error("sending message with keyboard fallback", sl.Err(err))
+		}
+	}
+}
+
 // reportError logs the error, notifies admins with details, and sends a neutral message to the user.
 func (t *TgBot) reportError(chatId int64, command string, err error) {
 	t.log.Error("bot command failed",

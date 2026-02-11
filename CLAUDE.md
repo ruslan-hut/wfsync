@@ -116,6 +116,15 @@ Note: Test coverage is currently minimal.
 }
 ```
 
+### Comments
+- Add Go doc comments to every exported type, function, and non-trivial unexported function
+- Package-level comments should explain the package's purpose and key architectural decisions
+- For multi-file packages (e.g. `bot/`), put the package doc on the main file and list file responsibilities
+- Explain *why*, not *what* — skip obvious comments like "// returns the user"
+- Document important conventions and design decisions inline (e.g., "empty slice = subscribed to all")
+- Document callback/handler patterns once at the group level, not on every handler
+- Keep comments concise — one line for simple functions, a short block for complex ones
+
 ### Validation
 - Use `go-playground/validator` tags
 - Monetary amounts in minor units (cents)

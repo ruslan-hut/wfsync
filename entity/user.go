@@ -6,23 +6,29 @@ import (
 	"wfsync/lib/validate"
 )
 
+// TelegramRole controls access level within the bot.
+// Role hierarchy: RoleNone < RolePending < RoleUser < RoleAdmin.
+// Changing role via SetTelegramRole also toggles telegram_enabled in the DB.
 type TelegramRole string
 
 const (
-	RoleNone    TelegramRole = ""
-	RolePending TelegramRole = "pending"
-	RoleUser    TelegramRole = "user"
-	RoleAdmin   TelegramRole = "admin"
+	RoleNone    TelegramRole = ""        // unregistered or revoked
+	RolePending TelegramRole = "pending" // registered, awaiting admin approval
+	RoleUser    TelegramRole = "user"    // approved, can receive notifications
+	RoleAdmin   TelegramRole = "admin"   // full access, can manage other users
 )
 
+// SubscriptionTier controls how notifications are delivered to a user.
 type SubscriptionTier string
 
 const (
-	TierRealtime SubscriptionTier = "realtime"
-	TierCritical SubscriptionTier = "critical"
-	TierDigest   SubscriptionTier = "digest"
+	TierRealtime SubscriptionTier = "realtime" // immediate delivery (default)
+	TierCritical SubscriptionTier = "critical" // only ERROR+ level, immediate
+	TierDigest   SubscriptionTier = "digest"   // batched summary at configured interval
 )
 
+// User represents both an API user (Token-based auth) and a Telegram bot subscriber.
+// Telegram-specific fields are populated during bot registration (/start command).
 type User struct {
 	Username           string           `json:"username" bson:"username" validate:"required"`
 	Name               string           `json:"name" bson:"name" validate:"omitempty"`
@@ -56,6 +62,9 @@ func (u *User) IsPending() bool {
 	return u.TelegramRole == RolePending
 }
 
+// HasTopic checks if the user is subscribed to a given notification topic.
+// Convention: empty TelegramTopics = subscribed to all (backward compat).
+// The sentinel value "none" means unsubscribed from everything.
 func (u *User) HasTopic(topic string) bool {
 	if len(u.TelegramTopics) == 0 {
 		return true // empty = subscribed to everything

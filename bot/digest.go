@@ -8,8 +8,11 @@ import (
 	"time"
 )
 
+// maxTelegramMessageLen is Telegram's hard limit per message.
+// Messages exceeding this are split at newline boundaries by splitMessage.
 const maxTelegramMessageLen = 4096
 
+// DigestEntry is a single buffered notification waiting for the next flush.
 type DigestEntry struct {
 	Message   string
 	Topic     string
@@ -17,9 +20,12 @@ type DigestEntry struct {
 	Timestamp time.Time
 }
 
+// DigestBuffer collects notifications for users on the "digest" tier
+// and flushes them as grouped summaries at a configurable interval.
+// Thread-safe: Add() can be called concurrently from multiple goroutines.
 type DigestBuffer struct {
 	mu       sync.Mutex
-	entries  map[int64][]DigestEntry
+	entries  map[int64][]DigestEntry // telegram_id → pending entries
 	interval time.Duration
 	bot      *TgBot
 	stopCh   chan struct{}
@@ -47,6 +53,8 @@ func (d *DigestBuffer) Add(chatId int64, msg string, topic string, level slog.Le
 	})
 }
 
+// StartTicker launches a background goroutine that flushes accumulated entries
+// at the configured interval. Performs a final flush on Stop().
 func (d *DigestBuffer) StartTicker() {
 	go func() {
 		defer close(d.done)
@@ -64,6 +72,8 @@ func (d *DigestBuffer) StartTicker() {
 	}()
 }
 
+// Flush atomically swaps out all buffered entries and sends formatted digests.
+// Safe to call concurrently — uses mutex swap to minimize lock duration.
 func (d *DigestBuffer) Flush() {
 	d.mu.Lock()
 	snapshot := d.entries
@@ -87,6 +97,7 @@ func (d *DigestBuffer) Stop() {
 	<-d.done
 }
 
+// formatDigest groups entries by topic and formats them as a MarkdownV2 summary.
 func formatDigest(entries []DigestEntry) string {
 	// Group by topic
 	grouped := make(map[string][]DigestEntry)

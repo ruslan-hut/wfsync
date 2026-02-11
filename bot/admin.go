@@ -12,6 +12,8 @@ import (
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 )
 
+// usersCmd lists all registered Telegram users, grouped by role.
+// Sends approve/revoke inline buttons for each pending user.
 func (t *TgBot) usersCmd(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if t.db == nil {
 		return nil
@@ -44,6 +46,8 @@ func (t *TgBot) usersCmd(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	sb.WriteString(fmt.Sprintf("*Users* \\(%d total\\)\n", len(users)))
 
 	roleOrder := []entity.TelegramRole{entity.RoleAdmin, entity.RoleUser, entity.RolePending, entity.RoleNone}
+	// Collect pending users to show with action buttons
+	var pendingUsers []*entity.User
 	for _, role := range roleOrder {
 		roleUsers, ok := grouped[role]
 		if !ok || len(roleUsers) == 0 {
@@ -73,6 +77,9 @@ func (t *TgBot) usersCmd(_ *tgbotapi.Bot, ctx *ext.Context) error {
 				Sanitize(tier),
 				Sanitize(topics),
 			))
+			if role == entity.RolePending {
+				pendingUsers = append(pendingUsers, u)
+			}
 		}
 	}
 
@@ -80,9 +87,19 @@ func (t *TgBot) usersCmd(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	for _, part := range parts {
 		t.plainResponse(chatId, part)
 	}
+
+	// Send individual messages with approve/revoke buttons for each pending user
+	for _, u := range pendingUsers {
+		keyboard := buildPendingUserButtons(u.TelegramId)
+		t.sendWithKeyboard(chatId,
+			fmt.Sprintf("Pending: %s", Sanitize(userDisplayName(u))),
+			keyboard,
+		)
+	}
 	return nil
 }
 
+// approve sets a user's role to RoleUser, enables notifications, and assigns default topics.
 func (t *TgBot) approve(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if t.db == nil {
 		return nil
@@ -117,9 +134,11 @@ func (t *TgBot) approve(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	t.plainResponse(chatId, "User "+Sanitize(userDisplayName(target))+" approved\\.")
 	t.plainResponse(target.TelegramId, "Your registration has been approved\\! Notifications are now enabled\\.")
 	t.loadUsers()
+	t.setUserCommands(target.TelegramId, entity.RoleUser)
 	return nil
 }
 
+// revoke sets a user's role to RoleNone, disabling all access and notifications.
 func (t *TgBot) revoke(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if t.db == nil {
 		return nil
@@ -151,9 +170,11 @@ func (t *TgBot) revoke(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	t.plainResponse(chatId, "User "+Sanitize(userDisplayName(target))+" revoked\\.")
 	t.plainResponse(target.TelegramId, "Your access has been revoked\\.")
 	t.loadUsers()
+	t.setUserCommands(target.TelegramId, entity.RoleNone)
 	return nil
 }
 
+// adminCmd promotes an approved user to admin role.
 func (t *TgBot) adminCmd(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if t.db == nil {
 		return nil
@@ -190,9 +211,12 @@ func (t *TgBot) adminCmd(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	t.plainResponse(chatId, "User "+Sanitize(userDisplayName(target))+" promoted to admin\\.")
 	t.plainResponse(target.TelegramId, "You have been promoted to admin\\!")
 	t.loadUsers()
+	t.setUserCommands(target.TelegramId, entity.RoleAdmin)
 	return nil
 }
 
+// invite generates a single-use invite code and returns a Telegram deep link.
+// New users opening the deep link are auto-approved without admin intervention.
 func (t *TgBot) invite(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if t.db == nil {
 		return nil
