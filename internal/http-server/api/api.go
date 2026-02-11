@@ -104,6 +104,6 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
-	s.log.Info("shutting down api server")
+	s.log.Debug("shutting down api server")
 	return s.httpServer.Shutdown(ctx)
 }

@@ -20,7 +20,6 @@ var commandsUser = []tgbotapi.BotCommand{
 	{Command: "stop", Description: "Disable notifications"},
 	{Command: "topics", Description: "Manage topic subscriptions"},
 	{Command: "tier", Description: "Set notification tier"},
-	{Command: "level", Description: "Set log level filter"},
 	{Command: "status", Description: "Show your settings"},
 	{Command: "help", Description: "Show available commands"},
 }

@@ -90,7 +90,7 @@ func (oc *Opencart) Start() {
 			oc.ProcessOrders()
 			select {
 			case <-oc.done:
-				oc.log.Info("order processor stopped")
+				oc.log.Debug("order processor stopped")
 				return
 			case <-ticker.C:
 			}
@@ -100,7 +100,7 @@ func (oc *Opencart) Start() {
 
 func (oc *Opencart) Stop() {
 	if oc.done != nil {
-		oc.log.Info("stopping order processor")
+		oc.log.Debug("stopping order processor")
 		close(oc.done)
 		<-oc.stopped
 	}

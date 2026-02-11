@@ -122,14 +122,14 @@ func (t *TgBot) stop(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	return nil
 }
 
-// level shows an inline keyboard to select the minimum log level for notifications.
+// level shows an inline keyboard to select the minimum log level for notifications. Admin only.
 func (t *TgBot) level(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if t.db == nil {
 		return nil
 	}
 	chatId := ctx.EffectiveUser.Id
-	if !t.requireApproved(chatId) {
-		t.plainResponse(chatId, "You need to be approved first\\.")
+	if !t.requireAdmin(chatId) {
+		t.plainResponse(chatId, "Admin access required\\.")
 		return nil
 	}
 
@@ -375,7 +375,6 @@ func (t *TgBot) help(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if isApproved {
 		sb.WriteString("\n*User Commands:*\n")
 		sb.WriteString("`/stop` \\- Disable notifications\n")
-		sb.WriteString("`/level` \\- Set log level\n")
 		sb.WriteString("`/topics` \\- Manage topic subscriptions\n")
 		sb.WriteString("`/tier` \\- Set notification tier\n")
 		sb.WriteString("`/status` \\- Show your settings\n")
@@ -383,6 +382,7 @@ func (t *TgBot) help(_ *tgbotapi.Bot, ctx *ext.Context) error {
 
 	if isAdmin {
 		sb.WriteString("\n*Admin Commands:*\n")
+		sb.WriteString("`/level` \\- Set log level\n")
 		sb.WriteString("`/users` \\- List all users\n")
 		sb.WriteString("`/approve <id|@user>` \\- Approve a user\n")
 		sb.WriteString("`/revoke <id|@user>` \\- Revoke a user\n")
