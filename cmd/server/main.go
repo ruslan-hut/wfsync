@@ -45,11 +45,24 @@ func main() {
 		).Info("connected to mongo")
 	}
 
+	// Migrate existing telegram users if mongo is available
+	if mongo != nil {
+		if err := mongo.MigrateExistingTelegramUsers(); err != nil {
+			log.Error("telegram user migration", sl.Err(err))
+		}
+	}
+
 	// Initialize Telegram bot if enabled
 	var tgBot *bot.TgBot
 	if conf.Telegram.Enabled {
+		botCfg := bot.BotConfig{
+			RequireApproval:   conf.Telegram.RequireApproval,
+			DigestIntervalMin: conf.Telegram.DigestIntervalMin,
+			DefaultTier:       conf.Telegram.DefaultTier,
+			InviteCodeLength:  conf.Telegram.InviteCodeLength,
+		}
 		var err error
-		tgBot, err = bot.NewTgBot(conf.Telegram.ApiKey, mongo, log)
+		tgBot, err = bot.NewTgBot(conf.Telegram.ApiKey, mongo, log, botCfg)
 		if err != nil {
 			log.Error("initialize telegram bot", sl.Err(err))
 		} else {

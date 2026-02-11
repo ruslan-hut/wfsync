@@ -58,8 +58,12 @@ type OpenCart struct {
 }
 
 type Telegram struct {
-	Enabled bool   `yaml:"enabled" env-default:"false"`
-	ApiKey  string `yaml:"api_key" env-default:""`
+	Enabled           bool   `yaml:"enabled" env-default:"false"`
+	ApiKey            string `yaml:"api_key" env-default:""`
+	RequireApproval   bool   `yaml:"require_approval" env-default:"true"`
+	DigestIntervalMin int    `yaml:"digest_interval_min" env-default:"60"`
+	DefaultTier       string `yaml:"default_tier" env-default:"realtime"`
+	InviteCodeLength  int    `yaml:"invite_code_length" env-default:"8"`
 }
 
 type Config struct {

@@ -3,7 +3,7 @@ package bot
 import (
 	"fmt"
 	"log/slog"
-	"strings"
+	"sync"
 	"time"
 	"wfsync/entity"
 	"wfsync/lib/sl"
@@ -13,26 +13,55 @@ import (
 	"github.com/PaulSonOfLars/gotgbot/v2/ext/handlers"
 )
 
+type BotConfig struct {
+	RequireApproval   bool
+	DigestIntervalMin int
+	DefaultTier       string
+	InviteCodeLength  int
+}
+
 type Database interface {
 	GetTelegramUsers() ([]*entity.User, error)
+	GetAllTelegramUsers() ([]*entity.User, error)
+	GetTelegramUserById(telegramId int64) (*entity.User, error)
 	SetTelegramEnabled(id int64, isActive bool, logLevel int) error
+	RegisterTelegramUser(telegramId int64, username string) error
+	SetTelegramRole(telegramId int64, role entity.TelegramRole) error
+	GetPendingTelegramUsers() ([]*entity.User, error)
+	SetTelegramTopics(telegramId int64, topics []string) error
+	SetSubscriptionTier(telegramId int64, tier entity.SubscriptionTier, schedule string) error
+	CreateInviteCode(code *entity.InviteCode) error
+	UseInviteCode(code string, telegramId int64) error
+	MigrateExistingTelegramUsers() error
 }
 
 type TgBot struct {
 	log         *slog.Logger
 	api         *tgbotapi.Bot
 	db          Database
+	mu          sync.RWMutex
 	users       map[int64]*entity.User
 	minLogLevel slog.Level
 	updater     *ext.Updater
+	digest      *DigestBuffer
+	adminIds    []int64
+	config      BotConfig
 }
 
-func NewTgBot(apiKey string, db Database, log *slog.Logger) (*TgBot, error) {
+func NewTgBot(apiKey string, db Database, log *slog.Logger, cfg BotConfig) (*TgBot, error) {
+	if cfg.InviteCodeLength == 0 {
+		cfg.InviteCodeLength = 8
+	}
+	if cfg.DigestIntervalMin == 0 {
+		cfg.DigestIntervalMin = 60
+	}
+
 	tgBot := &TgBot{
 		log:         log.With(sl.Module("tgbot")),
 		db:          db,
 		minLogLevel: slog.LevelDebug,
 		users:       make(map[int64]*entity.User),
+		config:      cfg,
 	}
 
 	api, err := tgbotapi.NewBot(apiKey, nil)
@@ -47,8 +76,12 @@ func NewTgBot(apiKey string, db Database, log *slog.Logger) (*TgBot, error) {
 func (t *TgBot) Start() error {
 	t.loadUsers()
 
+	// Start digest buffer
+	interval := time.Duration(t.config.DigestIntervalMin) * time.Minute
+	t.digest = NewDigestBuffer(t, interval)
+	t.digest.StartTicker()
+
 	dispatcher := ext.NewDispatcher(&ext.DispatcherOpts{
-		// If an error is returned by a handler, log it and continue going.
 		Error: func(b *tgbotapi.Bot, ctx *ext.Context, err error) ext.DispatcherAction {
 			t.log.Error("handling update:", sl.Err(err))
 			return ext.DispatcherActionNoop
@@ -57,11 +90,24 @@ func (t *TgBot) Start() error {
 	})
 	t.updater = ext.NewUpdater(dispatcher, nil)
 
+	// User commands
 	dispatcher.AddHandler(handlers.NewCommand("start", t.start))
 	dispatcher.AddHandler(handlers.NewCommand("stop", t.stop))
 	dispatcher.AddHandler(handlers.NewCommand("level", t.level))
+	dispatcher.AddHandler(handlers.NewCommand("topics", t.topics))
+	dispatcher.AddHandler(handlers.NewCommand("subscribe", t.subscribe))
+	dispatcher.AddHandler(handlers.NewCommand("unsubscribe", t.unsubscribe))
+	dispatcher.AddHandler(handlers.NewCommand("tier", t.tier))
+	dispatcher.AddHandler(handlers.NewCommand("status", t.status))
+	dispatcher.AddHandler(handlers.NewCommand("help", t.help))
 
-	// Start receiving updates.
+	// Admin commands
+	dispatcher.AddHandler(handlers.NewCommand("users", t.usersCmd))
+	dispatcher.AddHandler(handlers.NewCommand("approve", t.approve))
+	dispatcher.AddHandler(handlers.NewCommand("revoke", t.revoke))
+	dispatcher.AddHandler(handlers.NewCommand("admin", t.adminCmd))
+	dispatcher.AddHandler(handlers.NewCommand("invite", t.invite))
+
 	err := t.updater.StartPolling(t.api, &ext.PollingOpts{
 		DropPendingUpdates: true,
 		GetUpdatesOpts: &tgbotapi.GetUpdatesOpts{
@@ -75,13 +121,14 @@ func (t *TgBot) Start() error {
 		return fmt.Errorf("failed to start polling: %w", err)
 	}
 
-	// Idle, to keep updates coming in, and avoid bot stopping.
 	t.updater.Idle()
-
 	return nil
 }
 
 func (t *TgBot) Stop() {
+	if t.digest != nil {
+		t.digest.Stop()
+	}
 	if t.updater != nil {
 		t.log.Info("stopping telegram bot")
 		t.updater.Stop()
@@ -92,179 +139,40 @@ func (t *TgBot) loadUsers() {
 	if t.db == nil {
 		return
 	}
-	users, err := t.db.GetTelegramUsers()
+	users, err := t.db.GetAllTelegramUsers()
 	if err != nil {
 		t.log.Error("loading users", sl.Err(err))
 		return
 	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	t.users = make(map[int64]*entity.User)
+	t.adminIds = nil
 	active := 0
 	for _, user := range users {
 		t.users[user.TelegramId] = user
 		if user.TelegramEnabled {
 			active++
 		}
+		if user.IsAdmin() {
+			t.adminIds = append(t.adminIds, user.TelegramId)
+		}
 	}
 	t.log.With(
 		slog.Int("count", len(t.users)),
 		slog.Int("active", active),
+		slog.Int("admins", len(t.adminIds)),
 	).Debug("loaded users")
 }
 
 func (t *TgBot) findUser(id int64) *entity.User {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	user, ok := t.users[id]
 	if ok {
 		return user
 	}
 	return nil
-}
-
-func (t *TgBot) start(_ *tgbotapi.Bot, ctx *ext.Context) error {
-	if t.db == nil {
-		return nil
-	}
-	user := t.findUser(ctx.EffectiveUser.Id)
-	if user == nil {
-		return nil
-	}
-
-	err := t.db.SetTelegramEnabled(user.TelegramId, true, int(t.minLogLevel))
-	if err != nil {
-		t.plainResponse(user.TelegramId, "Error setting Telegram enabled: "+err.Error())
-		return nil
-	}
-	t.plainResponse(user.TelegramId, "Status changed to ENABLED")
-	t.loadUsers()
-	return nil
-}
-
-func (t *TgBot) stop(_ *tgbotapi.Bot, ctx *ext.Context) error {
-	if t.db == nil {
-		return nil
-	}
-	user := t.findUser(ctx.EffectiveUser.Id)
-	if user == nil {
-		return nil
-	}
-
-	err := t.db.SetTelegramEnabled(user.TelegramId, false, int(t.minLogLevel))
-	if err != nil {
-		t.plainResponse(user.TelegramId, "Error setting Telegram disabled: "+err.Error())
-		return nil
-	}
-	t.plainResponse(user.TelegramId, "Status changed to DISABLED")
-	t.loadUsers()
-	return nil
-}
-
-// level handles the /level command to set the minimum log level for admin notifications
-func (t *TgBot) level(_ *tgbotapi.Bot, ctx *ext.Context) error {
-	if t.db == nil {
-		return nil
-	}
-	user := t.findUser(ctx.EffectiveUser.Id)
-	if user == nil {
-		return nil
-	}
-
-	// Get the level argument
-	args := strings.Fields(ctx.EffectiveMessage.Text)
-	if len(args) < 2 {
-		currentLevel := slog.Level(user.LogLevel).String()
-		t.plainResponse(user.TelegramId, fmt.Sprintf("Your current log level: %s\nAvailable levels: debug, info, warn, error", currentLevel))
-		return nil
-	}
-
-	// Parse the level
-	levelStr := strings.ToLower(args[1])
-	level := t.minLogLevel
-	switch levelStr {
-	case "debug":
-		level = slog.LevelDebug
-	case "info":
-		level = slog.LevelInfo
-	case "warn":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	default:
-		t.plainResponse(user.TelegramId, fmt.Sprintf("Invalid level: %s\nAvailable levels: debug, info, warn, error", levelStr))
-		return nil
-	}
-
-	err := t.db.SetTelegramEnabled(user.TelegramId, true, int(level))
-	if err != nil {
-		t.plainResponse(user.TelegramId, "Error setting level: "+err.Error())
-		return nil
-	}
-	t.plainResponse(user.TelegramId, fmt.Sprintf("Log level set to: %s", level.String()))
-	t.loadUsers()
-	return nil
-}
-
-func (t *TgBot) SendMessage(msg string) {
-	t.SendMessageWithLevel(msg, t.minLogLevel)
-}
-
-// SendMessageWithLevel sends a message to all admins with the specified log level
-func (t *TgBot) SendMessageWithLevel(msg string, level slog.Level) {
-	l := int(level)
-	for _, user := range t.users {
-		if !user.TelegramEnabled {
-			continue
-		}
-		if l >= user.LogLevel {
-			t.plainResponse(user.TelegramId, msg)
-		}
-	}
-}
-
-func (t *TgBot) plainResponse(chatId int64, text string) {
-
-	//text = strings.ReplaceAll(text, "**", "*")
-	//text = strings.ReplaceAll(text, "![", "[")
-	//
-	//sanitized := Sanitize(text)
-
-	if text != "" {
-		_, err := t.api.SendMessage(chatId, text, &tgbotapi.SendMessageOpts{
-			ParseMode: "MarkdownV2",
-		})
-		if err != nil {
-			t.log.With(
-				slog.Int64("id", chatId),
-			).Warn("sending message", sl.Err(err))
-			_, _ = t.api.SendMessage(chatId, err.Error(), &tgbotapi.SendMessageOpts{})
-			_, err = t.api.SendMessage(chatId, text, &tgbotapi.SendMessageOpts{})
-			if err != nil {
-				t.log.With(
-					slog.Int64("id", chatId),
-				).Error("sending safe message", sl.Err(err))
-			}
-		}
-	} else {
-		t.log.With(
-			slog.Int64("id", chatId),
-		).Debug("empty message")
-	}
-}
-
-func Sanitize(input string) string {
-	// Define a list of reserved characters that need to be escaped
-	reservedChars := "\\_{}#+-.!|()[]=*"
-
-	// Loop through each character in the input string
-	sanitized := ""
-	for _, char := range input {
-		// Check if the character is reserved
-		if strings.ContainsRune(reservedChars, char) {
-			// Escape the character with a backslash
-			sanitized += "\\" + string(char)
-		} else {
-			// Add the character to the sanitized string
-			sanitized += string(char)
-		}
-	}
-
-	return sanitized
 }

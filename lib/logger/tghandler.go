@@ -66,15 +66,24 @@ func (h *TelegramHandler) Handle(ctx context.Context, record slog.Record) error 
 			}
 		}
 
-		// Add attributes from the record
+		// Add attributes from the record, extracting tg_topic if present
+		topic := ""
 		record.Attrs(func(attr slog.Attr) bool {
+			if attr.Key == "tg_topic" {
+				topic = attr.Value.String()
+				return true // skip adding tg_topic to message text
+			}
 			msg += bot.Sanitize(fmt.Sprintf("\n%s: %v", attr.Key, attr.Value))
 			return true
 		})
 
-		// Send to Telegram with the record's log level
+		// Route by topic if available, otherwise fall back to level-based routing
 		if h.bot != nil {
-			h.bot.SendMessageWithLevel(msg, record.Level)
+			if topic != "" {
+				h.bot.SendMessageWithTopic(msg, record.Level, topic)
+			} else {
+				h.bot.SendMessageWithLevel(msg, record.Level)
+			}
 		}
 	}
 

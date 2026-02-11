@@ -18,6 +18,7 @@ const (
 	collectionCheckoutParams = "checkout_params"
 	collectionInvoice        = "wfirma_invoice"
 	collectionProducts       = "products"
+	collectionInviteCodes    = "invite_codes"
 )
 
 type MongoDB struct {
@@ -251,5 +252,224 @@ func (m *MongoDB) SaveInvoice(id string, invoice interface{}) error {
 	update := bson.D{{"$set", invoice}}
 	opts := options.Update().SetUpsert(true)
 	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	return err
+}
+
+// GetAllTelegramUsers returns all users with telegram_id > 0 (includes pending/disabled).
+func (m *MongoDB) GetAllTelegramUsers() ([]*entity.User, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionUsers)
+	filter := bson.D{{"telegram_id", bson.D{{"$gt", 0}}}}
+	cursor, err := collection.Find(m.ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer func(cursor *mongo.Cursor, ctx context.Context) {
+		_ = cursor.Close(ctx)
+	}(cursor, m.ctx)
+
+	var users []*entity.User
+	err = cursor.All(m.ctx, &users)
+	if err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+// GetTelegramUserById returns a single user by telegram ID.
+func (m *MongoDB) GetTelegramUserById(telegramId int64) (*entity.User, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionUsers)
+	filter := bson.D{{"telegram_id", telegramId}}
+	var user entity.User
+	err = collection.FindOne(m.ctx, filter).Decode(&user)
+	if err != nil {
+		return nil, m.findError(err)
+	}
+	return &user, nil
+}
+
+// RegisterTelegramUser upserts a new user with role=pending.
+func (m *MongoDB) RegisterTelegramUser(telegramId int64, username string) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionUsers)
+	filter := bson.D{{"telegram_id", telegramId}}
+	update := bson.D{
+		{"$setOnInsert", bson.D{
+			{"telegram_id", telegramId},
+			{"telegram_username", username},
+			{"telegram_role", entity.RolePending},
+			{"telegram_enabled", false},
+			{"subscription_tier", entity.TierRealtime},
+			{"registered_at", time.Now()},
+			{"username", username},
+			{"token", ""},
+		}},
+		{"$set", bson.D{
+			{"telegram_username", username},
+		}},
+	}
+	opts := options.Update().SetUpsert(true)
+	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	return err
+}
+
+// SetTelegramRole sets the telegram role for a user.
+func (m *MongoDB) SetTelegramRole(telegramId int64, role entity.TelegramRole) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionUsers)
+	filter := bson.D{{"telegram_id", telegramId}}
+	update := bson.D{{"$set", bson.D{
+		{"telegram_role", role},
+		{"telegram_enabled", role == entity.RoleUser || role == entity.RoleAdmin},
+	}}}
+	_, err = collection.UpdateOne(m.ctx, filter, update)
+	return err
+}
+
+// GetPendingTelegramUsers returns users with role=pending.
+func (m *MongoDB) GetPendingTelegramUsers() ([]*entity.User, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionUsers)
+	filter := bson.D{{"telegram_role", entity.RolePending}}
+	cursor, err := collection.Find(m.ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer func(cursor *mongo.Cursor, ctx context.Context) {
+		_ = cursor.Close(ctx)
+	}(cursor, m.ctx)
+
+	var users []*entity.User
+	err = cursor.All(m.ctx, &users)
+	if err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+// SetTelegramTopics sets the topic subscriptions for a user.
+func (m *MongoDB) SetTelegramTopics(telegramId int64, topics []string) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionUsers)
+	filter := bson.D{{"telegram_id", telegramId}}
+	update := bson.D{{"$set", bson.D{{"telegram_topics", topics}}}}
+	_, err = collection.UpdateOne(m.ctx, filter, update)
+	return err
+}
+
+// SetSubscriptionTier sets the subscription tier and digest schedule for a user.
+func (m *MongoDB) SetSubscriptionTier(telegramId int64, tier entity.SubscriptionTier, schedule string) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionUsers)
+	filter := bson.D{{"telegram_id", telegramId}}
+	update := bson.D{{"$set", bson.D{
+		{"subscription_tier", tier},
+		{"digest_schedule", schedule},
+	}}}
+	_, err = collection.UpdateOne(m.ctx, filter, update)
+	return err
+}
+
+// CreateInviteCode stores a new invite code.
+func (m *MongoDB) CreateInviteCode(code *entity.InviteCode) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionInviteCodes)
+	_, err = collection.InsertOne(m.ctx, code)
+	return err
+}
+
+// UseInviteCode atomically finds and uses an invite code.
+func (m *MongoDB) UseInviteCode(code string, telegramId int64) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionInviteCodes)
+	filter := bson.D{
+		{"code", code},
+		{"$expr", bson.D{{"$lt", bson.A{"$use_count", "$max_uses"}}}},
+	}
+	update := bson.D{
+		{"$set", bson.D{
+			{"used_by", telegramId},
+			{"used_at", time.Now()},
+		}},
+		{"$inc", bson.D{{"use_count", 1}}},
+	}
+	result, err := collection.UpdateOne(m.ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("invite code not found or exhausted")
+	}
+	return nil
+}
+
+// MigrateExistingTelegramUsers sets existing enabled users to RoleAdmin + TierRealtime (idempotent).
+func (m *MongoDB) MigrateExistingTelegramUsers() error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionUsers)
+	filter := bson.D{
+		{"telegram_enabled", true},
+		{"telegram_id", bson.D{{"$gt", 0}}},
+		{"$or", bson.A{
+			bson.D{{"telegram_role", bson.D{{"$exists", false}}}},
+			bson.D{{"telegram_role", ""}},
+		}},
+	}
+	update := bson.D{{"$set", bson.D{
+		{"telegram_role", entity.RoleAdmin},
+		{"subscription_tier", entity.TierRealtime},
+	}}}
+	_, err = collection.UpdateMany(m.ctx, filter, update)
 	return err
 }
