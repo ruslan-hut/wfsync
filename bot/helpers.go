@@ -169,48 +169,55 @@ func (t *TgBot) sanitizeUserTopics() {
 	t.mu.RUnlock()
 
 	for _, user := range users {
-		if len(user.TelegramTopics) == 0 {
-			continue
-		}
-		allowed := entity.TopicsForRole(user.TelegramRole)
-		allowedSet := make(map[string]bool, len(allowed))
-		for _, t := range allowed {
-			allowedSet[t] = true
-		}
-
-		filtered := make([]string, 0, len(user.TelegramTopics))
-		changed := false
-		for _, topic := range user.TelegramTopics {
-			if topic == "none" || allowedSet[topic] {
-				filtered = append(filtered, topic)
-			} else {
-				changed = true
-			}
-		}
-
-		if !changed {
-			continue
-		}
-		if len(filtered) == 0 {
-			filtered = []string{"none"}
-		}
-		err := t.db.SetTelegramTopics(user.TelegramId, filtered)
-		if err != nil {
-			t.log.Warn("sanitizing topics",
-				slog.Int64("user_id", user.TelegramId),
-				sl.Err(err),
-			)
-		} else {
-			t.log.Info("sanitized topics",
-				slog.Int64("user_id", user.TelegramId),
-				slog.Any("removed_from", user.TelegramTopics),
-				slog.Any("kept", filtered),
-			)
-		}
+		t.sanitizeUserTopicsSingle(user)
 	}
 
 	// Reload after cleanup
 	t.loadUsers()
+}
+
+// sanitizeUserTopicsSingle checks a single user's topics against their allowed list
+// and removes any that are no longer valid for their role.
+func (t *TgBot) sanitizeUserTopicsSingle(user *entity.User) {
+	if t.db == nil || len(user.TelegramTopics) == 0 {
+		return
+	}
+
+	allowed := entity.TopicsForRole(user.TelegramRole)
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, a := range allowed {
+		allowedSet[a] = true
+	}
+
+	filtered := make([]string, 0, len(user.TelegramTopics))
+	changed := false
+	for _, topic := range user.TelegramTopics {
+		if topic == "none" || allowedSet[topic] {
+			filtered = append(filtered, topic)
+		} else {
+			changed = true
+		}
+	}
+
+	if !changed {
+		return
+	}
+	if len(filtered) == 0 {
+		filtered = []string{"none"}
+	}
+	err := t.db.SetTelegramTopics(user.TelegramId, filtered)
+	if err != nil {
+		t.log.Warn("sanitizing topics",
+			slog.Int64("user_id", user.TelegramId),
+			sl.Err(err),
+		)
+	} else {
+		t.log.Info("sanitized topics",
+			slog.Int64("user_id", user.TelegramId),
+			slog.Any("removed_from", user.TelegramTopics),
+			slog.Any("kept", filtered),
+		)
+	}
 }
 
 // reportError logs the error, notifies admins with details, and sends a neutral message to the user.

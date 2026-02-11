@@ -31,6 +31,7 @@ func (t *TgBot) start(_ *tgbotapi.Bot, ctx *ext.Context) error {
 			t.reportError(chatId, "/start", err)
 			return nil
 		}
+		t.sanitizeUserTopicsSingle(user)
 		t.plainResponse(chatId, "Notifications ENABLED")
 		t.loadUsers()
 		return nil
