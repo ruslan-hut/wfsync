@@ -312,7 +312,6 @@ func (m *MongoDB) RegisterTelegramUser(telegramId int64, username string) error 
 	update := bson.D{
 		{"$setOnInsert", bson.D{
 			{"telegram_id", telegramId},
-			{"telegram_username", username},
 			{"telegram_role", entity.RolePending},
 			{"telegram_enabled", false},
 			{"subscription_tier", entity.TierRealtime},

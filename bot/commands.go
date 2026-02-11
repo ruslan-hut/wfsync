@@ -21,7 +21,7 @@ func (t *TgBot) start(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if user != nil && user.IsApproved() {
 		err := t.db.SetTelegramEnabled(user.TelegramId, true, int(t.minLogLevel))
 		if err != nil {
-			t.plainResponse(chatId, "Error enabling notifications: "+Sanitize(err.Error()))
+			t.reportError(chatId, "/start", err)
 			return nil
 		}
 		t.plainResponse(chatId, "Notifications ENABLED")
@@ -51,7 +51,7 @@ func (t *TgBot) start(_ *tgbotapi.Bot, ctx *ext.Context) error {
 
 	err := t.db.RegisterTelegramUser(chatId, username)
 	if err != nil {
-		t.plainResponse(chatId, "Registration error: "+Sanitize(err.Error()))
+		t.reportError(chatId, "/start register", err)
 		return nil
 	}
 
@@ -59,7 +59,7 @@ func (t *TgBot) start(_ *tgbotapi.Bot, ctx *ext.Context) error {
 		// Auto-approve with valid invite code or when approval not required
 		err = t.db.SetTelegramRole(chatId, entity.RoleUser)
 		if err != nil {
-			t.plainResponse(chatId, "Approval error: "+Sanitize(err.Error()))
+			t.reportError(chatId, "/start approve", err)
 			return nil
 		}
 		t.plainResponse(chatId, "Welcome\\! You have been approved\\. Notifications are now ENABLED\\.")
@@ -89,7 +89,7 @@ func (t *TgBot) stop(_ *tgbotapi.Bot, ctx *ext.Context) error {
 
 	err := t.db.SetTelegramEnabled(user.TelegramId, false, user.LogLevel)
 	if err != nil {
-		t.plainResponse(chatId, "Error disabling notifications: "+Sanitize(err.Error()))
+		t.reportError(chatId, "/stop", err)
 		return nil
 	}
 	t.plainResponse(chatId, "Notifications DISABLED")
@@ -137,7 +137,7 @@ func (t *TgBot) level(_ *tgbotapi.Bot, ctx *ext.Context) error {
 
 	err := t.db.SetTelegramEnabled(user.TelegramId, true, int(level))
 	if err != nil {
-		t.plainResponse(chatId, "Error setting level: "+Sanitize(err.Error()))
+		t.reportError(chatId, "/level", err)
 		return nil
 	}
 	t.plainResponse(chatId, fmt.Sprintf("Log level set to: %s", Sanitize(level.String())))
@@ -207,7 +207,7 @@ func (t *TgBot) subscribe(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if topic == "all" {
 		err := t.db.SetTelegramTopics(chatId, nil)
 		if err != nil {
-			t.plainResponse(chatId, "Error: "+Sanitize(err.Error()))
+			t.reportError(chatId, "/subscribe all", err)
 			return nil
 		}
 		t.plainResponse(chatId, "Subscribed to *all* topics\\.")
@@ -233,7 +233,7 @@ func (t *TgBot) subscribe(_ *tgbotapi.Bot, ctx *ext.Context) error {
 
 	err := t.db.SetTelegramTopics(chatId, filtered)
 	if err != nil {
-		t.plainResponse(chatId, "Error: "+Sanitize(err.Error()))
+		t.reportError(chatId, "/subscribe", err)
 		return nil
 	}
 	t.plainResponse(chatId, "Subscribed to `"+Sanitize(topic)+"`")
@@ -267,7 +267,7 @@ func (t *TgBot) unsubscribe(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	if topic == "all" {
 		err := t.db.SetTelegramTopics(chatId, []string{"none"})
 		if err != nil {
-			t.plainResponse(chatId, "Error: "+Sanitize(err.Error()))
+			t.reportError(chatId, "/unsubscribe all", err)
 			return nil
 		}
 		t.plainResponse(chatId, "Unsubscribed from all topics\\.")
@@ -298,7 +298,7 @@ func (t *TgBot) unsubscribe(_ *tgbotapi.Bot, ctx *ext.Context) error {
 
 	err := t.db.SetTelegramTopics(chatId, filtered)
 	if err != nil {
-		t.plainResponse(chatId, "Error: "+Sanitize(err.Error()))
+		t.reportError(chatId, "/unsubscribe", err)
 		return nil
 	}
 	t.plainResponse(chatId, "Unsubscribed from `"+Sanitize(topic)+"`")
@@ -347,7 +347,7 @@ func (t *TgBot) tier(_ *tgbotapi.Bot, ctx *ext.Context) error {
 
 	err := t.db.SetSubscriptionTier(chatId, newTier, "")
 	if err != nil {
-		t.plainResponse(chatId, "Error: "+Sanitize(err.Error()))
+		t.reportError(chatId, "/tier", err)
 		return nil
 	}
 	t.plainResponse(chatId, "Subscription tier set to: `"+Sanitize(string(newTier))+"`")

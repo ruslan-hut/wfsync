@@ -132,3 +132,17 @@ func userDisplayName(user *entity.User) string {
 	}
 	return fmt.Sprintf("%d", user.TelegramId)
 }
+
+// reportError logs the error, notifies admins with details, and sends a neutral message to the user.
+func (t *TgBot) reportError(chatId int64, command string, err error) {
+	t.log.Error("bot command failed",
+		slog.String("command", command),
+		slog.Int64("user_id", chatId),
+		sl.Err(err),
+	)
+	t.notifyAdmins(fmt.Sprintf(
+		"Command `%s` failed\nUser: `%d`\nError: `%s`",
+		Sanitize(command), chatId, Sanitize(err.Error()),
+	))
+	t.plainResponse(chatId, "Something went wrong\\. Please try again later\\.")
+}

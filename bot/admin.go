@@ -107,7 +107,7 @@ func (t *TgBot) approve(_ *tgbotapi.Bot, ctx *ext.Context) error {
 
 	err := t.db.SetTelegramRole(target.TelegramId, entity.RoleUser)
 	if err != nil {
-		t.plainResponse(chatId, "Error: "+Sanitize(err.Error()))
+		t.reportError(chatId, "/approve", err)
 		return nil
 	}
 
@@ -141,7 +141,7 @@ func (t *TgBot) revoke(_ *tgbotapi.Bot, ctx *ext.Context) error {
 
 	err := t.db.SetTelegramRole(target.TelegramId, entity.RoleNone)
 	if err != nil {
-		t.plainResponse(chatId, "Error: "+Sanitize(err.Error()))
+		t.reportError(chatId, "/revoke", err)
 		return nil
 	}
 
@@ -180,7 +180,7 @@ func (t *TgBot) adminCmd(_ *tgbotapi.Bot, ctx *ext.Context) error {
 
 	err := t.db.SetTelegramRole(target.TelegramId, entity.RoleAdmin)
 	if err != nil {
-		t.plainResponse(chatId, "Error: "+Sanitize(err.Error()))
+		t.reportError(chatId, "/admin", err)
 		return nil
 	}
 
@@ -212,7 +212,7 @@ func (t *TgBot) invite(_ *tgbotapi.Bot, ctx *ext.Context) error {
 
 	err := t.db.CreateInviteCode(inviteCode)
 	if err != nil {
-		t.plainResponse(chatId, "Error creating invite code: "+Sanitize(err.Error()))
+		t.reportError(chatId, "/invite", err)
 		return nil
 	}
 
