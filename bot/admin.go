@@ -129,7 +129,7 @@ func (t *TgBot) approve(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	}
 
 	// Set default topic to invoice only for new users
-	_ = t.db.SetTelegramTopics(target.TelegramId, []string{entity.TopicInvoice})
+	_ = t.db.SetTelegramTopics(target.TelegramId, []string{entity.TopicInvoice, entity.TopicError})
 
 	t.plainResponse(chatId, "User "+Sanitize(userDisplayName(target))+" approved\\.")
 	t.plainResponse(target.TelegramId, "Your registration has been approved\\! Notifications are now enabled\\.")

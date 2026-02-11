@@ -220,6 +220,9 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 					slog.String("message", w.Error.Message),
 					slog.String("method", w.Error.Method.Name),
 					slog.String("parameters", w.Error.Method.Parameters),
+					slog.String("email", customer.Email),
+					slog.String("name", customer.Name),
+					slog.String("tg_topic", entity.TopicError),
 				).Error("add contractor")
 				break
 			}
@@ -640,6 +643,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			slog.String("field", errWrap.Error.Field),
 			slog.String("method", errWrap.Error.Method.Name),
 			slog.String("parameters", errWrap.Error.Method.Parameters),
+			slog.String("tg_topic", entity.TopicError),
 		).Warn("invoice creation")
 		return nil, fmt.Errorf("invoice creation error: %s", errWrap.Error.Message)
 	}
@@ -686,6 +690,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		slog.String("name", params.ClientDetails.Name),
 		slog.String("country", params.ClientDetails.Country),
 		slog.String("currency", params.Currency),
+		slog.String("tg_topic", entity.TopicInvoice),
 	).Info("invoice created")
 
 	// *** payment creation is disabled ***

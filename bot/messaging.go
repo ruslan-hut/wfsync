@@ -11,23 +11,30 @@ func (t *TgBot) SendMessage(msg string) {
 	t.SendMessageWithLevel(msg, t.minLogLevel)
 }
 
-// SendMessageWithLevel sends a message to all enabled users filtered by log level.
-// Delegates to SendMessageWithTopic with an inferred topic.
+// SendMessageWithLevel sends an untagged log message — admins only.
+// Regular users don't receive raw log messages; they only get topic-tagged notifications.
 func (t *TgBot) SendMessageWithLevel(msg string, level slog.Level) {
 	topic := entity.TopicSystem
 	if level >= slog.LevelError {
 		topic = entity.TopicError
 	}
-	t.SendMessageWithTopic(msg, level, topic)
+	t.sendToUsers(msg, level, topic, true)
 }
 
-// SendMessageWithTopic is the core notification routing method.
-// For each cached user it checks: enabled → approved → log level ≥ user level → topic match.
+// SendMessageWithTopic sends a topic-tagged notification to all matching users.
+// Called from TelegramHandler when a log record has an explicit tg_topic attribute.
+func (t *TgBot) SendMessageWithTopic(msg string, level slog.Level, topic string) {
+	t.sendToUsers(msg, level, topic, false)
+}
+
+// sendToUsers is the core notification routing method.
+// For each cached user it checks: enabled → approved → log level → topic match.
+// When adminOnly is true, non-admin users are skipped (used for untagged log messages).
 // Then dispatches based on the user's subscription tier:
 //   - realtime: immediate send
 //   - critical: immediate send only if level ≥ ERROR
 //   - digest:   buffer in DigestBuffer for periodic flush
-func (t *TgBot) SendMessageWithTopic(msg string, level slog.Level, topic string) {
+func (t *TgBot) sendToUsers(msg string, level slog.Level, topic string, adminOnly bool) {
 	t.mu.RLock()
 	users := make(map[int64]*entity.User, len(t.users))
 	for k, v := range t.users {
@@ -38,6 +45,9 @@ func (t *TgBot) SendMessageWithTopic(msg string, level slog.Level, topic string)
 	l := int(level)
 	for _, user := range users {
 		if !user.TelegramEnabled || !user.IsApproved() {
+			continue
+		}
+		if adminOnly && !user.IsAdmin() {
 			continue
 		}
 		if l < user.LogLevel {

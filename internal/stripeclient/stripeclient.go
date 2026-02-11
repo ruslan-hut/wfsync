@@ -151,6 +151,7 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 	if err != nil {
 		log.With(
 			sl.Err(err),
+			slog.String("tg_topic", entity.TopicError),
 		).Error("get session from stripe")
 		return nil
 	}
@@ -158,6 +159,7 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 		slog.String("customer_email", sess.CustomerEmail),
 		slog.Int64("amount", sess.AmountTotal),
 		slog.String("currency", string(sess.Currency)),
+		slog.String("tg_topic", entity.TopicPayment),
 	)
 
 	s.checkCustomer(sess)
@@ -166,6 +168,8 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 	params.EventId = evt.ID
 
 	s.saveCheckoutParams(params)
+
+	log.Info("checkout session complete")
 
 	return params
 }
