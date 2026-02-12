@@ -49,33 +49,44 @@ func (h *TelegramHandler) Handle(ctx context.Context, record slog.Record) error 
 
 		// Format the log message
 		var msg string
+		var header string
 
-		// Add group prefix if present
-		if h.group != "" {
-			msg = fmt.Sprintf("*%s* `%s.%s`", record.Level.String(), h.group, record.Message)
-		} else {
-			msg = fmt.Sprintf("*%s* `%s`", record.Level.String(), record.Message)
-		}
+		// Extract tg_topic and build message from all attribute sources
+		topic := ""
 
 		// Add attributes from .With() calls
 		for _, attr := range h.attrs {
-			if attr.Key == "error" {
+			if attr.Key == "tg_topic" {
+				topic = attr.Value.String()
+			} else if attr.Key == "error" {
 				msg += fmt.Sprintf("```error %v ```", attr.Value)
 			} else {
 				msg += bot.Sanitize(fmt.Sprintf("\n%s: %v", attr.Key, attr.Value))
 			}
 		}
 
-		// Add attributes from the record, extracting tg_topic if present
-		topic := ""
+		// Add attributes from the record
 		record.Attrs(func(attr slog.Attr) bool {
 			if attr.Key == "tg_topic" {
 				topic = attr.Value.String()
-				return true // skip adding tg_topic to message text
+			} else if attr.Key == "error" {
+				msg += fmt.Sprintf("```error %v ```", attr.Value)
+			} else {
+				msg += bot.Sanitize(fmt.Sprintf("\n%s: %v", attr.Key, attr.Value))
 			}
-			msg += bot.Sanitize(fmt.Sprintf("\n%s: %v", attr.Key, attr.Value))
 			return true
 		})
+
+		// Add group prefix if present
+		if h.group != "" {
+			header = fmt.Sprintf("*%s* `%s.%s`", record.Level.String(), h.group, record.Message)
+		} else {
+			header = fmt.Sprintf("*%s* `%s`", record.Level.String(), record.Message)
+		}
+		if topic != "" {
+			header = fmt.Sprintf("*%s* `%s`", topic, record.Message)
+		}
+		msg = fmt.Sprintf("%s\n%s", header, msg)
 
 		// Route by topic if available, otherwise fall back to level-based routing
 		if h.bot != nil {
