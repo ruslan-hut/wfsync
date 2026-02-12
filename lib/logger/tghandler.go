@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"wfsync/bot"
 )
@@ -84,7 +85,7 @@ func (h *TelegramHandler) Handle(ctx context.Context, record slog.Record) error 
 			header = fmt.Sprintf("*%s* `%s`", record.Level.String(), record.Message)
 		}
 		if topic != "" {
-			header = fmt.Sprintf("*%s* `%s`", topic, record.Message)
+			header = fmt.Sprintf("*%s* `%s`", strings.ToUpper(topic), record.Message)
 		}
 		msg = fmt.Sprintf("%s\n%s", header, msg)
 
