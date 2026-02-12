@@ -60,7 +60,7 @@ func (h *TelegramHandler) Handle(ctx context.Context, record slog.Record) error 
 			if attr.Key == "tg_topic" {
 				topic = attr.Value.String()
 			} else if attr.Key == "error" {
-				msg += fmt.Sprintf("```error %v ```", attr.Value)
+				msg += fmt.Sprintf("\n```error %v ```", attr.Value)
 			} else {
 				msg += bot.Sanitize(fmt.Sprintf("\n%s: %v", attr.Key, attr.Value))
 			}
@@ -87,7 +87,7 @@ func (h *TelegramHandler) Handle(ctx context.Context, record slog.Record) error 
 		if topic != "" {
 			header = fmt.Sprintf("*%s* `%s`", strings.ToUpper(topic), record.Message)
 		}
-		msg = fmt.Sprintf("%s\n%s", header, msg)
+		msg = fmt.Sprintf("%s%s", header, msg)
 
 		// Route by topic if available, otherwise fall back to level-based routing
 		if h.bot != nil {
