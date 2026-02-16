@@ -30,11 +30,13 @@ func Download(logger *slog.Logger, handler Core) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		mod := sl.Module("http.handlers.wfinvoice")
 		invoiceId := chi.URLParam(r, "id")
+		user := cont.GetUser(r.Context())
 
 		log := logger.With(
 			mod,
 			slog.String("request_id", middleware.GetReqID(r.Context())),
 			slog.String("invoice_id", invoiceId),
+			slog.String("user", user.Username),
 		)
 
 		if handler == nil {
@@ -74,14 +76,14 @@ func OrderToInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		mod := sl.Module("http.handlers.wfinvoice")
 		orderId := chi.URLParam(r, "id")
+		user := cont.GetUser(r.Context())
 
 		log := logger.With(
 			mod,
 			slog.String("request_id", middleware.GetReqID(r.Context())),
 			slog.String("order_id", orderId),
+			slog.String("user", user.Username),
 		)
-
-		user := cont.GetUser(r.Context())
 		if user == nil {
 			log.Error("user not found")
 			render.Status(r, 401)
@@ -128,14 +130,14 @@ func FileProforma(logger *slog.Logger, handler Core) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		mod := sl.Module("http.handlers.wfinvoice")
 		orderId := chi.URLParam(r, "id")
+		user := cont.GetUser(r.Context())
 
 		log := logger.With(
 			mod,
 			slog.String("request_id", middleware.GetReqID(r.Context())),
 			slog.String("order_id", orderId),
+			slog.String("user", user.Username),
 		)
-
-		user := cont.GetUser(r.Context())
 		if user == nil {
 			log.Error("user not found")
 			render.Status(r, 401)
@@ -175,14 +177,14 @@ func FileInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		mod := sl.Module("http.handlers.wfinvoice")
 		orderId := chi.URLParam(r, "id")
+		user := cont.GetUser(r.Context())
 
 		log := logger.With(
 			mod,
 			slog.String("request_id", middleware.GetReqID(r.Context())),
 			slog.String("order_id", orderId),
+			slog.String("user", user.Username),
 		)
-
-		user := cont.GetUser(r.Context())
 		if user == nil {
 			log.Error("user not found")
 			render.Status(r, 401)
@@ -221,13 +223,13 @@ func FileInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 func CreateProforma(logger *slog.Logger, handler Core) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		mod := sl.Module("http.handlers.wfinvoice")
+		user := cont.GetUser(r.Context())
 
 		log := logger.With(
 			mod,
 			slog.String("request_id", middleware.GetReqID(r.Context())),
+			slog.String("user", user.Username),
 		)
-
-		user := cont.GetUser(r.Context())
 		if user == nil {
 			log.Error("user not found")
 			render.Status(r, 401)
@@ -268,13 +270,13 @@ func CreateProforma(logger *slog.Logger, handler Core) http.HandlerFunc {
 func CreateInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		mod := sl.Module("http.handlers.wfinvoice")
+		user := cont.GetUser(r.Context())
 
 		log := logger.With(
 			mod,
 			slog.String("request_id", middleware.GetReqID(r.Context())),
+			slog.String("user", user.Username),
 		)
-
-		user := cont.GetUser(r.Context())
 		if user == nil {
 			log.Error("user not found")
 			render.Status(r, 401)
