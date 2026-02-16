@@ -167,6 +167,13 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 	params = entity.NewFromCheckoutSession(sess)
 	params.EventId = evt.ID
 
+	if params.ClientDetails != nil {
+		log = log.With(
+			slog.String("client_name", params.ClientDetails.Name),
+			slog.String("client_email", params.ClientDetails.Email),
+		)
+	}
+
 	s.saveCheckoutParams(params)
 
 	log.Info("checkout session complete")
