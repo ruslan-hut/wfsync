@@ -44,12 +44,18 @@ type Invoice struct {
 //	"NPUE" — not subject to Polish VAT, EU (EU services, reverse charge)
 //	"ZW"   — exempt from VAT
 type Content struct {
-	Name  string  `json:"name" bson:"name"`
-	Good  *int64  `json:"good,omitempty" bson:"good,omitempty"` // wFirma good ID — links line item to product catalog
-	Count int64   `json:"count" bson:"count"`
-	Price float64 `json:"price" bson:"price"` // per-unit price in major currency units (e.g. PLN, not groszy)
-	Unit  string  `json:"unit" bson:"unit"`   // measurement unit, e.g. "szt." (pieces)
-	Vat   string  `json:"vat" bson:"vat"`     // VAT code: "23", "8", "0", "WDT", "EXP", "NP", "NPUE", "ZW"
+	Name  string   `json:"name" bson:"name"`
+	Good  *GoodRef `json:"good,omitempty" bson:"good,omitempty"` // wFirma good reference — links line item to product catalog
+	Count int64    `json:"count" bson:"count"`
+	Price float64  `json:"price" bson:"price"` // per-unit price in major currency units (e.g. PLN, not groszy)
+	Unit  string   `json:"unit" bson:"unit"`   // measurement unit, e.g. "szt." (pieces)
+	Vat   string   `json:"vat" bson:"vat"`     // VAT code: "23", "8", "0", "WDT", "EXP", "NP", "NPUE", "ZW"
+}
+
+// GoodRef is an entity reference to a wFirma goods catalog item.
+// The API expects references as objects: {"id": 12345}, not bare integers.
+type GoodRef struct {
+	ID int64 `json:"id" bson:"id"`
 }
 
 // ContentLine wraps Content for the wFirma API array structure.

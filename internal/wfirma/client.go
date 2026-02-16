@@ -344,7 +344,7 @@ func (c *Client) findGoodBySku(ctx context.Context, sku string) (int64, string, 
 // resolveGoodId looks up the wFirma good ID for a SKU: first from local DB, then from the wFirma API.
 // If found via API, the mapping is saved to local DB for future lookups.
 // Returns nil if not found or on any error (non-fatal).
-func (c *Client) resolveGoodId(ctx context.Context, sku string) *int64 {
+func (c *Client) resolveGoodId(ctx context.Context, sku string) *GoodRef {
 	log := c.log.With(slog.String("sku", sku))
 
 	// Try local DB first.
@@ -353,7 +353,7 @@ func (c *Client) resolveGoodId(ctx context.Context, sku string) *int64 {
 		if err != nil {
 			log.Warn("get product by sku", sl.Err(err))
 		} else if product != nil && product.WfirmaId > 0 {
-			return &product.WfirmaId
+			return &GoodRef{ID: product.WfirmaId}
 		}
 	}
 
@@ -379,7 +379,7 @@ func (c *Client) resolveGoodId(ctx context.Context, sku string) *int64 {
 			log.Warn("save product", sl.Err(err))
 		}
 	}
-	return &goodId
+	return &GoodRef{ID: goodId}
 }
 
 // DownloadInvoice fetches the PDF file for a given wFirma invoice ID.
