@@ -147,12 +147,24 @@ func (m *MongoDB) SaveCheckoutParams(params *entity.CheckoutParams) error {
 	}
 	defer m.disconnect(connection)
 
+	now := time.Now()
 	if params.Created.IsZero() {
-		params.Created = time.Now()
+		params.Created = now
 	}
-	params.Modified = time.Now()
+	params.Modified = now
 
 	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
+
+	// When event_id is present, upsert to avoid duplicate records from the same Stripe event
+	// (the webhook handler saves first, then the invoice flow updates the same document).
+	if params.EventId != "" {
+		filter := bson.D{{"event_id", params.EventId}}
+		update := bson.D{{"$set", params}}
+		opts := options.Update().SetUpsert(true)
+		_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+		return err
+	}
+
 	_, err = collection.InsertOne(m.ctx, params)
 	return err
 }
