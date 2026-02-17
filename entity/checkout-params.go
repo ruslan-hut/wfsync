@@ -47,6 +47,7 @@ type CheckoutParams struct {
 	ProformaFile  string         `json:"proforma_file,omitempty" bson:"proforma_file,omitempty"`
 	Paid          bool           `json:"paid,omitempty" bson:"paid"`
 	Source        Source         `json:"source,omitempty" bson:"source"`
+	CustomerGroup int            `json:"customer_group,omitempty" bson:"customer_group,omitempty"`
 	Payload       interface{}    `json:"payload,omitempty" bson:"payload,omitempty"`
 }
 
@@ -223,20 +224,36 @@ func (c *ClientDetails) NormalizeZipCode() string {
 
 // ParseTaxId extracts a tax ID from a JSON-formatted string based on the given field ID and assigns it to the ClientDetails.
 // Returns an error if the provided raw data is invalid JSON or the extraction fails.
-// Raw string example: {"2":"DE362155758"}
+// Supports flat and nested formats:
+//
+//	flat:   {"2":"DE362155758"}
+//	nested: {"account":{"2":"Lu36712803"}}
 func (c *ClientDetails) ParseTaxId(fieldId, raw string) error {
 	if fieldId == "" || raw == "" {
 		return nil
 	}
-	//var jsonStr string
-	//if err := json.Unmarshal([]byte(raw), &jsonStr); err != nil {
-	//	return err
-	//}
-	var data map[string]string
+	var data map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &data); err != nil {
 		return err
 	}
-	c.TaxId = data[fieldId]
+	// flat: field ID is a top-level key with a string value
+	if val, ok := data[fieldId]; ok {
+		var s string
+		if json.Unmarshal(val, &s) == nil {
+			c.TaxId = s
+			return nil
+		}
+	}
+	// nested: field ID is inside a nested object (e.g. {"account":{"2":"..."}})
+	for _, val := range data {
+		var nested map[string]string
+		if json.Unmarshal(val, &nested) == nil {
+			if s, ok := nested[fieldId]; ok {
+				c.TaxId = s
+				return nil
+			}
+		}
+	}
 	return nil
 }
 

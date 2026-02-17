@@ -57,6 +57,13 @@ const (
 
 // euCountries contains EU member state codes (ISO 3166-1 alpha-2), excluding Poland.
 // Used to determine whether a foreign contractor qualifies for intra-community (WDT) rates.
+// b2bCustomerGroups contains OpenCart customer group IDs that represent B2B customers.
+// B2B customers with a TaxID in the EU get WDT (0%), without TaxID get 23% Polish rate.
+// B2C customers always get the destination-country rate regardless of TaxID.
+var b2bCustomerGroups = map[int]bool{
+	6: true, 7: true, 16: true, 18: true, 19: true,
+}
+
 var euCountries = map[string]bool{
 	"AT": true, "BE": true, "BG": true, "HR": true, "CY": true,
 	"CZ": true, "DK": true, "EE": true, "FI": true, "FR": true,
@@ -510,21 +517,32 @@ func (c *Client) RegisterProforma(ctx context.Context, params *entity.CheckoutPa
 // resolveGoodsVatCode determines the correct VAT code for invoice line items.
 // The company is registered under the EU OSS (One-Stop Shop) scheme, so the site
 // calculates the destination-country VAT rate and we pass it through to wfirma.
-// Special zero-rate codes are applied only when the order is tax-exempt:
+//
+// B2B rules (OpenCart customer groups 6, 7, 16, 18, 19):
 //   - PL or unknown country → numeric rate from the order (e.g. "23")
 //   - EU country + VAT number → "WDT" (intra-community delivery, 0%)
-//   - EU country without VAT number → numeric rate from the order (e.g. "21" for NL, "19" for DE)
+//   - EU country without VAT number → "23" (Polish rate, not destination rate)
 //   - Non-EU country → "EXP" (export, 0%)
-func resolveGoodsVatCode(taxRate int, countryCode string, hasTaxId bool) string {
+//
+// B2C rules (all other customer groups):
+//   - PL or unknown country → numeric rate from the order (e.g. "23")
+//   - EU country → destination-country rate (e.g. "21" for NL, "19" for DE), TaxID irrelevant
+//   - Non-EU country → "EXP" (export, 0%)
+func resolveGoodsVatCode(taxRate int, countryCode string, hasTaxId bool, b2b bool) string {
 	if countryCode == "" || countryCode == "PL" {
 		return strconv.Itoa(taxRate)
-	}
-	if euCountries[countryCode] && hasTaxId {
-		return vatWDT
 	}
 	if !euCountries[countryCode] {
 		return vatEXP
 	}
+	// EU country — branch on B2B vs B2C
+	if b2b {
+		if hasTaxId {
+			return vatWDT
+		}
+		return "23"
+	}
+	// B2C: destination-country rate, TaxID irrelevant
 	return strconv.Itoa(taxRate)
 }
 
@@ -571,7 +589,8 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 
 	countryCode := params.ClientDetails.CountryCode()
 	hasTaxId := params.ClientDetails.TaxId != ""
-	goodsVat := resolveGoodsVatCode(params.TaxRate(), countryCode, hasTaxId)
+	isB2B := b2bCustomerGroups[params.CustomerGroup]
+	goodsVat := resolveGoodsVatCode(params.TaxRate(), countryCode, hasTaxId, isB2B)
 
 	var contents []*ContentLine
 	for _, line := range params.LineItems {
@@ -697,6 +716,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		slog.String("email", params.ClientDetails.Email),
 		slog.String("name", params.ClientDetails.Name),
 		slog.String("country", params.ClientDetails.Country),
+		slog.Int("customer_group", params.CustomerGroup),
 		slog.String("currency", params.Currency),
 		slog.String("tg_topic", entity.TopicInvoice),
 	).Info("invoice created")

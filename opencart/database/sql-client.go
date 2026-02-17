@@ -210,6 +210,7 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 			&order.ProformaId,
 			&order.ProformaFile,
 			&total,
+			&order.CustomerGroup,
 		); err != nil {
 			return nil, err
 		}
@@ -283,6 +284,7 @@ func (s *MySql) OrderSearchId(orderId int64) (*entity.CheckoutParams, error) {
 			&order.ProformaId,
 			&order.ProformaFile,
 			&total,
+			&order.CustomerGroup,
 		); err != nil {
 			return nil, err
 		}

@@ -125,7 +125,8 @@ func (s *MySql) stmtSelectOrderStatus() (*sql.Stmt, error) {
 			wf_file_invoice,
 			wf_proforma,
 			wf_file_proforma,
-			total
+			total,
+			customer_group_id
 		 FROM %sorder
 		 WHERE order_status_id = ?
 		 LIMIT 5`,
@@ -154,7 +155,8 @@ func (s *MySql) stmtSelectOrderId() (*sql.Stmt, error) {
 			wf_file_invoice,
 			wf_proforma,
 			wf_file_proforma,
-			total
+			total,
+			customer_group_id
 		 FROM %sorder
 		 WHERE order_id = ?`,
 		s.prefix,

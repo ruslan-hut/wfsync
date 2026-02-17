@@ -7,7 +7,10 @@ import (
 	"wfsync/lib/validate"
 )
 
-const SourceB2B Source = "b2b"
+const (
+	SourceB2B               Source = "b2b"
+	DefaultCustomerGroupB2B        = 6
+)
 
 type B2BOrder struct {
 	OrderUID        string     `json:"order_uid" validate:"required"`
@@ -62,13 +65,14 @@ func (o *B2BOrder) ToCheckoutParams() *CheckoutParams {
 			ZipCode: o.ClientZipcode,
 			TaxId:   o.ClientVAT,
 		},
-		Total:      floatToCents(o.Total),
-		Currency:   o.CurrencyCode,
-		OrderId:    o.OrderNumber,
-		SuccessUrl: "https://b2b.internal/success",
-		Created:    time.Now(),
-		Source:     SourceB2B,
-		TaxValue:   floatToCents(o.TotalVAT),
+		Total:         floatToCents(o.Total),
+		Currency:      o.CurrencyCode,
+		OrderId:       o.OrderNumber,
+		SuccessUrl:    "https://b2b.internal/success",
+		Created:       time.Now(),
+		Source:        SourceB2B,
+		TaxValue:      floatToCents(o.TotalVAT),
+		CustomerGroup: DefaultCustomerGroupB2B,
 	}
 
 	for _, item := range o.Items {
