@@ -103,6 +103,8 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 		}
 		if order != nil && len(order.LineItems) > 0 {
 			params.LineItems = order.LineItems
+			params.Total = order.Total
+			params.Shipping = order.Shipping
 			// tax parameters needed for invoice calculation in Wfirma
 			params.TaxValue = order.TaxValue
 			params.TaxTitle = order.TaxTitle
