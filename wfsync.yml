@@ -23,6 +23,10 @@ vatrates:
   enabled: true
   refresh_hours: 24
   trust_db: true
+vies:
+  enabled: true
+  cache_hours: 720
+  test_mode: false
 mongo:
   enabled: true
   host: ${MONGO_HOST}
