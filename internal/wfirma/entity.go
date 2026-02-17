@@ -36,7 +36,7 @@ type Invoice struct {
 }
 
 // Content represents a single line item in an invoice (invoicecontent).
-// Vat accepts both numeric rates ("23", "8", "5", "0") and special codes:
+// Vat accepts any numeric rate (e.g. "23", "21", "19", "8", "0") and special codes:
 //
 //	"WDT"  — 0% intra-community goods delivery (EU buyer with VAT number)
 //	"EXP"  — 0% export of goods (non-EU buyer)
@@ -49,7 +49,7 @@ type Content struct {
 	Count int64    `json:"count" bson:"count"`
 	Price float64  `json:"price" bson:"price"` // per-unit price in major currency units (e.g. PLN, not groszy)
 	Unit  string   `json:"unit" bson:"unit"`   // measurement unit, e.g. "szt." (pieces)
-	Vat   string   `json:"vat" bson:"vat"`     // VAT code: "23", "8", "0", "WDT", "EXP", "NP", "NPUE", "ZW"
+	Vat   string   `json:"vat" bson:"vat"`     // numeric rate ("23", "21", "19", "0") or special code ("WDT", "EXP", "NP", "NPUE", "ZW")
 }
 
 // GoodRef is an entity reference to a wFirma goods catalog item.

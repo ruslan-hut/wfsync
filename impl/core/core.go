@@ -102,10 +102,12 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 			).Error("get order")
 		}
 		if order != nil && len(order.LineItems) > 0 {
+			// Replace Stripe totals with OpenCart values so that TaxRate() uses consistent data.
+			// The site already applies the correct VAT rate per destination country (OSS scheme),
+			// and wfirma accepts those rates as-is (e.g. 21% for NL, 19% for DE).
 			params.LineItems = order.LineItems
 			params.Total = order.Total
 			params.Shipping = order.Shipping
-			// tax parameters needed for invoice calculation in Wfirma
 			params.TaxValue = order.TaxValue
 			params.TaxTitle = order.TaxTitle
 		}

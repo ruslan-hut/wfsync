@@ -37,7 +37,8 @@ const (
 	defaultPaymentDays = 7
 
 	// VAT codes for cross-border transactions (passed in invoicecontent "vat" field).
-	// For domestic (PL) invoices, use numeric strings like "23", "8", "0".
+	// wfirma accepts any numeric VAT rate (e.g. "23", "21", "19", "8", "0"),
+	// which is needed for OSS-registered companies invoicing with destination-country rates.
 	vatWDT  = "WDT"  // 0% intra-community goods delivery (EU buyer with VAT number)
 	vatEXP  = "EXP"  // 0% export of goods (non-EU buyer)
 	vatNP   = "NP"   // not subject to Polish VAT (non-EU services)
@@ -503,10 +504,13 @@ func (c *Client) RegisterProforma(ctx context.Context, params *entity.CheckoutPa
 	return c.invoice(ctx, invoiceProforma, params)
 }
 
-// resolveGoodsVatCode determines the correct VAT code for goods based on Polish tax rules:
+// resolveGoodsVatCode determines the correct VAT code for invoice line items.
+// The company is registered under the EU OSS (One-Stop Shop) scheme, so the site
+// calculates the destination-country VAT rate and we pass it through to wfirma.
+// Special zero-rate codes are applied only when the order is tax-exempt:
 //   - PL or unknown country → numeric rate from the order (e.g. "23")
 //   - EU country + VAT number → "WDT" (intra-community delivery, 0%)
-//   - EU country without VAT number → standard domestic rate (buyer is a consumer)
+//   - EU country without VAT number → numeric rate from the order (e.g. "21" for NL, "19" for DE)
 //   - Non-EU country → "EXP" (export, 0%)
 func resolveGoodsVatCode(taxRate int, countryCode string, hasTaxId bool) string {
 	if countryCode == "" || countryCode == "PL" {
