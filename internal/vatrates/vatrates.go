@@ -43,14 +43,18 @@ type rateGroup struct {
 }
 
 // Service fetches EU VAT rates from vatlookup.eu and caches them in memory.
+// The service tracks a "verified" flag that indicates whether the in-memory rates
+// have been confirmed against the database. Consumers should check Verified()
+// and fall back to their own logic when false.
 type Service struct {
 	hc              *http.Client
 	refreshInterval time.Duration
 	log             *slog.Logger
 	db              Database
 
-	mu    sync.RWMutex
-	rates map[string]float64 // country code (ISO alpha-2) → standard VAT rate
+	mu       sync.RWMutex
+	rates    map[string]float64 // country code (ISO alpha-2) → standard VAT rate
+	verified bool               // true when rates have been confirmed consistent with DB
 
 	done    chan struct{}
 	stopped chan struct{}
@@ -89,6 +93,14 @@ func (s *Service) GetStandardRate(code string) float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.rates[code]
+}
+
+// Verified reports whether the service data has been confirmed consistent with the database.
+// When false, consumers should fall back to their own hardcoded data.
+func (s *Service) Verified() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.verified
 }
 
 // Start launches the background refresh goroutine.
@@ -168,6 +180,7 @@ func (s *Service) loadFromDB() time.Time {
 
 	s.mu.Lock()
 	s.rates = loaded
+	s.verified = true
 	s.mu.Unlock()
 
 	s.log.Info("vat rates loaded from db", slog.Int("countries", len(loaded)))
@@ -229,11 +242,34 @@ func (s *Service) refreshFromAPI() {
 		return
 	}
 
+	// Verify DB persistence: the saved count must match what we fetched from the API.
+	// On mismatch, mark the service as unverified so consumers fall back to their own data.
+	dbVerified := true
+	if s.db != nil {
+		dbRates, err := s.db.GetAllVATRates()
+		if err != nil {
+			s.log.Error("verify vat rates in db", sl.Err(err))
+			dbVerified = false
+		} else if len(dbRates) != len(newRates) {
+			s.log.Error("vat rates db count mismatch",
+				slog.Int("api_count", len(newRates)),
+				slog.Int("db_count", len(dbRates)),
+			)
+			dbVerified = false
+		}
+	}
+
 	s.mu.Lock()
 	s.rates = newRates
+	s.verified = dbVerified
 	s.mu.Unlock()
 
-	s.log.Info("vat rates refreshed", slog.Int("countries", len(newRates)))
+	if dbVerified {
+		s.log.Info("vat rates refreshed and verified", slog.Int("countries", len(newRates)))
+	} else {
+		s.log.Warn("vat rates refreshed but NOT verified, consumers will use fallback",
+			slog.Int("countries", len(newRates)))
+	}
 }
 
 // fetchCountryList calls GET /countrylist/ and returns the list of EU countries.

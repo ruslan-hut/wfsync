@@ -74,10 +74,11 @@ var euCountries = map[string]bool{
 }
 
 // VATProvider supplies dynamic EU country membership and standard VAT rates.
-// When nil, the client falls back to the hardcoded euCountries map.
+// When nil or unverified, the client falls back to the hardcoded euCountries map.
 type VATProvider interface {
 	IsEUCountry(code string) bool
 	GetStandardRate(code string) float64
+	Verified() bool
 }
 
 type Database interface {
@@ -613,13 +614,21 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	hasTaxId := params.ClientDetails.TaxId != ""
 	isB2B := b2bCustomerGroups[params.CustomerGroup]
 	opencartRate := params.TaxRate()
-	goodsVat := resolveGoodsVatCode(opencartRate, countryCode, hasTaxId, isB2B, c.vatRates)
+
+	// Use the dynamic VAT provider only when it has been verified against the DB.
+	// Otherwise fall back to the hardcoded euCountries map.
+	var vp VATProvider
+	if c.vatRates != nil && c.vatRates.Verified() {
+		vp = c.vatRates
+	}
+
+	goodsVat := resolveGoodsVatCode(opencartRate, countryCode, hasTaxId, isB2B, vp)
 
 	// Cross-check OpenCart's calculated rate against our internal VAT rate database.
 	// Only meaningful for EU B2C orders where the destination-country rate is used.
 	// Internal rate (from vatlookup.eu) always takes priority over OpenCart data.
-	if c.vatRates != nil && !isB2B && countryCode != "" && countryCode != "PL" {
-		if internalRate := c.vatRates.GetStandardRate(countryCode); internalRate > 0 && internalRate != float64(opencartRate) {
+	if vp != nil && !isB2B && countryCode != "" && countryCode != "PL" {
+		if internalRate := vp.GetStandardRate(countryCode); internalRate > 0 && internalRate != float64(opencartRate) {
 			log.Warn("VAT rate mismatch: opencart rate differs from internal rate, using internal",
 				slog.String("country", countryCode),
 				slog.Int("opencart_rate", opencartRate),
