@@ -77,7 +77,7 @@ var euCountries = map[string]bool{
 // When nil, the client falls back to the hardcoded euCountries map.
 type VATProvider interface {
 	IsEUCountry(code string) bool
-	GetStandardRate(code string) int
+	GetStandardRate(code string) float64
 }
 
 type Database interface {
@@ -612,7 +612,30 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	countryCode := params.ClientDetails.CountryCode()
 	hasTaxId := params.ClientDetails.TaxId != ""
 	isB2B := b2bCustomerGroups[params.CustomerGroup]
-	goodsVat := resolveGoodsVatCode(params.TaxRate(), countryCode, hasTaxId, isB2B, c.vatRates)
+	opencartRate := params.TaxRate()
+	goodsVat := resolveGoodsVatCode(opencartRate, countryCode, hasTaxId, isB2B, c.vatRates)
+
+	// Cross-check OpenCart's calculated rate against our internal VAT rate database.
+	// Only meaningful for EU B2C orders where the destination-country rate is used.
+	// Internal rate (from vatlookup.eu) always takes priority over OpenCart data.
+	if c.vatRates != nil && !isB2B && countryCode != "" && countryCode != "PL" {
+		if internalRate := c.vatRates.GetStandardRate(countryCode); internalRate > 0 && internalRate != float64(opencartRate) {
+			log.Warn("VAT rate mismatch: opencart rate differs from internal rate, using internal",
+				slog.String("country", countryCode),
+				slog.Int("opencart_rate", opencartRate),
+				slog.Float64("internal_rate", internalRate),
+				slog.Int64("total", params.Total),
+				slog.Int64("tax_value", params.TaxValue),
+				slog.Int64("shipping", params.Shipping),
+				slog.String("tax_title", params.TaxTitle),
+				slog.Int("customer_group", params.CustomerGroup),
+				slog.Bool("has_tax_id", hasTaxId),
+				slog.String("email", params.ClientDetails.Email),
+				slog.String("tg_topic", entity.TopicError),
+			)
+			goodsVat = strconv.FormatFloat(internalRate, 'f', -1, 64)
+		}
+	}
 
 	var contents []*ContentLine
 	for _, line := range params.LineItems {

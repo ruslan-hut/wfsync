@@ -38,8 +38,8 @@ type ratesResponse struct {
 }
 
 type rateGroup struct {
-	Name  string `json:"name"`
-	Rates []int  `json:"rates"`
+	Name  string    `json:"name"`
+	Rates []float64 `json:"rates"`
 }
 
 // Service fetches EU VAT rates from vatlookup.eu and caches them in memory.
@@ -50,7 +50,7 @@ type Service struct {
 	db              Database
 
 	mu    sync.RWMutex
-	rates map[string]int // country code (ISO alpha-2) → standard VAT rate
+	rates map[string]float64 // country code (ISO alpha-2) → standard VAT rate
 
 	done    chan struct{}
 	stopped chan struct{}
@@ -66,7 +66,7 @@ func New(conf *config.Config, log *slog.Logger) *Service {
 		hc:              &http.Client{Timeout: 20 * time.Second},
 		refreshInterval: time.Duration(hours) * time.Hour,
 		log:             log.With(sl.Module("vatrates")),
-		rates:           make(map[string]int),
+		rates:           make(map[string]float64),
 	}
 }
 
@@ -85,7 +85,7 @@ func (s *Service) IsEUCountry(code string) bool {
 }
 
 // GetStandardRate returns the standard VAT rate for the given country, or 0 if unknown.
-func (s *Service) GetStandardRate(code string) int {
+func (s *Service) GetStandardRate(code string) float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.rates[code]
@@ -158,7 +158,7 @@ func (s *Service) loadFromDB() time.Time {
 		return newest
 	}
 
-	loaded := make(map[string]int, len(rates))
+	loaded := make(map[string]float64, len(rates))
 	for _, r := range rates {
 		loaded[r.CountryCode] = r.StandardRate
 		if r.UpdatedAt.After(newest) {
@@ -184,7 +184,7 @@ func (s *Service) refreshFromAPI() {
 	}
 
 	now := time.Now()
-	newRates := make(map[string]int, len(countries))
+	newRates := make(map[string]float64, len(countries))
 	for _, c := range countries {
 		code := c.Code
 
@@ -256,7 +256,7 @@ func (s *Service) fetchCountryList() ([]countryEntry, error) {
 }
 
 // fetchStandardRate calls GET /rates/{code}/ and extracts the first "Standard" rate.
-func (s *Service) fetchStandardRate(code string) (int, error) {
+func (s *Service) fetchStandardRate(code string) (float64, error) {
 	resp, err := s.hc.Get(fmt.Sprintf("%s/rates/%s/", baseURL, code))
 	if err != nil {
 		return 0, fmt.Errorf("GET rates/%s: %w", code, err)
