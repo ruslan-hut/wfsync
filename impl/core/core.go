@@ -27,6 +27,8 @@ type InvoiceService interface {
 	DownloadInvoice(ctx context.Context, invoiceID string) (string, *entity.FileMeta, error)
 	RegisterInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 	RegisterProforma(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
+	SyncFromRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
+	SyncToRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
 }
 
 type Core struct {
@@ -400,4 +402,18 @@ func (c *Core) B2BCreateProforma(ctx context.Context, order *entity.B2BOrder) (*
 func (c *Core) B2BCreateInvoice(ctx context.Context, order *entity.B2BOrder) (*entity.Payment, error) {
 	params := order.ToCheckoutParams()
 	return c.WFirmaRegisterInvoice(ctx, params)
+}
+
+func (c *Core) WFirmaSyncFromRemote(ctx context.Context, from, to string) (*entity.SyncResult, error) {
+	if c.inv == nil {
+		return nil, fmt.Errorf("invoice service not connected")
+	}
+	return c.inv.SyncFromRemote(ctx, from, to)
+}
+
+func (c *Core) WFirmaSyncToRemote(ctx context.Context, from, to string) (*entity.SyncResult, error) {
+	if c.inv == nil {
+		return nil, fmt.Errorf("invoice service not connected")
+	}
+	return c.inv.SyncToRemote(ctx, from, to)
 }

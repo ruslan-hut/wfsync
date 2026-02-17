@@ -415,6 +415,133 @@ Returns `Payment` object:
 
 ---
 
+### Sync Invoices from Remote (Pull)
+
+Pulls invoices from Wfirma for a date range and syncs them to the local MongoDB collection. Upserts remote invoices locally and deletes local records that no longer exist on Wfirma.
+
+```
+POST /v1/wf/sync/pull?from=YYYY-MM-DD&to=YYYY-MM-DD
+```
+
+#### Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `from` | string | Yes | Start date (inclusive), format `YYYY-MM-DD` |
+| `to` | string | Yes | End date (inclusive), format `YYYY-MM-DD` |
+
+#### Permissions
+
+Requires `WFirmaAllowInvoice` permission.
+
+#### How It Works
+
+1. Fetches all normal invoices from Wfirma for the date range
+2. Upserts each remote invoice into the local `wfirma_invoice` collection (including the `number` field)
+3. Finds local invoices for the same range whose IDs are absent from the remote set
+4. Deletes those orphaned local records
+
+#### Response
+
+Returns `SyncResult` object:
+
+```json
+{
+  "success": true,
+  "data": {
+    "remote_count": 15,
+    "local_count": 14,
+    "upserted": 15,
+    "deleted": 1,
+    "recreated": 0
+  },
+  "status_message": "Success",
+  "timestamp": "2025-07-07T11:41:40Z"
+}
+```
+
+#### Example
+
+```bash
+curl -X POST "https://api.example.com/v1/wf/sync/pull?from=2025-01-01&to=2025-01-31" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+#### Errors
+
+| Code | Description |
+|------|-------------|
+| 400 | Invalid date format (expected `YYYY-MM-DD`) |
+| 401 | Unauthorized |
+| 403 | User lacks `WFirmaAllowInvoice` permission |
+| 500 | Wfirma or database unavailable |
+
+---
+
+### Sync Invoices to Remote (Push)
+
+Checks local invoices against Wfirma for a date range and re-creates any that are missing on the remote side.
+
+```
+POST /v1/wf/sync/push?from=YYYY-MM-DD&to=YYYY-MM-DD
+```
+
+#### Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `from` | string | Yes | Start date (inclusive), format `YYYY-MM-DD` |
+| `to` | string | Yes | End date (inclusive), format `YYYY-MM-DD` |
+
+#### Permissions
+
+Requires `WFirmaAllowInvoice` permission.
+
+#### How It Works
+
+1. Reads local invoices from MongoDB for the date range
+2. Fetches remote invoices from Wfirma for the same range
+3. Finds local IDs that are absent from the remote set
+4. Re-creates each missing invoice on Wfirma using the stored data (contractor, line items, etc.)
+5. Deletes the old local record and saves a new one with the updated ID and invoice number
+
+#### Response
+
+Returns `SyncResult` object:
+
+```json
+{
+  "success": true,
+  "data": {
+    "remote_count": 14,
+    "local_count": 15,
+    "upserted": 0,
+    "deleted": 0,
+    "recreated": 1
+  },
+  "status_message": "Success",
+  "timestamp": "2025-07-07T11:41:40Z"
+}
+```
+
+#### Example
+
+```bash
+curl -X POST "https://api.example.com/v1/wf/sync/push?from=2025-01-01&to=2025-01-31" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+#### Errors
+
+| Code | Description |
+|------|-------------|
+| 400 | Invalid date format (expected `YYYY-MM-DD`) |
+| 401 | Unauthorized |
+| 403 | User lacks `WFirmaAllowInvoice` permission |
+| 500 | Wfirma or database unavailable |
+
+---
+
 ## Data Structures
 
 ### ClientDetails
@@ -449,3 +576,13 @@ Returns `Payment` object:
 | `order_id` | string | OpenCart order ID |
 | `link` | string | Public URL to the PDF file |
 | `invoice_file` | string | PDF filename |
+
+### SyncResult (Response)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `remote_count` | integer | Number of invoices found on Wfirma |
+| `local_count` | integer | Number of invoices found in local DB |
+| `upserted` | integer | Records upserted to local DB (pull only) |
+| `deleted` | integer | Orphaned records removed from local DB (pull only) |
+| `recreated` | integer | Invoices re-created on Wfirma (push only) |

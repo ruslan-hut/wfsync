@@ -20,6 +20,7 @@ package wfirma
 // Invoice represents a wFirma invoice payload for the invoices/add API action.
 type Invoice struct {
 	Id            string                  `json:"id,omitempty" bson:"id"`
+	Number        string                  `json:"fullnumber,omitempty" bson:"number"`
 	Contractor    *Contractor             `json:"contractor" bson:"contractor"`
 	Type          string                  `json:"type" bson:"type"`                   // "normal" or "proforma"
 	PriceType     string                  `json:"price_type" bson:"price_type"`       // "brutto" (gross) or "netto" (net)

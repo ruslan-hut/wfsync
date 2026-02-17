@@ -60,6 +60,21 @@ type InvoiceWrapper struct {
 	Invoice InvoiceData `json:"invoice"`
 }
 
+// InvoiceFindResponse is the top-level response for invoices/find action.
+// Separate from InvoiceResponse to avoid breaking the invoices/add flow.
+type InvoiceFindResponse struct {
+	Invoices   InvoicesWrapper `json:"invoices"`
+	Status     Status          `json:"status"`
+	Parameters FindParameters  `json:"parameters"`
+}
+
+// FindParameters contains pagination metadata returned by find actions.
+type FindParameters struct {
+	Limit int `json:"limit"`
+	Page  int `json:"page"`
+	Total int `json:"total"`
+}
+
 // InvoiceData represents the invoice object returned by the API.
 // Note: Total is a string in responses (the API returns it as a formatted decimal).
 type InvoiceData struct {

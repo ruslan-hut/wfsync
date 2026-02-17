@@ -13,6 +13,7 @@ import (
 	"wfsync/internal/http-server/handlers/payment"
 	"wfsync/internal/http-server/handlers/stripehandler"
 	"wfsync/internal/http-server/handlers/wfinvoice"
+	"wfsync/internal/http-server/handlers/wfsync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -33,6 +34,7 @@ type Handler interface {
 	authenticate.Authenticate
 	stripehandler.Core
 	wfinvoice.Core
+	wfsync.Core
 	payment.Core
 	b2b.Core
 }
@@ -61,6 +63,8 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 			wf.Get("/file/invoice/{id}", wfinvoice.FileInvoice(log, handler))
 			wf.Post("/proforma", wfinvoice.CreateProforma(log, handler))
 			wf.Post("/invoice", wfinvoice.CreateInvoice(log, handler))
+			wf.Post("/sync/pull", wfsync.SyncFromRemote(log, handler))
+			wf.Post("/sync/push", wfsync.SyncToRemote(log, handler))
 		})
 		rootApi.Route("/st", func(st chi.Router) {
 			st.Post("/hold", payment.Hold(log, handler))

@@ -267,6 +267,66 @@ func (m *MongoDB) SaveInvoice(id string, invoice interface{}) error {
 	return err
 }
 
+// GetInvoicesByDateRange returns locally stored invoices matching a date range and type.
+// String comparison on YYYY-MM-DD formatted dates works correctly for range filtering.
+func (m *MongoDB) GetInvoicesByDateRange(from, to, invType string) ([]*entity.LocalInvoice, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionInvoice)
+	filter := bson.D{
+		{"date", bson.D{{"$gte", from}}},
+		{"date", bson.D{{"$lte", to}}},
+		{"type", invType},
+	}
+	cursor, err := collection.Find(m.ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer func(cursor *mongo.Cursor, ctx context.Context) {
+		_ = cursor.Close(ctx)
+	}(cursor, m.ctx)
+
+	var invoices []*entity.LocalInvoice
+	err = cursor.All(m.ctx, &invoices)
+	if err != nil {
+		return nil, err
+	}
+	return invoices, nil
+}
+
+// DeleteInvoiceById removes a single invoice document by its wFirma ID.
+func (m *MongoDB) DeleteInvoiceById(id string) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionInvoice)
+	filter := bson.D{{"id", id}}
+	_, err = collection.DeleteOne(m.ctx, filter)
+	return err
+}
+
+// UpdateInvoiceNumber sets the invoice number for an existing invoice document.
+func (m *MongoDB) UpdateInvoiceNumber(id, number string) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionInvoice)
+	filter := bson.D{{"id", id}}
+	update := bson.D{{"$set", bson.D{{"number", number}}}}
+	_, err = collection.UpdateOne(m.ctx, filter, update)
+	return err
+}
+
 // GetAllTelegramUsers returns all users with telegram_id > 0 (includes pending/disabled).
 func (m *MongoDB) GetAllTelegramUsers() ([]*entity.User, error) {
 	connection, err := m.connect()
