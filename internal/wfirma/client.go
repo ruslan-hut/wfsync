@@ -73,6 +73,13 @@ var euCountries = map[string]bool{
 	"SE": true,
 }
 
+// VATProvider supplies dynamic EU country membership and standard VAT rates.
+// When nil, the client falls back to the hardcoded euCountries map.
+type VATProvider interface {
+	IsEUCountry(code string) bool
+	GetStandardRate(code string) int
+}
+
 type Database interface {
 	SaveInvoice(id string, invoice interface{}) error
 	SaveCheckoutParams(params *entity.CheckoutParams) error
@@ -88,6 +95,7 @@ type Client struct {
 	enabled   bool
 	hc        *http.Client
 	db        Database
+	vatRates  VATProvider
 	baseURL   string
 	accessKey string
 	secretKey string
@@ -117,6 +125,12 @@ func NewClient(conf *config.Config, logger *slog.Logger) *Client {
 
 func (c *Client) SetDatabase(db Database) {
 	c.db = db
+}
+
+// SetVATProvider injects a dynamic EU VAT rate provider.
+// When set, resolveGoodsVatCode uses it instead of the hardcoded euCountries map.
+func (c *Client) SetVATProvider(vp VATProvider) {
+	c.vatRates = vp
 }
 
 // request sends a signed POST to the wFirma API (https://api2.wfirma.pl).
@@ -528,11 +542,19 @@ func (c *Client) RegisterProforma(ctx context.Context, params *entity.CheckoutPa
 //   - PL or unknown country → numeric rate from the order (e.g. "23")
 //   - EU country → destination-country rate (e.g. "21" for NL, "19" for DE), TaxID irrelevant
 //   - Non-EU country → "EXP" (export, 0%)
-func resolveGoodsVatCode(taxRate int, countryCode string, hasTaxId bool, b2b bool) string {
+func resolveGoodsVatCode(taxRate int, countryCode string, hasTaxId bool, b2b bool, vp VATProvider) string {
 	if countryCode == "" || countryCode == "PL" {
 		return strconv.Itoa(taxRate)
 	}
-	if !euCountries[countryCode] {
+
+	isEU := false
+	if vp != nil {
+		isEU = vp.IsEUCountry(countryCode)
+	} else {
+		isEU = euCountries[countryCode]
+	}
+
+	if !isEU {
 		return vatEXP
 	}
 	// EU country — branch on B2B vs B2C
@@ -590,7 +612,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	countryCode := params.ClientDetails.CountryCode()
 	hasTaxId := params.ClientDetails.TaxId != ""
 	isB2B := b2bCustomerGroups[params.CustomerGroup]
-	goodsVat := resolveGoodsVatCode(params.TaxRate(), countryCode, hasTaxId, isB2B)
+	goodsVat := resolveGoodsVatCode(params.TaxRate(), countryCode, hasTaxId, isB2B, c.vatRates)
 
 	var contents []*ContentLine
 	for _, line := range params.LineItems {

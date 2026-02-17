@@ -19,6 +19,7 @@ const (
 	collectionInvoice        = "wfirma_invoice"
 	collectionProducts       = "products"
 	collectionInviteCodes    = "invite_codes"
+	collectionVATRates       = "vat_rates"
 )
 
 type MongoDB struct {
@@ -518,6 +519,47 @@ func (m *MongoDB) UseInviteCode(code string, telegramId int64) error {
 		return fmt.Errorf("invite code not found or exhausted")
 	}
 	return nil
+}
+
+// SaveVATRate upserts a VAT rate document by country_code.
+func (m *MongoDB) SaveVATRate(rate *entity.VATRate) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionVATRates)
+	filter := bson.D{{"country_code", rate.CountryCode}}
+	update := bson.D{{"$set", rate}}
+	opts := options.Update().SetUpsert(true)
+	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	return err
+}
+
+// GetAllVATRates returns all VAT rate documents from the collection.
+func (m *MongoDB) GetAllVATRates() ([]*entity.VATRate, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionVATRates)
+	cursor, err := collection.Find(m.ctx, bson.D{})
+	if err != nil {
+		return nil, err
+	}
+	defer func(cursor *mongo.Cursor, ctx context.Context) {
+		_ = cursor.Close(ctx)
+	}(cursor, m.ctx)
+
+	var rates []*entity.VATRate
+	err = cursor.All(m.ctx, &rates)
+	if err != nil {
+		return nil, err
+	}
+	return rates, nil
 }
 
 // MigrateExistingTelegramUsers sets existing enabled users to RoleAdmin + TierRealtime (idempotent).

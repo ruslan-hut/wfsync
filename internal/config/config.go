@@ -66,6 +66,11 @@ type Telegram struct {
 	InviteCodeLength  int    `yaml:"invite_code_length" env-default:"8"`
 }
 
+type VATRates struct {
+	Enabled      bool `yaml:"enabled" env-default:"false"`
+	RefreshHours int  `yaml:"refresh_hours" env-default:"24"`
+}
+
 type Config struct {
 	Stripe   StripeConfig `yaml:"stripe"`
 	WFirma   WfirmaConfig `yaml:"wfirma"`
@@ -73,6 +78,7 @@ type Config struct {
 	Mongo    Mongo        `yaml:"mongo"`
 	OpenCart OpenCart     `yaml:"opencart"`
 	Telegram Telegram     `yaml:"telegram"`
+	VATRates VATRates     `yaml:"vatrates"`
 	Env      string       `yaml:"env" env-default:"local"`
 	Log      string       `yaml:"log"`
 	Location string       `yaml:"location" env-default:"UTC"`

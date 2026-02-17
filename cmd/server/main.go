@@ -15,6 +15,7 @@ import (
 	"wfsync/internal/database"
 	"wfsync/internal/http-server/api"
 	"wfsync/internal/stripeclient"
+	"wfsync/internal/vatrates"
 	"wfsync/internal/wfirma"
 	"wfsync/lib/logger"
 	"wfsync/lib/sl"
@@ -86,6 +87,14 @@ func main() {
 	wfirmaClient := wfirma.NewClient(conf, log)
 	wfirmaClient.SetDatabase(mongo)
 
+	var vatService *vatrates.Service
+	if conf.VATRates.Enabled {
+		vatService = vatrates.New(conf, log)
+		vatService.SetDatabase(mongo)
+		wfirmaClient.SetVATProvider(vatService)
+		vatService.Start()
+	}
+
 	stripeClient := stripeclient.New(conf, log)
 	stripeClient.SetDatabase(mongo)
 
@@ -121,6 +130,10 @@ func main() {
 	// Stop background services
 	if oc != nil {
 		oc.Stop()
+	}
+
+	if vatService != nil {
+		vatService.Stop()
 	}
 
 	if tgBot != nil {
