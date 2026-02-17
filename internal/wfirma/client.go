@@ -569,6 +569,14 @@ func resolveGoodsVatCode(taxRate int, countryCode string, hasTaxId bool, b2b boo
 	return strconv.Itoa(taxRate)
 }
 
+// formatCustomerGroup returns a human-readable label like "3 (B2C)" or "6 (B2B)".
+func formatCustomerGroup(group int) string {
+	if b2bCustomerGroups[group] {
+		return fmt.Sprintf("%d (B2B)", group)
+	}
+	return fmt.Sprintf("%d (B2C)", group)
+}
+
 // invoice builds and sends an invoices/add request to the wFirma API.
 // Flow: validate params → find/create contractor → build invoice with contents → POST to API → persist result.
 func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entity.CheckoutParams) (*entity.Payment, error) {
@@ -770,7 +778,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		slog.String("email", params.ClientDetails.Email),
 		slog.String("name", params.ClientDetails.Name),
 		slog.String("country", params.ClientDetails.Country),
-		slog.Int("customer_group", params.CustomerGroup),
+		slog.String("customer_group", formatCustomerGroup(params.CustomerGroup)),
 		slog.String("currency", params.Currency),
 		slog.String("tg_topic", entity.TopicInvoice),
 	).Info("invoice created")
