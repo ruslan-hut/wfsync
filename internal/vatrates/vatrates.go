@@ -19,6 +19,9 @@ import (
 
 const baseURL = "https://api.vatlookup.eu"
 
+// retryInterval is used instead of the normal refresh interval when the service is unverified.
+const retryInterval = 30 * time.Minute
+
 // Database defines the persistence methods the VAT rates service needs.
 type Database interface {
 	SaveVATRate(rate *entity.VATRate) error
@@ -51,6 +54,7 @@ type Service struct {
 	refreshInterval time.Duration
 	log             *slog.Logger
 	db              Database
+	trustDB         bool
 
 	mu       sync.RWMutex
 	rates    map[string]float64 // country code (ISO alpha-2) → standard VAT rate
@@ -61,6 +65,8 @@ type Service struct {
 }
 
 // New creates a VAT rates service. Call Start() to begin background refresh.
+// When conf.VATRates.TrustDB is true, the service starts as verified after
+// loading data from the database, allowing consumers to use it immediately.
 func New(conf *config.Config, log *slog.Logger) *Service {
 	hours := conf.VATRates.RefreshHours
 	if hours <= 0 {
@@ -71,6 +77,7 @@ func New(conf *config.Config, log *slog.Logger) *Service {
 		refreshInterval: time.Duration(hours) * time.Hour,
 		log:             log.With(sl.Module("vatrates")),
 		rates:           make(map[string]float64),
+		trustDB:         conf.VATRates.TrustDB,
 	}
 }
 
@@ -103,6 +110,16 @@ func (s *Service) Verified() bool {
 	return s.verified
 }
 
+// nextInterval returns retryInterval when unverified, or the normal refresh interval otherwise.
+func (s *Service) nextInterval() time.Duration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.verified {
+		return retryInterval
+	}
+	return s.refreshInterval
+}
+
 // Start launches the background refresh goroutine.
 // It tries to load cached rates from DB first, falling back to an API call
 // when the DB is empty or the data is older than the refresh interval.
@@ -130,7 +147,7 @@ func (s *Service) Start() {
 			s.refreshFromAPI()
 		}
 
-		ticker := time.NewTicker(s.refreshInterval)
+		ticker := time.NewTicker(s.nextInterval())
 		defer ticker.Stop()
 		for {
 			select {
@@ -139,6 +156,7 @@ func (s *Service) Start() {
 				return
 			case <-ticker.C:
 				s.refreshFromAPI()
+				ticker.Reset(s.nextInterval())
 			}
 		}
 	}()
@@ -180,10 +198,14 @@ func (s *Service) loadFromDB() time.Time {
 
 	s.mu.Lock()
 	s.rates = loaded
-	s.verified = true
+	s.verified = s.trustDB
 	s.mu.Unlock()
 
-	s.log.Info("vat rates loaded from db", slog.Int("countries", len(loaded)))
+	if s.trustDB {
+		s.log.Info("vat rates loaded from db (trusted)", slog.Int("countries", len(loaded)))
+	} else {
+		s.log.Info("vat rates loaded from db (unverified, waiting for API refresh)", slog.Int("countries", len(loaded)))
+	}
 	return newest
 }
 

@@ -22,6 +22,7 @@ wfirma:
 vatrates:
   enabled: true
   refresh_hours: 24
+  trust_db: true
 mongo:
   enabled: true
   host: ${MONGO_HOST}

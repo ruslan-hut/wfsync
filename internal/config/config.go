@@ -69,6 +69,7 @@ type Telegram struct {
 type VATRates struct {
 	Enabled      bool `yaml:"enabled" env-default:"false"`
 	RefreshHours int  `yaml:"refresh_hours" env-default:"24"`
+	TrustDB      bool `yaml:"trust_db" env-default:"false"`
 }
 
 type Config struct {
