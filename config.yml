@@ -43,3 +43,7 @@ opencart:
 telegram:
   enabled: true
   api_key: your-telegram-api-key
+vies:
+  enabled: false
+  cache_hours: 720
+  test_mode: false

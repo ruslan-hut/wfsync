@@ -16,6 +16,7 @@ import (
 	"wfsync/internal/http-server/api"
 	"wfsync/internal/stripeclient"
 	"wfsync/internal/vatrates"
+	"wfsync/internal/vies"
 	"wfsync/internal/wfirma"
 	"wfsync/lib/logger"
 	"wfsync/lib/sl"
@@ -93,6 +94,12 @@ func main() {
 		vatService.SetDatabase(mongo)
 		wfirmaClient.SetVATProvider(vatService)
 		vatService.Start()
+	}
+
+	if conf.VIES.Enabled {
+		viesService := vies.New(conf, log)
+		viesService.SetDatabase(mongo)
+		wfirmaClient.SetVIESProvider(viesService)
 	}
 
 	stripeClient := stripeclient.New(conf, log)

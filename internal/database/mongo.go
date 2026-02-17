@@ -14,12 +14,13 @@ import (
 )
 
 const (
-	collectionUsers          = "users"
-	collectionCheckoutParams = "checkout_params"
-	collectionInvoice        = "wfirma_invoice"
-	collectionProducts       = "products"
-	collectionInviteCodes    = "invite_codes"
-	collectionVATRates       = "vat_rates"
+	collectionUsers           = "users"
+	collectionCheckoutParams  = "checkout_params"
+	collectionInvoice         = "wfirma_invoice"
+	collectionProducts        = "products"
+	collectionInviteCodes     = "invite_codes"
+	collectionVATRates        = "vat_rates"
+	collectionVIESValidations = "vies_validations"
 )
 
 type MongoDB struct {
@@ -560,6 +561,40 @@ func (m *MongoDB) GetAllVATRates() ([]*entity.VATRate, error) {
 		return nil, err
 	}
 	return rates, nil
+}
+
+// SaveVIESValidation upserts a VIES validation result by country_code + vat_number.
+func (m *MongoDB) SaveVIESValidation(v *entity.VIESValidation) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionVIESValidations)
+	filter := bson.D{{"country_code", v.CountryCode}, {"vat_number", v.VATNumber}}
+	update := bson.D{{"$set", v}}
+	opts := options.Update().SetUpsert(true)
+	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	return err
+}
+
+// GetVIESValidation returns a cached VIES validation result by country_code + vat_number.
+func (m *MongoDB) GetVIESValidation(countryCode, vatNumber string) (*entity.VIESValidation, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionVIESValidations)
+	filter := bson.D{{"country_code", countryCode}, {"vat_number", vatNumber}}
+	var v entity.VIESValidation
+	err = collection.FindOne(m.ctx, filter).Decode(&v)
+	if err != nil {
+		return nil, m.findError(err)
+	}
+	return &v, nil
 }
 
 // MigrateExistingTelegramUsers sets existing enabled users to RoleAdmin + TierRealtime (idempotent).

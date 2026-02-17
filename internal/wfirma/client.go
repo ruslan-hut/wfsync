@@ -81,6 +81,13 @@ type VATProvider interface {
 	Verified() bool
 }
 
+// VIESProvider validates EU VAT numbers against the VIES service.
+// When set, the client logs a warning if a B2B customer's TaxId fails validation.
+// Validation is non-blocking: the result is logged but does not affect invoice creation.
+type VIESProvider interface {
+	ValidateTaxId(taxId string) bool
+}
+
 type Database interface {
 	SaveInvoice(id string, invoice interface{}) error
 	SaveCheckoutParams(params *entity.CheckoutParams) error
@@ -97,6 +104,7 @@ type Client struct {
 	hc        *http.Client
 	db        Database
 	vatRates  VATProvider
+	vies      VIESProvider
 	baseURL   string
 	accessKey string
 	secretKey string
@@ -132,6 +140,12 @@ func (c *Client) SetDatabase(db Database) {
 // When set, resolveGoodsVatCode uses it instead of the hardcoded euCountries map.
 func (c *Client) SetVATProvider(vp VATProvider) {
 	c.vatRates = vp
+}
+
+// SetVIESProvider injects a VIES VAT number validator.
+// When set, invoice creation logs a warning if a B2B TaxId fails VIES validation.
+func (c *Client) SetVIESProvider(vp VIESProvider) {
+	c.vies = vp
 }
 
 // request sends a signed POST to the wFirma API (https://api2.wfirma.pl).
@@ -622,6 +636,22 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	hasTaxId := params.ClientDetails.TaxId != ""
 	isB2B := b2bCustomerGroups[params.CustomerGroup]
 	opencartRate := params.TaxRate()
+
+	// VIES validation: check the TaxId against the EU VIES service.
+	// Non-blocking — the result is logged but does not change hasTaxId or prevent invoice creation.
+	if hasTaxId && c.vies != nil {
+		if c.vies.ValidateTaxId(params.ClientDetails.TaxId) {
+			log.Info("VIES validation passed",
+				slog.String("tax_id", params.ClientDetails.TaxId),
+				slog.String("country", countryCode))
+		} else {
+			log.Warn("VIES validation failed",
+				slog.String("tax_id", params.ClientDetails.TaxId),
+				slog.String("country", countryCode),
+				slog.String("email", params.ClientDetails.Email),
+				slog.String("tg_topic", entity.TopicError))
+		}
+	}
 
 	// Use the dynamic VAT provider only when it has been verified against the DB.
 	// Otherwise fall back to the hardcoded euCountries map.

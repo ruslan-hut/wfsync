@@ -72,6 +72,12 @@ type VATRates struct {
 	TrustDB      bool `yaml:"trust_db" env-default:"false"`
 }
 
+type VIES struct {
+	Enabled    bool `yaml:"enabled" env-default:"false"`
+	CacheHours int  `yaml:"cache_hours" env-default:"720"`
+	TestMode   bool `yaml:"test_mode" env-default:"false"`
+}
+
 type Config struct {
 	Stripe   StripeConfig `yaml:"stripe"`
 	WFirma   WfirmaConfig `yaml:"wfirma"`
@@ -80,6 +86,7 @@ type Config struct {
 	OpenCart OpenCart     `yaml:"opencart"`
 	Telegram Telegram     `yaml:"telegram"`
 	VATRates VATRates     `yaml:"vatrates"`
+	VIES     VIES         `yaml:"vies"`
 	Env      string       `yaml:"env" env-default:"local"`
 	Log      string       `yaml:"log"`
 	Location string       `yaml:"location" env-default:"UTC"`
