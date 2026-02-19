@@ -14,6 +14,11 @@ package wfirma
 // Payment methods (paymentmethod field):
 //   "transfer", "cash", "compensation", "cod", "payment_card"
 //
+// Type of sale (type_of_sale field, JSON-encoded array):
+//   "SW" — distance selling of goods (WSTO) under EU OSS
+//   "EE" — electronic services under EU OSS
+//   Required for invoices with destination-country VAT rates (non-PL EU B2C).
+//
 // Note: the API computes totals from invoicecontents automatically.
 // The "total" field is included for local reference but ignored by the API on create.
 
@@ -31,7 +36,8 @@ type Invoice struct {
 	IdExternal    string                  `json:"id_external" bson:"id_external"`
 	Description   string                  `json:"description" bson:"description"`
 	Date          string                  `json:"date" bson:"date"`         // invoice issue date, format "YYYY-MM-DD"
-	Currency      string                  `json:"currency" bson:"currency"` // uppercase ISO 4217: "PLN", "EUR"
+	Currency      string                  `json:"currency" bson:"currency"`                           // uppercase ISO 4217: "PLN", "EUR"
+	TypeOfSale    string                  `json:"type_of_sale,omitempty" bson:"type_of_sale,omitempty"` // JSON array of sale types, e.g. "[\"SW\"]" for OSS goods
 	Contents      []*ContentLine          `json:"invoicecontents" bson:"invoicecontents"`
 	Errors        map[string]ErrorWrapper `json:"errors,omitempty" bson:"errors,omitempty"`
 }

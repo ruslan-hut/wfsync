@@ -45,6 +45,11 @@ const (
 	vatNPUE = "NPUE" // not subject to Polish VAT, EU reverse charge (EU services)
 	vatZW   = "ZW"   // exempt from VAT
 
+	// typeOfSaleSW is the wFirma type_of_sale value for distance selling of goods
+	// under the EU OSS (One-Stop Shop) scheme. Required when invoicing EU B2C
+	// customers with a destination-country VAT rate.
+	typeOfSaleSW = `["SW"]`
+
 	// shippingVatCode overrides the VAT code for shipping line items.
 	// When empty, shipping uses the same VAT code as goods.
 	// Set to a specific code (e.g. "NP", "ZW", "23") to tax shipping differently.
@@ -713,6 +718,19 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	issueDate := params.Created.Format("2006-01-02")
 	paymentDate := params.Created.AddDate(0, 0, defaultPaymentDays).Format("2006-01-02")
 
+	// Determine if this is an EU OSS sale (B2C to another EU country).
+	// wFirma requires type_of_sale to accept destination-country VAT rates.
+	isEU := false
+	if vp != nil {
+		isEU = vp.IsEUCountry(countryCode)
+	} else {
+		isEU = euCountries[countryCode]
+	}
+	var typeOfSale string
+	if !isB2B && isEU && countryCode != "" && countryCode != "PL" {
+		typeOfSale = typeOfSaleSW
+	}
+
 	invoice := &Invoice{
 		Contractor:    contractor,
 		Type:          string(invType),
@@ -725,6 +743,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		Description:   "Numer zamówienia: " + params.OrderId,
 		Date:          issueDate,
 		Currency:      strings.ToUpper(params.Currency),
+		TypeOfSale:    typeOfSale,
 		Contents:      contents,
 	}
 

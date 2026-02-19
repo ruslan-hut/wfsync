@@ -96,24 +96,47 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 
 	// try to read invoice items from the site database
 	if c.oc != nil && params.OrderId != "" {
-		orderId, _ := strconv.ParseInt(params.OrderId, 10, 64)
+		orderId, err := strconv.ParseInt(params.OrderId, 10, 64)
+		if err != nil {
+			c.log.With(
+				slog.String("order_id", params.OrderId),
+				slog.String("session_id", params.SessionId),
+				slog.String("event_id", evt.ID),
+				slog.String("email", params.ClientDetails.Email),
+				slog.Int64("total", params.Total),
+				slog.String("currency", params.Currency),
+				slog.String("tg_topic", entity.TopicError),
+			).Warn("no opencart order id in stripe session, skipping invoice creation")
+			return
+		}
 		order, err := c.oc.GetOrder(orderId)
 		if err != nil {
 			c.log.With(
 				sl.Err(err),
+				slog.Int64("order_id", orderId),
 			).Error("get order")
 		}
-		if order != nil && len(order.LineItems) > 0 {
-			// Replace Stripe totals with OpenCart values so that TaxRate() uses consistent data.
-			// The site already applies the correct VAT rate per destination country (OSS scheme),
-			// and wfirma accepts those rates as-is (e.g. 21% for NL, 19% for DE).
-			params.LineItems = order.LineItems
-			params.Total = order.Total
-			params.Shipping = order.Shipping
-			params.TaxValue = order.TaxValue
-			params.TaxTitle = order.TaxTitle
-			params.CustomerGroup = order.CustomerGroup
+		if order == nil || len(order.LineItems) == 0 {
+			c.log.With(
+				slog.Int64("order_id", orderId),
+				slog.String("session_id", params.SessionId),
+				slog.String("event_id", evt.ID),
+				slog.String("email", params.ClientDetails.Email),
+				slog.Int64("total", params.Total),
+				slog.String("currency", params.Currency),
+				slog.String("tg_topic", entity.TopicError),
+			).Warn("opencart order not found or has no items, skipping invoice creation")
+			return
 		}
+		// Replace Stripe totals with OpenCart values so that TaxRate() uses consistent data.
+		// The site already applies the correct VAT rate per destination country (OSS scheme),
+		// and wfirma accepts those rates as-is (e.g. 21% for NL, 19% for DE).
+		params.LineItems = order.LineItems
+		params.Total = order.Total
+		params.Shipping = order.Shipping
+		params.TaxValue = order.TaxValue
+		params.TaxTitle = order.TaxTitle
+		params.CustomerGroup = order.CustomerGroup
 	}
 
 	if params.InvoiceId != "" && params.OrderId != "" {
