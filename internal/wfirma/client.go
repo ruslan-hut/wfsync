@@ -48,7 +48,7 @@ const (
 	// typeOfSaleSW is the wFirma type_of_sale value for distance selling of goods
 	// under the EU OSS (One-Stop Shop) scheme. Required when invoicing EU B2C
 	// customers with a destination-country VAT rate.
-	typeOfSaleSW = `["SW"]`
+	typeOfSaleSW = "SW"
 
 	// shippingVatCode overrides the VAT code for shipping line items.
 	// When empty, shipping uses the same VAT code as goods.
@@ -823,7 +823,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		slog.String("wfirma_number", resultInvoice.Number),
 		slog.String("order_id", params.OrderId),
 		slog.String("total", fmt.Sprintf("%.2f", total)),
-		slog.String("tax", params.TaxTitle),
+		slog.String("tax", fmt.Sprintf("%s %s", goodsVat, typeOfSale)),
 		slog.String("email", params.ClientDetails.Email),
 		slog.String("name", params.ClientDetails.Name),
 		slog.String("country", params.ClientDetails.Country),
