@@ -169,8 +169,8 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			Count: line.Qty,
 			Price: float64(line.Price) / 100.0,
 			Unit:  "szt.",
+			Vat:   vatCode,
 		}
-		c.setContentVat(ctx, content, vatCode)
 		sku := line.Sku
 		if sku == "" && line.Shipping {
 			sku = shippingSku
@@ -197,7 +197,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	}
 	var typeOfSale string
 	if !isB2B && isEU && countryCode != "" && countryCode != "PL" {
-		typeOfSale = typeOfSaleSW
+		typeOfSale = `["` + typeOfSaleSW + `"]`
 	}
 
 	invoice := &Invoice{

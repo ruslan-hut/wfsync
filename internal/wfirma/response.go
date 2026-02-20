@@ -89,22 +89,3 @@ type InvoiceData struct {
 	Currency    string                  `json:"currency" bson:"currency"`
 	Errors      map[string]ErrorWrapper `json:"errors,omitempty" bson:"errors,omitempty"`
 }
-
-// VatCodesResponse is the top-level response for vat_codes/find and vat_codes/findAll actions.
-type VatCodesResponse struct {
-	VatCodes   map[string]VatCodeWrapper `json:"vat_codes"`
-	Status     Status                    `json:"status"`
-	Parameters FindParameters            `json:"parameters"`
-}
-
-type VatCodeWrapper struct {
-	VatCode VatCodeData `json:"vat_code"`
-}
-
-// VatCodeData represents a single VAT code entity returned by the API.
-// Code is the string identifier (e.g. "23", "8", "25") and Rate is the numeric value.
-type VatCodeData struct {
-	ID   string `json:"id"`
-	Code string `json:"code"`
-	Rate string `json:"rate"`
-}

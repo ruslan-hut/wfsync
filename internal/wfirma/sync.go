@@ -244,16 +244,10 @@ func (c *Client) recreateInvoice(ctx context.Context, local *entity.LocalInvoice
 			Count: line.Content.Count,
 			Price: line.Content.Price,
 			Unit:  line.Content.Unit,
+			Vat:   line.Content.Vat,
 		}
 		if line.Content.Good != nil {
 			content.Good = &GoodRef{ID: line.Content.Good.ID}
-		}
-		// Preserve vat_code reference from stored data; for old records that only
-		// have a vat string, resolve it through setContentVat.
-		if line.Content.VatCode != nil && line.Content.VatCode.ID > 0 {
-			content.VatCode = &VatCodeRef{ID: line.Content.VatCode.ID}
-		} else {
-			c.setContentVat(ctx, content, line.Content.Vat)
 		}
 		contents = append(contents, &ContentLine{Content: content})
 	}

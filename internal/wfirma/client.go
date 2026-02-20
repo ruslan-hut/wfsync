@@ -9,7 +9,7 @@
 //	client.go      — Client struct, interfaces, constructor, HTTP transport
 //	contractor.go  — contractor find/create operations
 //	goods.go       — goods catalog (SKU) lookups
-//	vat.go         — VAT code constants, resolution logic, vat_code caching
+//	vat.go         — VAT code constants and resolution logic
 //	invoice.go     — invoice creation, download, payment registration
 //	sync.go        — bidirectional sync between local DB and wFirma
 //	entity.go      — request/response payload structs
@@ -25,7 +25,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"sync"
 	"time"
 	"wfsync/entity"
 	"wfsync/internal/config"
@@ -72,10 +71,6 @@ type Client struct {
 	appID     string
 	filePath  string
 	log       *slog.Logger
-
-	vatCodesMu sync.RWMutex
-	vatCodes   map[string]int64 // vat code string → wFirma vat_code entity ID
-	vatCodesAt time.Time        // when vatCodes was last refreshed
 }
 
 // Config holds wFirma API credentials (currently unused — credentials come from config.Config).

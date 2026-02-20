@@ -38,22 +38,16 @@ type LocalContentLine struct {
 
 // LocalContent mirrors wfirma.Content for local storage.
 type LocalContent struct {
-	Name    string           `json:"name" bson:"name"`
-	Good    *LocalGoodRef    `json:"good,omitempty" bson:"good,omitempty"`
-	Count   int64            `json:"count" bson:"count"`
-	Price   float64          `json:"price" bson:"price"`
-	Unit    string           `json:"unit" bson:"unit"`
-	Vat     string           `json:"vat,omitempty" bson:"vat"`
-	VatCode *LocalVatCodeRef `json:"vat_code,omitempty" bson:"vat_code,omitempty"`
+	Name  string        `json:"name" bson:"name"`
+	Good  *LocalGoodRef `json:"good,omitempty" bson:"good,omitempty"`
+	Count int64         `json:"count" bson:"count"`
+	Price float64       `json:"price" bson:"price"`
+	Unit  string        `json:"unit" bson:"unit"`
+	Vat   string        `json:"vat" bson:"vat"`
 }
 
 // LocalGoodRef mirrors wfirma.GoodRef for local storage.
 type LocalGoodRef struct {
-	ID int64 `json:"id" bson:"id"`
-}
-
-// LocalVatCodeRef mirrors wfirma.VatCodeRef for local storage.
-type LocalVatCodeRef struct {
 	ID int64 `json:"id" bson:"id"`
 }
 
