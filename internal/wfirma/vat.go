@@ -147,7 +147,7 @@ func (c *Client) fetchVatCodes(ctx context.Context) (map[string]int64, error) {
 		}
 	}
 
-	c.log.Info("vat codes loaded", slog.Int("count", len(result)))
+	c.log.Info("vat codes loaded", slog.Int("count", len(result)), slog.Any("codes", result))
 	return result, nil
 }
 
