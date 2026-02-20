@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"wfsync/entity"
 	"wfsync/internal/config"
@@ -59,6 +60,14 @@ const (
 	// Used to look up the wFirma good ID for shipping costs.
 	shippingSku = "Zwrot"
 )
+
+// polishVatCodes contains VAT code strings accepted by the wFirma "vat" field.
+// Any rate not in this set (e.g. "25" for Denmark, "21" for Netherlands) must be sent
+// via the "vat_code" object reference with the numeric ID from vat_codes/findAll.
+var polishVatCodes = map[string]bool{
+	"23": true, "22": true, "8": true, "7": true, "5": true, "3": true, "0": true,
+	vatWDT: true, vatEXP: true, vatNP: true, vatNPUE: true, vatZW: true,
+}
 
 // euCountries contains EU member state codes (ISO 3166-1 alpha-2), excluding Poland.
 // Used to determine whether a foreign contractor qualifies for intra-community (WDT) rates.
@@ -116,6 +125,10 @@ type Client struct {
 	appID     string
 	filePath  string
 	log       *slog.Logger
+
+	vatCodesMu sync.RWMutex
+	vatCodes   map[string]int64 // vat code string → wFirma vat_code entity ID
+	vatCodesAt time.Time        // when vatCodes was last refreshed
 }
 
 type Config struct {
@@ -427,6 +440,120 @@ func (c *Client) resolveGoodId(ctx context.Context, sku string) *GoodRef {
 	return &GoodRef{ID: goodId}
 }
 
+// fetchVatCodes retrieves all VAT codes from the wFirma API (vat_codes/find)
+// and returns a map of code string → entity ID.
+// This is needed because non-Polish VAT rates (e.g. "25" for DK) require the
+// vat_code object reference — the plain "vat" string field only accepts Polish codes.
+func (c *Client) fetchVatCodes(ctx context.Context) (map[string]int64, error) {
+	const pageSize = 100
+	result := make(map[string]int64)
+
+	for page := 0; ; page++ {
+		payload := map[string]interface{}{
+			"api": map[string]interface{}{
+				"vat_codes": map[string]interface{}{
+					"parameters": map[string]interface{}{
+						"limit": pageSize,
+						"page":  page,
+					},
+				},
+			},
+		}
+
+		res, err := c.request(ctx, "vat_codes", "find", payload)
+		if err != nil {
+			return nil, fmt.Errorf("fetch vat codes page %d: %w", page, err)
+		}
+
+		var resp VatCodesResponse
+		if err = json.Unmarshal(res, &resp); err != nil {
+			return nil, fmt.Errorf("parse vat codes response: %w", err)
+		}
+		if resp.Status.Code == "ERROR" {
+			return nil, fmt.Errorf("vat_codes API error")
+		}
+
+		for _, wrapper := range resp.VatCodes {
+			vc := wrapper.VatCode
+			if vc.ID == "" || vc.Code == "" {
+				continue
+			}
+			id, err := strconv.ParseInt(vc.ID, 10, 64)
+			if err != nil {
+				continue
+			}
+			result[vc.Code] = id
+		}
+
+		fetched := (page + 1) * pageSize
+		if fetched >= resp.Parameters.Total || len(resp.VatCodes) == 0 {
+			break
+		}
+	}
+
+	c.log.Info("vat codes loaded", slog.Int("count", len(result)))
+	return result, nil
+}
+
+// vatCodesTTL is how long fetched VAT codes stay valid before a refresh is attempted.
+const vatCodesTTL = 24 * time.Hour
+
+// getVatCodeId looks up the wFirma vat_code entity ID for a given code string.
+// Thread-safe. Lazily fetches on first call and refreshes after vatCodesTTL.
+// Keeps stale cache on refresh failure. Returns 0 if the code is not found.
+func (c *Client) getVatCodeId(ctx context.Context, code string) int64 {
+	c.vatCodesMu.RLock()
+	id, ok := c.vatCodes[code]
+	stale := c.vatCodes == nil || time.Since(c.vatCodesAt) > vatCodesTTL
+	c.vatCodesMu.RUnlock()
+
+	if !stale && ok {
+		return id
+	}
+	if !stale {
+		return 0
+	}
+
+	// Cache is empty or expired — refresh under write lock.
+	c.vatCodesMu.Lock()
+	defer c.vatCodesMu.Unlock()
+
+	// Double-check after acquiring write lock (another goroutine may have refreshed).
+	if c.vatCodes != nil && time.Since(c.vatCodesAt) <= vatCodesTTL {
+		return c.vatCodes[code]
+	}
+
+	codes, err := c.fetchVatCodes(ctx)
+	if err != nil {
+		c.log.Warn("fetch vat codes failed, using stale cache", sl.Err(err))
+		// Keep stale cache — return whatever we have.
+		return c.vatCodes[code]
+	}
+	c.vatCodes = codes
+	c.vatCodesAt = time.Now()
+	return c.vatCodes[code]
+}
+
+// setContentVat sets the VAT on a Content line item.
+// For standard Polish codes (23, 8, 5, etc.) it uses the "vat" string field.
+// For non-Polish rates (EU OSS) it looks up the vat_code entity ID and uses the "vat_code" reference.
+// Falls back to the "vat" string field if the vat_code lookup fails.
+func (c *Client) setContentVat(ctx context.Context, content *Content, vatCode string) {
+	if polishVatCodes[vatCode] {
+		content.Vat = vatCode
+		return
+	}
+	// Non-Polish rate — resolve via vat_code reference.
+	if id := c.getVatCodeId(ctx, vatCode); id > 0 {
+		content.VatCode = &VatCodeRef{ID: id}
+		return
+	}
+	// Fallback: send as vat string (may be ignored by the API).
+	c.log.Warn("vat_code not found, falling back to vat string",
+		slog.String("code", vatCode))
+	content.Vat = vatCode
+}
+
 // DownloadInvoice fetches the PDF file for a given wFirma invoice ID.
 // Uses the invoices/download/{id} endpoint. Returns the saved filename and file metadata.
 func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string, *entity.FileMeta, error) {
@@ -700,8 +827,8 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			Count: line.Qty,
 			Price: float64(line.Price) / 100.0,
 			Unit:  "szt.",
-			Vat:   vatCode,
 		}
+		c.setContentVat(ctx, content, vatCode)
 		sku := line.Sku
 		if sku == "" && line.Shipping {
 			sku = shippingSku
@@ -1125,10 +1252,16 @@ func (c *Client) recreateInvoice(ctx context.Context, local *entity.LocalInvoice
 			Count: line.Content.Count,
 			Price: line.Content.Price,
 			Unit:  line.Content.Unit,
-			Vat:   line.Content.Vat,
 		}
 		if line.Content.Good != nil {
 			content.Good = &GoodRef{ID: line.Content.Good.ID}
+		}
+		// Preserve vat_code reference from stored data; for old records that only
+		// have a vat string, resolve it through setContentVat.
+		if line.Content.VatCode != nil && line.Content.VatCode.ID > 0 {
+			content.VatCode = &VatCodeRef{ID: line.Content.VatCode.ID}
+		} else {
+			c.setContentVat(ctx, content, line.Content.Vat)
 		}
 		contents = append(contents, &ContentLine{Content: content})
 	}

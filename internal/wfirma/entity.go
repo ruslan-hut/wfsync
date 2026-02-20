@@ -35,33 +35,46 @@ type Invoice struct {
 	Total         float64                 `json:"total" bson:"total"`                 // informational; API recomputes from contents
 	IdExternal    string                  `json:"id_external" bson:"id_external"`
 	Description   string                  `json:"description" bson:"description"`
-	Date          string                  `json:"date" bson:"date"`         // invoice issue date, format "YYYY-MM-DD"
-	Currency      string                  `json:"currency" bson:"currency"`                           // uppercase ISO 4217: "PLN", "EUR"
+	Date          string                  `json:"date" bson:"date"`                                     // invoice issue date, format "YYYY-MM-DD"
+	Currency      string                  `json:"currency" bson:"currency"`                             // uppercase ISO 4217: "PLN", "EUR"
 	TypeOfSale    string                  `json:"type_of_sale,omitempty" bson:"type_of_sale,omitempty"` // JSON array of sale types, e.g. "[\"SW\"]" for OSS goods
 	Contents      []*ContentLine          `json:"invoicecontents" bson:"invoicecontents"`
 	Errors        map[string]ErrorWrapper `json:"errors,omitempty" bson:"errors,omitempty"`
 }
 
 // Content represents a single line item in an invoice (invoicecontent).
-// Vat accepts any numeric rate (e.g. "23", "21", "19", "8", "0") and special codes:
 //
-//	"WDT"  — 0% intra-community goods delivery (EU buyer with VAT number)
-//	"EXP"  — 0% export of goods (non-EU buyer)
-//	"NP"   — not subject to Polish VAT (non-EU services)
-//	"NPUE" — not subject to Polish VAT, EU (EU services, reverse charge)
-//	"ZW"   — exempt from VAT
+// VAT can be specified in two ways (mutually exclusive in the JSON request):
+//
+//   - Vat (string): standard Polish rates ("23", "8", "5", "0") and special codes
+//     ("WDT", "EXP", "NP", "NPUE", "ZW"). Only recognized for Polish tax system codes.
+//   - VatCode (object reference): for non-Polish VAT rates used in EU OSS invoices
+//     (e.g. 25% Denmark, 21% Netherlands). References a vat_code entity by numeric ID.
+//     The correct ID must be looked up via the vat_codes/findAll API endpoint.
+//
+// When VatCode is set, Vat must be empty (omitted) — the API ignores Vat if both are present
+// and may fall back to the default 23% Polish rate for unrecognized Vat strings.
 type Content struct {
-	Name  string   `json:"name" bson:"name"`
-	Good  *GoodRef `json:"good,omitempty" bson:"good,omitempty"` // wFirma good reference — links line item to product catalog
-	Count int64    `json:"count" bson:"count"`
-	Price float64  `json:"price" bson:"price"` // per-unit price in major currency units (e.g. PLN, not groszy)
-	Unit  string   `json:"unit" bson:"unit"`   // measurement unit, e.g. "szt." (pieces)
-	Vat   string   `json:"vat" bson:"vat"`     // numeric rate ("23", "21", "19", "0") or special code ("WDT", "EXP", "NP", "NPUE", "ZW")
+	Name    string      `json:"name" bson:"name"`
+	Good    *GoodRef    `json:"good,omitempty" bson:"good,omitempty"` // wFirma good reference — links line item to product catalog
+	Count   int64       `json:"count" bson:"count"`
+	Price   float64     `json:"price" bson:"price"`                           // per-unit price in major currency units (e.g. PLN, not groszy)
+	Unit    string      `json:"unit" bson:"unit"`                             // measurement unit, e.g. "szt." (pieces)
+	Vat     string      `json:"vat,omitempty" bson:"vat"`                     // Polish rate ("23","8","5","0") or special code ("WDT","EXP","NP","NPUE","ZW")
+	VatCode *VatCodeRef `json:"vat_code,omitempty" bson:"vat_code,omitempty"` // non-Polish VAT rate reference for EU OSS invoices
 }
 
 // GoodRef is an entity reference to a wFirma goods catalog item.
 // The API expects references as objects: {"id": 12345}, not bare integers.
 type GoodRef struct {
+	ID int64 `json:"id" bson:"id"`
+}
+
+// VatCodeRef is an entity reference to a wFirma VAT code.
+// Required for non-Polish VAT rates (EU OSS) where the plain "vat" string field
+// only accepts standard Polish codes. The API expects: {"id": 12345}.
+// Use fetchVatCodes to look up the correct ID for a given rate.
+type VatCodeRef struct {
 	ID int64 `json:"id" bson:"id"`
 }
 
