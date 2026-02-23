@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
-	"time"
 	"wfsync/entity"
 	"wfsync/lib/api/cont"
 	"wfsync/lib/api/response"
@@ -20,7 +19,7 @@ import (
 
 type Core interface {
 	WFirmaInvoiceDownload(ctx context.Context, invID string) (io.ReadCloser, *entity.FileMeta, error)
-	WFirmaOrderToInvoice(ctx context.Context, orderId int64) (*entity.CheckoutParams, error)
+	WFirmaOrderToInvoice(ctx context.Context, orderId int64, useCurrentDate bool) (*entity.CheckoutParams, error)
 	WFirmaOrderFileProforma(ctx context.Context, orderId int64) (*entity.Payment, error)
 	WFirmaOrderFileInvoice(ctx context.Context, orderId int64) (*entity.Payment, error)
 	WFirmaCreateProforma(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
@@ -113,7 +112,9 @@ func OrderToInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 			return
 		}
 
-		params, err := handler.WFirmaOrderToInvoice(r.Context(), id)
+		useCurrentDate := r.URL.Query().Get("current_date") != "false"
+
+		params, err := handler.WFirmaOrderToInvoice(r.Context(), id, useCurrentDate)
 		if err != nil {
 			log.Error("invoice creation", sl.Err(err))
 			render.JSON(w, r, response.Error(fmt.Sprintf("Request failed: %v", err)))
@@ -291,18 +292,12 @@ func CreateInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 			return
 		}
 
-		useCurrentDate := r.URL.Query().Get("current_date") != "false"
-
 		var params entity.CheckoutParams
 		if err := render.Bind(r, &params); err != nil {
 			log.Warn("invalid request body", sl.Err(err))
 			render.Status(r, 400)
 			render.JSON(w, r, response.Error(fmt.Sprintf("Invalid request: %v", err)))
 			return
-		}
-
-		if useCurrentDate {
-			params.Created = time.Now()
 		}
 
 		log = log.With(slog.String("order_id", params.OrderId))

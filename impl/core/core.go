@@ -182,7 +182,7 @@ func (c *Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (io.
 	return file, meta, nil
 }
 
-func (c *Core) WFirmaOrderToInvoice(ctx context.Context, orderId int64) (*entity.CheckoutParams, error) {
+func (c *Core) WFirmaOrderToInvoice(ctx context.Context, orderId int64, useCurrentDate bool) (*entity.CheckoutParams, error) {
 	if c.inv == nil {
 		return nil, fmt.Errorf("invoice service not connected")
 	}
@@ -196,6 +196,10 @@ func (c *Core) WFirmaOrderToInvoice(ctx context.Context, orderId int64) (*entity
 	}
 	if params == nil {
 		return nil, fmt.Errorf("order not found")
+	}
+
+	if useCurrentDate {
+		params.Created = time.Now()
 	}
 
 	log := c.log.With(
