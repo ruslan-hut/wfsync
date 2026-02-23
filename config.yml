@@ -46,4 +46,3 @@ telegram:
 vies:
   enabled: false
   cache_hours: 720
-  test_mode: false

@@ -75,7 +75,6 @@ type VATRates struct {
 type VIES struct {
 	Enabled    bool `yaml:"enabled" env-default:"false"`
 	CacheHours int  `yaml:"cache_hours" env-default:"720"`
-	TestMode   bool `yaml:"test_mode" env-default:"false"`
 }
 
 type Config struct {

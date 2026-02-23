@@ -4,7 +4,6 @@
 package vies
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,21 +15,12 @@ import (
 	"wfsync/lib/sl"
 )
 
-const (
-	prodURL = "https://ec.europa.eu/taxation_customs/vies/rest-api/check-vat-number"
-	testURL = "https://ec.europa.eu/taxation_customs/vies/rest-api/check-vat-test-service"
-)
+const baseURL = "https://ec.europa.eu/taxation_customs/vies/rest-api/ms/%s/vat/%s"
 
 // Database defines the persistence methods the VIES service needs.
 type Database interface {
 	SaveVIESValidation(v *entity.VIESValidation) error
 	GetVIESValidation(countryCode, vatNumber string) (*entity.VIESValidation, error)
-}
-
-// viesRequest is the JSON body sent to the VIES REST API.
-type viesRequest struct {
-	CountryCode string `json:"countryCode"`
-	VATNumber   string `json:"vatNumber"`
 }
 
 // viesResponse is the JSON body returned by the VIES REST API.
@@ -50,7 +40,6 @@ type Service struct {
 	log      *slog.Logger
 	db       Database
 	cacheAge time.Duration
-	baseURL  string
 }
 
 // New creates a VIES validation service.
@@ -59,15 +48,10 @@ func New(conf *config.Config, log *slog.Logger) *Service {
 	if hours <= 0 {
 		hours = 720
 	}
-	baseURL := prodURL
-	if conf.VIES.TestMode {
-		baseURL = testURL
-	}
 	return &Service{
 		hc:       &http.Client{Timeout: 20 * time.Second},
 		log:      log.With(sl.Module("vies")),
 		cacheAge: time.Duration(hours) * time.Hour,
-		baseURL:  baseURL,
 	}
 }
 
@@ -148,26 +132,19 @@ func (s *Service) ValidateTaxId(taxId string) bool {
 	return resp.IsValid
 }
 
-// checkVATNumber sends a POST request to the VIES REST API.
+// checkVATNumber sends a GET request to the VIES REST API.
 func (s *Service) checkVATNumber(countryCode, vatNumber string) (*viesResponse, error) {
-	body, err := json.Marshal(viesRequest{
-		CountryCode: countryCode,
-		VATNumber:   vatNumber,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
+	url := fmt.Sprintf(baseURL, countryCode, vatNumber)
 
-	req, err := http.NewRequest(http.MethodPost, s.baseURL, bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := s.hc.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("POST %s: %w", s.baseURL, err)
+		return nil, fmt.Errorf("GET %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 
