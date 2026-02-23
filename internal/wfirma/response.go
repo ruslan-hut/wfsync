@@ -75,6 +75,13 @@ type FindParameters struct {
 	Total int `json:"total"`
 }
 
+// ContractorErrors captures only the errors from a contractor embedded in an invoice response.
+// Separate from Contractor because the invoice response returns contractor.id as a JSON number,
+// while other endpoints return it as a string.
+type ContractorErrors struct {
+	Errors map[string]ErrorWrapper `json:"errors,omitempty"`
+}
+
 // InvoiceData represents the invoice object returned by the API.
 // Note: Total is a string in responses (the API returns it as a formatted decimal).
 type InvoiceData struct {
@@ -87,6 +94,6 @@ type InvoiceData struct {
 	Description string                  `json:"description" bson:"description"`
 	Date        string                  `json:"date" bson:"date"`
 	Currency    string                  `json:"currency" bson:"currency"`
-	Contractor  *Contractor             `json:"contractor,omitempty" bson:"contractor,omitempty"`
+	Contractor  *ContractorErrors       `json:"contractor,omitempty" bson:"contractor,omitempty"`
 	Errors      map[string]ErrorWrapper `json:"errors,omitempty" bson:"errors,omitempty"`
 }

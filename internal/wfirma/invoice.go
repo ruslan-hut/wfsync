@@ -330,7 +330,7 @@ func extractInvoiceErrors(resp *InvoiceResponse) string {
 			msgs = append(msgs, fmt.Sprintf("%s: %s", ew.Error.Field, ew.Error.Message))
 		}
 		if inv.Contractor != nil {
-			for _, ew := range inv.Contractor.ErrorsRaw {
+			for _, ew := range inv.Contractor.Errors {
 				msgs = append(msgs, fmt.Sprintf("contractor.%s: %s", ew.Error.Field, ew.Error.Message))
 			}
 		}
