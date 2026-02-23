@@ -119,7 +119,7 @@ func (c *Client) updateContractor(ctx context.Context, contractorID string, cust
 		},
 	}
 
-	res, err := c.request(ctx, "contractors", "edit", payload)
+	res, err := c.request(ctx, "contractors", "edit/"+contractorID, payload)
 	if err != nil {
 		return fmt.Errorf("edit contractor: %w", err)
 	}
@@ -135,6 +135,9 @@ func (c *Client) updateContractor(ctx context.Context, contractorID string, cust
 		}
 		return fmt.Errorf("edit contractor: unknown error")
 	}
+	c.log.Debug("contractor updated",
+		slog.String("contractor_id", contractorID),
+		slog.String("nip", customer.TaxId))
 	return nil
 }
 
