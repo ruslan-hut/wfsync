@@ -254,6 +254,9 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		return nil, fmt.Errorf("invoice creation error: %s", errWrap.Error.Message)
 	}
 	if resultInvoice.Id == "" {
+		log.With(
+			slog.Any("response", addRes),
+		).Info("invoice creation")
 		return nil, fmt.Errorf("no invoice id returned from wFirma")
 	}
 
