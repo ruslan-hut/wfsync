@@ -95,6 +95,49 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 	return contr.ID, nil
 }
 
+// updateContractor updates an existing contractor's tax ID and related fields in wFirma.
+// Called when a returning customer now provides a tax ID that wasn't set before.
+func (c *Client) updateContractor(ctx context.Context, contractorID string, customer *entity.ClientDetails) error {
+	taxIdType := "other"
+	if customer.TaxId != "" {
+		taxIdType = "custom"
+	}
+
+	payload := map[string]interface{}{
+		"api": map[string]interface{}{
+			"contractors": []map[string]interface{}{
+				{
+					"contractor": map[string]interface{}{
+						"id":          contractorID,
+						"name":        customer.Name,
+						"country":     customer.CountryCode(),
+						"tax_id_type": taxIdType,
+						"nip":         customer.TaxId,
+					},
+				},
+			},
+		},
+	}
+
+	res, err := c.request(ctx, "contractors", "edit", payload)
+	if err != nil {
+		return fmt.Errorf("edit contractor: %w", err)
+	}
+
+	var editResp Response
+	if err = json.Unmarshal(res, &editResp); err != nil {
+		return fmt.Errorf("parse contractor edit response: %w", err)
+	}
+	if editResp.Status.Code == "ERROR" {
+		contr := editResp.Contractors["0"].Contractor
+		for _, w := range contr.ErrorsRaw {
+			return fmt.Errorf("edit contractor: %s: %s", w.Error.Field, w.Error.Message)
+		}
+		return fmt.Errorf("edit contractor: unknown error")
+	}
+	return nil
+}
+
 // getContractor searches for an existing contractor by email. Returns empty string if not found.
 func (c *Client) getContractor(ctx context.Context, email string) (string, error) {
 	if email == "" {

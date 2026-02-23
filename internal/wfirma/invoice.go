@@ -99,6 +99,12 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		if err != nil {
 			return nil, fmt.Errorf("create contractor: %w", err)
 		}
+	} else if params.ClientDetails.TaxId != "" {
+		// Existing contractor — ensure wFirma has the current tax ID.
+		// Without this, WDT invoices fail when the contractor was previously created without a NIP.
+		if err := c.updateContractor(ctx, contractorID, params.ClientDetails); err != nil {
+			log.Warn("update contractor tax id", sl.Err(err))
+		}
 	}
 	log = log.With(slog.String("contractor_id", contractorID))
 
@@ -234,29 +240,26 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 
 	var addResp InvoiceResponse
 	if err = json.Unmarshal(addRes, &addResp); err != nil {
-		log.With(
-			slog.Any("response", addRes),
-		).Debug("invoice creation response")
-		return nil, err
+		log.With(slog.String("response", string(addRes))).Warn("unmarshal invoice response")
+		return nil, fmt.Errorf("unmarshal invoice response: %w", err)
 	}
+
+	// Check top-level status first.
+	if addResp.Status.Code == "ERROR" {
+		errMsg := extractInvoiceErrors(&addResp)
+		log.With(
+			slog.String("error", errMsg),
+			slog.String("tg_topic", entity.TopicError),
+		).Warn("invoice creation error")
+		return nil, fmt.Errorf("wFirma error: %s", errMsg)
+	}
+
 	var resultInvoice InvoiceData
 	if wrapper, ok := addResp.Invoices["0"]; ok {
 		resultInvoice = wrapper.Invoice
 	}
-	if errWrap, ok := resultInvoice.Errors["0"]; ok {
-		log.With(
-			slog.String("error", errWrap.Error.Message),
-			slog.String("field", errWrap.Error.Field),
-			slog.String("method", errWrap.Error.Method.Name),
-			slog.String("parameters", errWrap.Error.Method.Parameters),
-			slog.String("tg_topic", entity.TopicError),
-		).Warn("invoice creation")
-		return nil, fmt.Errorf("invoice creation error: %s", errWrap.Error.Message)
-	}
 	if resultInvoice.Id == "" {
-		log.With(
-			slog.Any("response", addRes),
-		).Info("invoice creation")
+		log.With(slog.String("response", string(addRes))).Warn("no invoice id in response")
 		return nil, fmt.Errorf("no invoice id returned from wFirma")
 	}
 
@@ -315,6 +318,27 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	//}
 
 	return payment, nil
+}
+
+// extractInvoiceErrors collects all error messages from the invoice response,
+// including contractor-level validation errors.
+func extractInvoiceErrors(resp *InvoiceResponse) string {
+	var msgs []string
+	for _, wrapper := range resp.Invoices {
+		inv := wrapper.Invoice
+		for _, ew := range inv.Errors {
+			msgs = append(msgs, fmt.Sprintf("%s: %s", ew.Error.Field, ew.Error.Message))
+		}
+		if inv.Contractor != nil {
+			for _, ew := range inv.Contractor.ErrorsRaw {
+				msgs = append(msgs, fmt.Sprintf("contractor.%s: %s", ew.Error.Field, ew.Error.Message))
+			}
+		}
+	}
+	if len(msgs) == 0 {
+		return "unknown error"
+	}
+	return strings.Join(msgs, "; ")
 }
 
 // addPayment registers a payment against an existing invoice in wFirma (payments/add).

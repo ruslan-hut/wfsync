@@ -11,21 +11,26 @@ import (
 	tgbotapi "github.com/PaulSonOfLars/gotgbot/v2"
 )
 
+// tgMaxMessageLen is Telegram's maximum message length.
+const tgMaxMessageLen = 4096
+
 func (t *TgBot) plainResponse(chatId int64, text string) {
 	if text == "" {
 		t.log.With("id", chatId).Debug("empty message")
 		return
 	}
 
-	_, err := t.api.SendMessage(chatId, text, &tgbotapi.SendMessageOpts{
-		ParseMode: "MarkdownV2",
-	})
-	if err != nil {
-		t.log.With(slog.Int64("id", chatId)).Warn("sending message", sl.Err(err))
-		_, _ = t.api.SendMessage(chatId, err.Error(), &tgbotapi.SendMessageOpts{})
-		_, err = t.api.SendMessage(chatId, text, &tgbotapi.SendMessageOpts{})
+	for _, part := range splitMessage(text, tgMaxMessageLen) {
+		_, err := t.api.SendMessage(chatId, part, &tgbotapi.SendMessageOpts{
+			ParseMode: "MarkdownV2",
+		})
 		if err != nil {
-			t.log.With(slog.Int64("id", chatId)).Error("sending safe message", sl.Err(err))
+			t.log.With(slog.Int64("id", chatId)).Warn("sending message", sl.Err(err))
+			// Fallback: try without markdown, still respecting the limit
+			_, err = t.api.SendMessage(chatId, part, &tgbotapi.SendMessageOpts{})
+			if err != nil {
+				t.log.With(slog.Int64("id", chatId)).Error("sending safe message", sl.Err(err))
+			}
 		}
 	}
 }

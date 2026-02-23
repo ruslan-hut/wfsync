@@ -87,5 +87,6 @@ type InvoiceData struct {
 	Description string                  `json:"description" bson:"description"`
 	Date        string                  `json:"date" bson:"date"`
 	Currency    string                  `json:"currency" bson:"currency"`
+	Contractor  *Contractor             `json:"contractor,omitempty" bson:"contractor,omitempty"`
 	Errors      map[string]ErrorWrapper `json:"errors,omitempty" bson:"errors,omitempty"`
 }
