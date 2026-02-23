@@ -52,7 +52,9 @@ type CheckoutParams struct {
 }
 
 func (c *CheckoutParams) Bind(_ *http.Request) error {
-	c.Created = time.Now()
+	if c.Created.IsZero() {
+		c.Created = time.Now()
+	}
 	return validate.Struct(c)
 }
 

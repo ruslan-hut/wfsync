@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 	"wfsync/entity"
 	"wfsync/lib/api/cont"
 	"wfsync/lib/api/response"
@@ -290,12 +291,18 @@ func CreateInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 			return
 		}
 
+		useCurrentDate := r.URL.Query().Get("current_date") != "false"
+
 		var params entity.CheckoutParams
 		if err := render.Bind(r, &params); err != nil {
 			log.Warn("invalid request body", sl.Err(err))
 			render.Status(r, 400)
 			render.JSON(w, r, response.Error(fmt.Sprintf("Invalid request: %v", err)))
 			return
+		}
+
+		if useCurrentDate {
+			params.Created = time.Now()
 		}
 
 		log = log.With(slog.String("order_id", params.OrderId))
