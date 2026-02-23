@@ -129,6 +129,14 @@ func (s *Service) ValidateTaxId(taxId string) bool {
 		}
 	}
 
+	s.log.With(
+		slog.String("country", countryCode),
+		slog.String("vat_number", vatNumber),
+		slog.String("name", validation.Name),
+		slog.Bool("valid", validation.Valid),
+		slog.String("validated_at", validation.ValidatedAt.Format(time.RFC3339)),
+	).Info("VIES validation passed")
+
 	return resp.IsValid
 }
 

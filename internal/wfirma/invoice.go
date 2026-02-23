@@ -115,15 +115,15 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	// Non-blocking — the result is logged but does not change hasTaxId or prevent invoice creation.
 	if hasTaxId && c.vies != nil {
 		if c.vies.ValidateTaxId(params.ClientDetails.TaxId) {
-			log.Info("VIES validation passed",
+			log.Debug("VIES validation passed",
 				slog.String("tax_id", params.ClientDetails.TaxId),
 				slog.String("country", countryCode))
-		} else {
-			log.Warn("VIES validation failed",
-				slog.String("tax_id", params.ClientDetails.TaxId),
-				slog.String("country", countryCode),
-				slog.String("email", params.ClientDetails.Email),
-				slog.String("tg_topic", entity.TopicError))
+			//} else {
+			//	log.Warn("VIES validation failed",
+			//		slog.String("tax_id", params.ClientDetails.TaxId),
+			//		slog.String("country", countryCode),
+			//		slog.String("email", params.ClientDetails.Email),
+			//		slog.String("tg_topic", entity.TopicError))
 		}
 	}
 
