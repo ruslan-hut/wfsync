@@ -25,6 +25,8 @@ func (c *Client) fetchVatCodes(ctx context.Context) error {
 		return fmt.Errorf("vat_codes/find: %w", err)
 	}
 
+	c.log.Debug("vat_codes/find raw response", slog.String("body", string(res)))
+
 	var resp VatCodesResponse
 	if err = json.Unmarshal(res, &resp); err != nil {
 		return fmt.Errorf("parse vat_codes response: %w", err)
