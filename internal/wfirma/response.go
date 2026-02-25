@@ -60,6 +60,22 @@ type InvoiceWrapper struct {
 	Invoice InvoiceData `json:"invoice"`
 }
 
+// VatCodesResponse is the top-level response for vat_codes/find action.
+type VatCodesResponse struct {
+	VatCodes map[string]VatCodeWrapper `json:"vat_codes"`
+	Status   Status                    `json:"status"`
+}
+
+type VatCodeWrapper struct {
+	VatCode VatCodeData `json:"vat_code"`
+}
+
+// VatCodeData represents a single VAT code returned by the wFirma API.
+type VatCodeData struct {
+	ID   string `json:"id"`
+	Name string `json:"name"` // code name, e.g. "23", "8", "WDT", "EXP"
+}
+
 // InvoiceFindResponse is the top-level response for invoices/find action.
 // Separate from InvoiceResponse to avoid breaking the invoices/add flow.
 type InvoiceFindResponse struct {

@@ -10,6 +10,7 @@
 //	contractor.go  — contractor find/create operations
 //	goods.go       — goods catalog (SKU) lookups
 //	vat.go         — VAT code constants and resolution logic
+//	vat-codes.go   — wFirma vat_code ID fetching and caching
 //	invoice.go     — invoice creation, download, payment registration
 //	sync.go        — bidirectional sync between local DB and wFirma
 //	entity.go      — request/response payload structs
@@ -71,6 +72,7 @@ type Client struct {
 	appID     string
 	filePath  string
 	log       *slog.Logger
+	vatCodes  map[string]string // cached vat code name → wFirma ID (fetched via vat_codes/find)
 }
 
 // Config holds wFirma API credentials (currently unused — credentials come from config.Config).
@@ -142,7 +144,9 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		_ = Body.Close()
+	}(resp.Body)
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode >= 300 {

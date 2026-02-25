@@ -11,7 +11,8 @@ import (
 
 // createContractor registers a new contractor in wFirma and returns its ID.
 // Contractor fields: name, email, country (ISO 3166 alpha-2), zip, city, street, nip, tax_id_type.
-// tax_id_type: "other" = no tax ID provided, "custom" = tax ID present.
+// tax_id_type: "none" = no tax ID provided, "custom" = tax ID present in the nip field.
+// Using "none"/"custom" (instead of "other") allows wFirma to accept custom VAT rates on invoices.
 func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDetails) (string, error) {
 	if customer == nil {
 		return "", fmt.Errorf("no customer")
@@ -25,7 +26,7 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 	if customer.City == "" {
 		customer.City = "Warszawa"
 	}
-	taxIdType := "other"
+	taxIdType := "none"
 	if customer.TaxId != "" {
 		taxIdType = "custom"
 	}
@@ -98,7 +99,7 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 // updateContractor updates an existing contractor's tax ID and related fields in wFirma.
 // Called when a returning customer now provides a tax ID that wasn't set before.
 func (c *Client) updateContractor(ctx context.Context, contractorID string, customer *entity.ClientDetails) error {
-	taxIdType := "other"
+	taxIdType := "none"
 	if customer.TaxId != "" {
 		taxIdType = "custom"
 	}

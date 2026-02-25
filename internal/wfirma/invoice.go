@@ -175,7 +175,14 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			Count: line.Qty,
 			Price: float64(line.Price) / 100.0,
 			Unit:  "szt.",
-			Vat:   vatCode,
+		}
+		// Prefer vat_code with wFirma ID over the plain "vat" string field.
+		// The API resets non-standard rates (e.g. EU destination-country rates) to 23%
+		// when the plain "vat" field is used.
+		if vcID := c.resolveVatCodeID(ctx, vatCode); vcID != "" {
+			content.VatCode = &VatCodeRef{ID: vcID}
+		} else {
+			content.Vat = vatCode
 		}
 		sku := line.Sku
 		if sku == "" && line.Shipping {
@@ -442,7 +449,7 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string,
 	}
 
 	if resp.StatusCode >= 300 {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		log.Error("wfirma api", slog.String("status", resp.Status))
 		return "", nil, fmt.Errorf("wfirma status: %s", resp.Status)
 	}
@@ -460,12 +467,12 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string,
 
 	f, err := os.Create(filePath)
 	if err != nil {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		return "", nil, fmt.Errorf("create file: %w", err)
 	}
 
 	_, copyErr := io.Copy(f, resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Sync to ensure data is flushed to disk before closing
 	if copyErr == nil {
