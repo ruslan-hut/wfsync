@@ -53,6 +53,7 @@ func (c *Client) fetchVatCodes(ctx context.Context) error {
 // resolveVatCodeID looks up the wFirma vat_code ID for a given VAT code string
 // (e.g. "23", "WDT", "EXP"). Fetches and caches vat codes on first call.
 // Returns empty string if the code is not found or fetching fails.
+// On fetch failure the cache is reset to nil so the next invoice retries.
 func (c *Client) resolveVatCodeID(ctx context.Context, code string) string {
 	if c.vatCodes == nil {
 		if err := c.fetchVatCodes(ctx); err != nil {
@@ -65,8 +66,10 @@ func (c *Client) resolveVatCodeID(ctx context.Context, code string) string {
 		return id
 	}
 
-	c.log.Warn("vat code ID not found",
+	c.log.Warn("vat code ID not found, will retry on next invoice",
 		slog.String("code", code),
 		slog.Any("available", c.vatCodes))
+	// Reset cache so the next invoice creation retries the fetch.
+	c.vatCodes = nil
 	return ""
 }

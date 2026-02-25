@@ -164,6 +164,18 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		}
 	}
 
+	// Pre-resolve distinct vat codes to wFirma IDs once per invoice.
+	// Avoids repeated API warnings for the same code across line items.
+	vatCodeIDCache := make(map[string]string)
+	for _, code := range []string{goodsVat, shippingVatCode} {
+		if code == "" {
+			continue
+		}
+		if _, ok := vatCodeIDCache[code]; !ok {
+			vatCodeIDCache[code] = c.resolveVatCodeID(ctx, code)
+		}
+	}
+
 	var contents []*ContentLine
 	for _, line := range params.LineItems {
 		vatCode := goodsVat
@@ -179,7 +191,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		// Prefer vat_code with wFirma ID over the plain "vat" string field.
 		// The API resets non-standard rates (e.g. EU destination-country rates) to 23%
 		// when the plain "vat" field is used.
-		if vcID := c.resolveVatCodeID(ctx, vatCode); vcID != "" {
+		if vcID := vatCodeIDCache[vatCode]; vcID != "" {
 			content.VatCode = &VatCodeRef{ID: vcID}
 		} else {
 			content.Vat = vatCode
@@ -305,7 +317,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		slog.String("wfirma_number", resultInvoice.Number),
 		slog.String("order_id", params.OrderId),
 		slog.String("total", fmt.Sprintf("%.2f", total)),
-		slog.String("tax", fmt.Sprintf("%s %s", goodsVat, typeOfSale)),
+		slog.String("tax", strings.TrimSpace(goodsVat+" "+typeOfSale)),
 		slog.String("email", params.ClientDetails.Email),
 		slog.String("name", params.ClientDetails.Name),
 		slog.String("country", params.ClientDetails.Country),
