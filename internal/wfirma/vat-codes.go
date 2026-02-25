@@ -25,8 +25,6 @@ func (c *Client) fetchVatCodes(ctx context.Context) error {
 		return fmt.Errorf("vat_codes/find: %w", err)
 	}
 
-	c.log.Debug("vat_codes/find raw response", slog.String("body", string(res)))
-
 	var resp VatCodesResponse
 	if err = json.Unmarshal(res, &resp); err != nil {
 		return fmt.Errorf("parse vat_codes response: %w", err)
@@ -38,8 +36,8 @@ func (c *Client) fetchVatCodes(ctx context.Context) error {
 	codes := make(map[string]string, len(resp.VatCodes))
 	for _, wrapper := range resp.VatCodes {
 		vc := wrapper.VatCode
-		if vc.ID != "" && vc.Name != "" {
-			codes[vc.Name] = vc.ID
+		if vc.ID != "" && vc.Code != "" {
+			codes[vc.Code] = vc.ID
 		}
 	}
 

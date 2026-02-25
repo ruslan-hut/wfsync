@@ -73,7 +73,7 @@ type VatCodeWrapper struct {
 // VatCodeData represents a single VAT code returned by the wFirma API.
 type VatCodeData struct {
 	ID   string `json:"id"`
-	Name string `json:"name"` // code name, e.g. "23", "8", "WDT", "EXP"
+	Code string `json:"code"` // short code, e.g. "23", "8", "WDT", "EXP"
 }
 
 // InvoiceFindResponse is the top-level response for invoices/find action.
