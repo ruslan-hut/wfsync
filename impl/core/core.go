@@ -136,6 +136,7 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 		params.Shipping = order.Shipping
 		params.TaxValue = order.TaxValue
 		params.TaxTitle = order.TaxTitle
+		params.SubTotal = order.SubTotal
 		params.CustomerGroup = order.CustomerGroup
 	}
 

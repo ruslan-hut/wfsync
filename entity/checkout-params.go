@@ -30,6 +30,7 @@ type CheckoutParams struct {
 	Shipping      int64          `json:"shipping,omitempty" bson:"shipping,omitempty"`
 	TaxTitle      string         `json:"tax_title" bson:"tax_title"`
 	TaxValue      int64          `json:"tax_value" bson:"tax_value"`
+	SubTotal      int64          `json:"sub_total,omitempty" bson:"sub_total,omitempty"`
 	Currency      string         `json:"currency" bson:"currency" validate:"required,oneof=PLN EUR"`
 	CurrencyValue float64        `json:"currency_value,omitempty" bson:"currency_value,omitempty"`
 	OrderId       string         `json:"order_id" bson:"order_id" validate:"required,min=1,max=32"`
@@ -102,11 +103,6 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 		return
 	}
 	k := float64(c.Total-c.Shipping) / float64(itemsTotal-c.Shipping)
-	// Scale TaxValue by the same discount ratio so TaxRate() stays correct.
-	// OpenCart stores the tax on the undiscounted sub-total, but Total is post-discount.
-	if c.TaxValue > 0 {
-		c.TaxValue = int64(math.Round(float64(c.TaxValue) * k))
-	}
 	for _, item := range c.LineItems {
 		if item.Shipping {
 			continue
@@ -140,10 +136,21 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 	diff = c.Total - itemsTotal
 }
 
-// TaxRate calculates the tax rate as a percentage based on the tax value and total amount. Returns 0 if not applicable.
-// Shipping is excluded from the denominator because OpenCart's tax total only covers product VAT, not shipping VAT.
+// TaxRate calculates the tax rate as a percentage based on the tax value and the net sub-total.
+// When SubTotal is available (OpenCart orders), it is used directly because the order_total
+// "sub_total" row is always the correct net amount regardless of discounts or the OrderPRO
+// module's inflated per-product tax values.
+// Falls back to deriving net from Total for non-OpenCart orders (e.g. direct API calls).
 func (c *CheckoutParams) TaxRate() int {
-	if c.TaxValue == 0 || c.Total <= c.TaxValue {
+	if c.TaxValue == 0 {
+		return 0
+	}
+	// Prefer SubTotal from order_total — it is always the correct net base for tax.
+	if c.SubTotal > 0 {
+		return int(math.Round(float64(c.TaxValue) * 100 / float64(c.SubTotal)))
+	}
+	// Fallback: derive net from Total (works when there are no discounts).
+	if c.Total <= c.TaxValue {
 		return 0
 	}
 	net := float64(c.Total) - float64(c.Shipping) - float64(c.TaxValue)

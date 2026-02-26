@@ -15,6 +15,7 @@ import (
 
 const (
 	totalCodeShipping = "shipping"
+	totalCodeSubTotal = "sub_total"
 	//totalCodeDiscount = "discount"
 	totalCodeTax = "tax"
 	//totalCodeTotal    = "total"
@@ -309,10 +310,14 @@ func (s *MySql) OrderSearchId(orderId int64) (*entity.CheckoutParams, error) {
 // addOrderData retrieves and calculates tax, line items, and shipping costs for a specific order and updates its details.
 func (s *MySql) addOrderData(orderId int64, order *entity.CheckoutParams) (*entity.CheckoutParams, error) {
 	var err error
-	// before adding line items and shipping costs to each order, get order tax
+	// before adding line items and shipping costs to each order, get order tax and sub-total
 	order.TaxTitle, order.TaxValue, err = s.OrderTotal(orderId, totalCodeTax, order.CurrencyValue)
 	if err != nil {
 		return nil, fmt.Errorf("get order tax: %w", err)
+	}
+	_, order.SubTotal, err = s.OrderTotal(orderId, totalCodeSubTotal, order.CurrencyValue)
+	if err != nil {
+		return nil, fmt.Errorf("get order sub_total: %w", err)
 	}
 
 	// add line items and shipping costs to each order
