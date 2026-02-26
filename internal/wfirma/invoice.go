@@ -39,6 +39,11 @@ const (
 	// customers with a destination-country VAT rate.
 	typeOfSaleSW = "SW"
 
+	// ossServiceCodeGoods is the vat_moss_details "type" value for distance
+	// selling of goods (WSTO). Service codes: BA/BB = goods, SA-SE = services,
+	// TA-TK = telecom/broadcasting/electronic.
+	ossServiceCodeGoods = "BA"
+
 	// shippingVatCode overrides the VAT code for shipping line items.
 	// When empty, shipping uses the same VAT code as goods.
 	// Set to a specific code (e.g. "NP", "ZW", "23") to tax shipping differently.
@@ -221,24 +226,28 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		isEU = euCountries[countryCode]
 	}
 	var typeOfSale string
-	if !isB2B && isEU && countryCode != "" && countryCode != "PL" {
+	var vatMossDetails []*VatMossDetailLine
+	isOSS := !isB2B && isEU && countryCode != "" && countryCode != "PL"
+	if isOSS {
 		typeOfSale = `["` + typeOfSaleSW + `"]`
+		vatMossDetails = buildVatMossDetails(params.ClientDetails, countryCode)
 	}
 
 	invoice := &Invoice{
-		Contractor:    contractor,
-		Type:          string(invType),
-		PriceType:     "brutto",
-		PaymentMethod: defaultPaymentMethod,
-		PaymentDate:   paymentDate,
-		DisposalDate:  issueDate, // date of sale defaults to the issue date
-		Total:         total,
-		IdExternal:    params.OrderId,
-		Description:   "Numer zamówienia: " + params.OrderId,
-		Date:          issueDate,
-		Currency:      strings.ToUpper(params.Currency),
-		TypeOfSale:    typeOfSale,
-		Contents:      contents,
+		Contractor:     contractor,
+		Type:           string(invType),
+		PriceType:      "brutto",
+		PaymentMethod:  defaultPaymentMethod,
+		PaymentDate:    paymentDate,
+		DisposalDate:   issueDate, // date of sale defaults to the issue date
+		Total:          total,
+		IdExternal:     params.OrderId,
+		Description:    "Numer zamówienia: " + params.OrderId,
+		Date:           issueDate,
+		Currency:       strings.ToUpper(params.Currency),
+		TypeOfSale:     typeOfSale,
+		Contents:       contents,
+		VatMossDetails: vatMossDetails,
 	}
 
 	addPayload := map[string]interface{}{
@@ -249,6 +258,10 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 				},
 			},
 		},
+	}
+
+	if debugPayload, err := json.Marshal(addPayload); err == nil {
+		log.With(slog.String("payload", string(debugPayload))).Debug("invoice add request")
 	}
 
 	addRes, err := c.request(ctx, "invoices", "add", addPayload)
@@ -282,9 +295,9 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		return nil, fmt.Errorf("no invoice id returned from wFirma")
 	}
 
-	//log.With(
-	//	slog.Any("invoice", addRes),
-	//).Debug("invoice created")
+	log.With(
+		slog.String("response", string(addRes)),
+	).Debug("invoice created")
 
 	invoice.Id = resultInvoice.Id
 	invoice.Number = resultInvoice.Number
@@ -358,6 +371,42 @@ func extractInvoiceErrors(resp *InvoiceResponse) string {
 		return "unknown error"
 	}
 	return strings.Join(msgs, "; ")
+}
+
+// buildVatMossDetails constructs the OSS evidence payload for EU B2C invoices.
+// Uses the customer's shipping address as primary evidence (type "A") and the
+// order's country-specific context as secondary evidence (type "F").
+func buildVatMossDetails(client *entity.ClientDetails, countryCode string) []*VatMossDetailLine {
+	// Evidence 1: shipping/billing address
+	var addrParts []string
+	if client.Street != "" {
+		addrParts = append(addrParts, client.Street)
+	}
+	if client.ZipCode != "" {
+		addrParts = append(addrParts, client.ZipCode)
+	}
+	if client.City != "" {
+		addrParts = append(addrParts, client.City)
+	}
+	if client.Country != "" {
+		addrParts = append(addrParts, client.Country)
+	}
+	evidence1Desc := strings.Join(addrParts, ", ")
+	if evidence1Desc == "" {
+		evidence1Desc = countryCode
+	}
+
+	return []*VatMossDetailLine{
+		{
+			Detail: &VatMossDetail{
+				Type:                 ossServiceCodeGoods,
+				Evidence1Type:        "A",
+				Evidence1Description: evidence1Desc,
+				Evidence2Type:        "F",
+				Evidence2Description: "Order delivery address: " + countryCode,
+			},
+		},
+	}
 }
 
 // addPayment registers a payment against an existing invoice in wFirma (payments/add).
