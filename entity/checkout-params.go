@@ -102,6 +102,11 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 		return
 	}
 	k := float64(c.Total-c.Shipping) / float64(itemsTotal-c.Shipping)
+	// Scale TaxValue by the same discount ratio so TaxRate() stays correct.
+	// OpenCart stores the tax on the undiscounted sub-total, but Total is post-discount.
+	if c.TaxValue > 0 {
+		c.TaxValue = int64(math.Round(float64(c.TaxValue) * k))
+	}
 	for _, item := range c.LineItems {
 		if item.Shipping {
 			continue
