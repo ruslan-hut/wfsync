@@ -10,7 +10,7 @@
 //	contractor.go  — contractor find/create operations
 //	goods.go       — goods catalog (SKU) lookups
 //	vat.go         — VAT code constants and resolution logic
-//	vat-codes.go   — wFirma vat_code ID fetching and caching
+//	vat-codes.go   — wFirma vat_code/declaration_country fetching, caching, and OSS resolution
 //	invoice.go     — invoice creation, download, payment registration
 //	sync.go        — bidirectional sync between local DB and wFirma
 //	entity.go      — request/response payload structs

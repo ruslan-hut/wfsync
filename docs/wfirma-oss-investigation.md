@@ -6,27 +6,20 @@ When creating invoices via the wFirma API for B2C clients in EU countries with n
 
 ## Root Cause
 
-wFirma requires **three things together** for OSS invoices to accept a foreign VAT rate:
+wFirma requires **two things together** for OSS invoices to accept a foreign VAT rate:
 
-1. `type_of_sale` — JSON-encoded array string, e.g. `["SW"]`
-2. `vat` field on line items — plain numeric rate string, e.g. `"25"`
-3. `vat_moss_details` — OSS evidence nested inside the invoice (buyer's country proof)
+1. **Foreign `vat_code` ID** on each line item — country-specific codes resolved via `declaration_countries/find` → `vat_codes/find`
+2. **`vat_moss_details`** — OSS evidence nested inside the invoice as a singular object (buyer's country proof)
 
-Without all three, the API silently resets the rate to Polish 23%.
+Using a plain `vat` field with a numeric rate (e.g. `"25"`) is silently overridden to Polish 23%. The `type_of_sale` field is not required.
 
 ## What We Tried (and Failed)
 
-### Attempt 1: `vat_code` ID from `vat_codes/find`
+### Attempt 1: Polish `vat_code` IDs from `vat_codes/find`
 
-The `vat_codes/find` endpoint only returns **Polish** VAT codes:
-
-```
-23 → ID 222, 22 → ID 225, 8 → ID 223, 7 → ID 226, 5 → ID 224, 3 → ID 227, 0 → ID 234
-WDT → 228, EXP → 229, NP → 230, NPUE → 231, VAT_BUYER → 232, ZW → 233
-```
-
-Using `vat_code: {"id": 222}` always maps to Polish 23%, even for Ireland (which also has 23%).
-Foreign EU rates are **not available** through this endpoint.
+Initially only fetched the first page of vat_codes with `limit: 20`, which returned only Polish codes.
+Using `vat_code: {"id": 222}` always maps to Polish 23%.
+Foreign EU codes (IDs 607+) are available but require fetching all pages and have empty `code` fields (keyed by `declaration_country.id` instead).
 
 ### Attempt 2: Plain `vat` field + `type_of_sale`
 
@@ -73,14 +66,13 @@ Two-step approach:
 
 Created invoice as `type: "normal_draft"` hoping to edit the draft (bypassing "księgi rachunkowe") and then approve it. API rejected the draft creation entirely — `normal_draft` type not supported for this account (requires KSeF module).
 
-## Solution (Current — Foreign vat_code IDs)
+## Solution (Working — Foreign vat_code IDs + vat_moss_details)
 
 ### Discovery
 
 Examining a working OSS invoice (FV 627/2025, Germany 19%) created through the wFirma UI revealed:
 - Line items use `vat_code: {"id": "617"}` — a **foreign** vat_code specific to Germany
 - `type_of_sale` is empty
-- No `vat_moss_details` present
 
 The wFirma `vat_codes/find` endpoint returns **both** Polish and foreign codes (144 total):
 - Polish codes (IDs 222-234): have a non-empty `code` field ("23", "WDT", etc.) and `declaration_country.id = "0"`
@@ -92,9 +84,9 @@ The wFirma `vat_codes/find` endpoint returns **both** Polish and foreign codes (
 ISO country code → declaration_country_id → foreign vat_code_id
 ```
 
-1. `declaration_countries/find` maps ISO codes to internal IDs (e.g. SE → 205, DE → 146)
-2. `vat_codes/find` returns foreign codes with `declaration_country.id` references (e.g. 205 → vat_code 687)
-3. Use `vat_code: {"id": "687"}` on line items — the API applies SE 25% correctly
+1. `declaration_countries/find` with a `code` filter maps the ISO code to an internal ID (e.g. SE → 205)
+2. `vat_codes/find` (paginated, all pages) returns foreign codes keyed by `declaration_country.id` (e.g. 205 → vat_code 687)
+3. Use `vat_code: {"id": "687"}` on line items + `vat_moss_details` with buyer evidence
 
 ### Payload structure
 
@@ -104,6 +96,15 @@ ISO country code → declaration_country_id → foreign vat_code_id
     "invoices": [{
       "invoice": {
         "type": "normal",
+        "vat_moss_details": {
+          "vat_moss_detail": {
+            "type": "BA",
+            "evidence1_type": "A",
+            "evidence1_description": "Street, Zip, City, Country",
+            "evidence2_type": "F",
+            "evidence2_description": "Order delivery address: SE"
+          }
+        },
         "invoicecontents": [
           {"invoicecontent": {"name": "Product", "vat_code": {"id": "687"}, "price": 20.63, ...}}
         ]
@@ -112,8 +113,6 @@ ISO country code → declaration_country_id → foreign vat_code_id
   }
 }
 ```
-
-No `type_of_sale` or `vat_moss_details` needed.
 
 ### OSS detection logic
 
@@ -134,6 +133,14 @@ isOSS = !isB2B && isEU && countryCode != "" && countryCode != "PL"
 | DK | 43 | 616 | 25% |
 | HR | 39 | 633 | 25% |
 
+### API quirks encountered
+
+- `declaration_country.id` is returned as a **number** when nested in vat_code responses, but as a **string** in declaration_countries/find — requires flexible JSON unmarshaling
+- Pagination parameters (`limit`, `page`, `total`) are sometimes strings, sometimes numbers
+- wFirma uses **1-based** page numbering
+- Using a foreign `vat_code` without `vat_moss_details` triggers validation errors (type, evidence1_type, evidence2_type are required)
+- Using a plain `vat` field with `vat_moss_details` (without foreign `vat_code`) silently resets the rate to Polish 23%
+
 ## wFirma Account Requirements
 
 The following must be enabled in wFirma Settings → Taxes → VAT:
@@ -147,7 +154,7 @@ The following must be enabled in wFirma Settings → Taxes → VAT:
 |---|---|---|---|---|
 | 11562 | IE | 23% | 3 (B2C) | Inconclusive — IE rate = PL rate |
 | 11321 | ES | 21% | 7 (B2B) | Not OSS — B2B uses WDT |
-| 11594 | SE | 25% | 3 (B2C) | Rate reset to 23% (before fix) — pending retest with foreign vat_code |
+| 11594 | SE | 25% | 3 (B2C) | Fixed — vat_code 687 applied correctly (FV 351/2026) |
 
 ## References
 

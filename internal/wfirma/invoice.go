@@ -205,8 +205,6 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			Unit:  "szt.",
 		}
 		// For OSS invoices, use the foreign vat_code ID resolved via declaration_countries.
-		// This is how wFirma UI creates OSS invoices — the correct country-specific vat_code
-		// (e.g. ID 687 for SE 25%) is referenced directly, no type_of_sale or vat_moss_details needed.
 		// Falls back to plain "vat" field if the foreign vat_code was not found.
 		if isOSS && ossVatCodeID != "" {
 			content.VatCode = &VatCodeRef{ID: ossVatCodeID}
@@ -300,10 +298,6 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		log.With(slog.String("response", string(addRes))).Warn("no invoice id in response")
 		return nil, fmt.Errorf("no invoice id returned from wFirma")
 	}
-
-	log.With(
-		slog.String("response", string(addRes)),
-	).Debug("invoice created")
 
 	invoice.Id = resultInvoice.Id
 	invoice.Number = resultInvoice.Number

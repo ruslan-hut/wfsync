@@ -14,18 +14,14 @@ package wfirma
 // Payment methods (paymentmethod field):
 //   "transfer", "cash", "compensation", "cod", "payment_card"
 //
-// Type of sale (type_of_sale field, JSON-encoded array):
-//   "SW" — distance selling of goods (WSTO) under EU OSS
-//   "EE" — electronic services under EU OSS
-//   Required for invoices with destination-country VAT rates (non-PL EU B2C).
-//   Must be a JSON array string, e.g. `["SW"]`, not a bare string.
-//
 // OSS (One-Stop Shop) invoices:
-//   For EU B2C sales to non-PL countries, the correct foreign vat_code ID must be used
-//   on line items. These IDs are resolved via declaration_countries/find → vat_codes/find.
-//   Example: Sweden 25% → declaration_country 205 → vat_code 688.
-//   Additionally, vat_moss_details must be provided as a singular nested object inside the
-//   invoice — the API validates that type, evidence1_type, and evidence2_type are non-empty.
+//   For EU B2C sales to non-PL countries, two things are required:
+//   1. Foreign vat_code ID on each line item — resolved via
+//      declaration_countries/find (ISO code → country ID) then
+//      vat_codes/find (country ID → vat_code ID).
+//      Example: SE → declaration_country 205 → vat_code 687 (25%).
+//   2. vat_moss_details nested as a singular object inside the invoice,
+//      providing two pieces of evidence of the buyer's country.
 //
 // Note: the API computes totals from invoicecontents automatically.
 // The "total" field is included for local reference but ignored by the API on create.
@@ -45,7 +41,6 @@ type Invoice struct {
 	Description    string                  `json:"description" bson:"description"`
 	Date           string                  `json:"date" bson:"date"`                                     // invoice issue date, format "YYYY-MM-DD"
 	Currency       string                  `json:"currency" bson:"currency"`                             // uppercase ISO 4217: "PLN", "EUR"
-	TypeOfSale     string                  `json:"type_of_sale,omitempty" bson:"type_of_sale,omitempty"` // JSON array, e.g. '["SW"]' for OSS goods
 	Contents       []*ContentLine          `json:"invoicecontents" bson:"invoicecontents"`
 	VatMossDetails *VatMossDetailWrapper   `json:"vat_moss_details,omitempty" bson:"vat_moss_details,omitempty"`
 	Errors         map[string]ErrorWrapper `json:"errors,omitempty" bson:"errors,omitempty"`
@@ -70,14 +65,12 @@ type VatMossDetail struct {
 // Content represents a single line item in an invoice (invoicecontent).
 //
 // VAT can be specified in two ways:
-//   - VatCode (preferred): references a wFirma vat_code by ID, fetched via vat_codes/find.
-//     Required for non-standard rates (EU destination-country rates, WDT, EXP, etc.)
-//     because wFirma resets plain "vat" values to the default Polish rate.
+//   - VatCode (preferred): references a wFirma vat_code by ID.
+//     For Polish rates: resolved from the code name (e.g. "23" → ID 222) via vat_codes/find.
+//     For foreign OSS rates: resolved via declaration_countries → vat_codes chain
+//     (e.g. SE → country 205 → vat_code 687 for 25%).
 //   - Vat (fallback): numeric rate string ("23", "8", "0") or special code ("WDT", "EXP", "NP", "NPUE", "ZW").
 //     Used only when vat_code IDs are unavailable.
-//
-// Non-Polish numeric rates (e.g. "25" for Denmark) require the invoice to have
-// type_of_sale set as a JSON array (e.g. '["SW"]') and OSS enabled in wFirma settings.
 type Content struct {
 	Name    string      `json:"name" bson:"name"`
 	Good    *GoodRef    `json:"good,omitempty" bson:"good,omitempty"` // wFirma good reference — links line item to product catalog
