@@ -1,5 +1,10 @@
 package wfirma
 
+import (
+	"encoding/json"
+	"strconv"
+)
+
 // wFirma API response structures.
 // The API returns objects keyed by index ("0", "1", ...) rather than arrays,
 // so we use map[string]...Wrapper to deserialize them.
@@ -94,9 +99,46 @@ type DeclarationCountryWrapper struct {
 }
 
 // DeclarationCountry maps a wFirma internal ID to an ISO 3166-1 alpha-2 country code.
+// The API inconsistently returns the ID as a string in some contexts and a number in others
+// (e.g., as a string in declaration_countries/find but as a number when nested in vat_code).
 type DeclarationCountry struct {
 	ID   string `json:"id"`
 	Code string `json:"code"` // ISO 3166-1 alpha-2, e.g. "SE", "DE"
+}
+
+// UnmarshalJSON handles the wFirma API's inconsistent typing of the "id" field
+// (sometimes a JSON string, sometimes a JSON number).
+func (dc *DeclarationCountry) UnmarshalJSON(data []byte) error {
+	// Use a raw struct to avoid infinite recursion.
+	var raw struct {
+		ID   json.RawMessage `json:"id"`
+		Code string          `json:"code"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	dc.Code = raw.Code
+	dc.ID = unmarshalFlexString(raw.ID)
+	return nil
+}
+
+// unmarshalFlexString converts a JSON value (string or number) to a Go string.
+// Returns empty string for null or invalid JSON.
+func unmarshalFlexString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	// Try string first.
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	// Try number.
+	var n json.Number
+	if err := json.Unmarshal(raw, &n); err == nil {
+		return n.String()
+	}
+	return ""
 }
 
 // InvoiceFindResponse is the top-level response for invoices/find action.
@@ -108,10 +150,46 @@ type InvoiceFindResponse struct {
 }
 
 // FindParameters contains pagination metadata returned by find actions.
+// The API inconsistently returns these as strings or numbers depending on the endpoint.
 type FindParameters struct {
 	Limit int `json:"limit"`
 	Page  int `json:"page"`
 	Total int `json:"total"`
+}
+
+// UnmarshalJSON handles the wFirma API returning pagination values as either
+// strings ("20") or numbers (20).
+func (fp *FindParameters) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Limit json.RawMessage `json:"limit"`
+		Page  json.RawMessage `json:"page"`
+		Total json.RawMessage `json:"total"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	fp.Limit = unmarshalFlexInt(raw.Limit)
+	fp.Page = unmarshalFlexInt(raw.Page)
+	fp.Total = unmarshalFlexInt(raw.Total)
+	return nil
+}
+
+// unmarshalFlexInt converts a JSON value (string or number) to an int.
+func unmarshalFlexInt(raw json.RawMessage) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var n int
+	if err := json.Unmarshal(raw, &n); err == nil {
+		return n
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		if v, err := strconv.Atoi(s); err == nil {
+			return v
+		}
+	}
+	return 0
 }
 
 // ContractorErrors captures only the errors from a contractor embedded in an invoice response.
