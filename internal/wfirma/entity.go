@@ -20,10 +20,14 @@ package wfirma
 //   Required for invoices with destination-country VAT rates (non-PL EU B2C).
 //   Must be a JSON array string, e.g. `["SW"]`, not a bare string.
 //
-// VAT MOSS details (vat_moss_details, separate API call — nesting in invoice is silently ignored):
+// VAT MOSS details (vat_moss_details):
 //   Required for OSS invoices. Provides the type of sale classification and
 //   two pieces of evidence proving the buyer's country (EU regulation requirement).
-//   Added via vat_moss_details/add after invoice creation.
+//   Nested inside the invoice payload as a singular (one-to-one) relation:
+//     "vat_moss_details": {"vat_moss_detail": {...}}
+//   NOT an array (unlike invoicecontents which is one-to-many).
+//   vat_moss_details is NOT a standalone API controller — calling
+//   vat_moss_details/add returns CONTROLLER NOT FOUND.
 //   Service codes for goods (WSTO): "BA", "BB".
 //   Evidence types: "A" (address), "B" (IP/geo), "C" (bank), "D" (SIM),
 //   "E" (landline), "F" (other).
@@ -33,22 +37,23 @@ package wfirma
 
 // Invoice represents a wFirma invoice payload for the invoices/add API action.
 type Invoice struct {
-	Id            string                  `json:"id,omitempty" bson:"id"`
-	Number        string                  `json:"fullnumber,omitempty" bson:"number"`
-	Contractor    *Contractor             `json:"contractor" bson:"contractor"`
-	Type          string                  `json:"type" bson:"type"`                   // "normal" or "proforma"
-	PriceType     string                  `json:"price_type" bson:"price_type"`       // "brutto" (gross) or "netto" (net)
-	PaymentMethod string                  `json:"paymentmethod" bson:"paymentmethod"` // e.g. "transfer", "cash", "payment_card"
-	PaymentDate   string                  `json:"paymentdate" bson:"paymentdate"`     // payment due date, format "YYYY-MM-DD"
-	DisposalDate  string                  `json:"disposaldate" bson:"disposaldate"`   // date of sale/service, format "YYYY-MM-DD"
-	Total         float64                 `json:"total" bson:"total"`                 // informational; API recomputes from contents
-	IdExternal    string                  `json:"id_external" bson:"id_external"`
-	Description   string                  `json:"description" bson:"description"`
-	Date          string                  `json:"date" bson:"date"`                                     // invoice issue date, format "YYYY-MM-DD"
-	Currency      string                  `json:"currency" bson:"currency"`                             // uppercase ISO 4217: "PLN", "EUR"
-	TypeOfSale    string                  `json:"type_of_sale,omitempty" bson:"type_of_sale,omitempty"` // JSON array, e.g. '["SW"]' for OSS goods
-	Contents      []*ContentLine          `json:"invoicecontents" bson:"invoicecontents"`
-	Errors        map[string]ErrorWrapper `json:"errors,omitempty" bson:"errors,omitempty"`
+	Id             string                  `json:"id,omitempty" bson:"id"`
+	Number         string                  `json:"fullnumber,omitempty" bson:"number"`
+	Contractor     *Contractor             `json:"contractor" bson:"contractor"`
+	Type           string                  `json:"type" bson:"type"`                   // "normal" or "proforma"
+	PriceType      string                  `json:"price_type" bson:"price_type"`       // "brutto" (gross) or "netto" (net)
+	PaymentMethod  string                  `json:"paymentmethod" bson:"paymentmethod"` // e.g. "transfer", "cash", "payment_card"
+	PaymentDate    string                  `json:"paymentdate" bson:"paymentdate"`     // payment due date, format "YYYY-MM-DD"
+	DisposalDate   string                  `json:"disposaldate" bson:"disposaldate"`   // date of sale/service, format "YYYY-MM-DD"
+	Total          float64                 `json:"total" bson:"total"`                 // informational; API recomputes from contents
+	IdExternal     string                  `json:"id_external" bson:"id_external"`
+	Description    string                  `json:"description" bson:"description"`
+	Date           string                  `json:"date" bson:"date"`                                     // invoice issue date, format "YYYY-MM-DD"
+	Currency       string                  `json:"currency" bson:"currency"`                             // uppercase ISO 4217: "PLN", "EUR"
+	TypeOfSale     string                  `json:"type_of_sale,omitempty" bson:"type_of_sale,omitempty"` // JSON array, e.g. '["SW"]' for OSS goods
+	Contents       []*ContentLine          `json:"invoicecontents" bson:"invoicecontents"`
+	VatMossDetails *VatMossDetailWrapper   `json:"vat_moss_details,omitempty" bson:"vat_moss_details,omitempty"`
+	Errors         map[string]ErrorWrapper `json:"errors,omitempty" bson:"errors,omitempty"`
 }
 
 // Content represents a single line item in an invoice (invoicecontent).
@@ -90,17 +95,33 @@ type ContentLine struct {
 	Content *Content `json:"invoicecontent" bson:"invoicecontent"`
 }
 
-// vat_moss_details fields (used via raw maps in addVatMossDetails, not as a struct):
+// VatMossDetailWrapper wraps a VatMossDetail for the wFirma API singular relation.
+// The API expects: "vat_moss_details": {"vat_moss_detail": {...}}
+// This is a singular (one-to-one) relation, NOT an array.
+type VatMossDetailWrapper struct {
+	Detail *VatMossDetail `json:"vat_moss_detail" bson:"vat_moss_detail"`
+}
+
+// VatMossDetail represents OSS evidence attached to an invoice.
 //
 // Service codes (type field):
-//   "BA", "BB" — goods (WSTO)
-//   "SA"-"SE"  — services
-//   "TA"-"TK"  — telecom/broadcasting/electronic
+//
+//	"BA", "BB" — goods (WSTO)
+//	"SA"-"SE"  — services
+//	"TA"-"TK"  — telecom/broadcasting/electronic
 //
 // Evidence types (evidence1_type, evidence2_type):
-//   "A" — billing/shipping address
-//   "B" — IP address / geolocation
-//   "C" — bank details
-//   "D" — mobile phone country code (SIM)
-//   "E" — fixed landline location
-//   "F" — other commercially relevant information
+//
+//	"A" — billing/shipping address
+//	"B" — IP address / geolocation
+//	"C" — bank details
+//	"D" — mobile phone country code (SIM)
+//	"E" — fixed landline location
+//	"F" — other commercially relevant information
+type VatMossDetail struct {
+	Type                 string `json:"type" bson:"type"`
+	Evidence1Type        string `json:"evidence1_type" bson:"evidence1_type"`
+	Evidence1Description string `json:"evidence1_description" bson:"evidence1_description"`
+	Evidence2Type        string `json:"evidence2_type" bson:"evidence2_type"`
+	Evidence2Description string `json:"evidence2_description" bson:"evidence2_description"`
+}

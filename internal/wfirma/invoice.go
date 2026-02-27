@@ -253,6 +253,12 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		Contents:      contents,
 	}
 
+	// For OSS invoices, attach vat_moss_details as a singular nested relation.
+	// This is required for wFirma to accept destination-country VAT rates.
+	if isOSS {
+		invoice.VatMossDetails = buildVatMossDetails(params.ClientDetails, countryCode)
+	}
+
 	addPayload := map[string]interface{}{
 		"api": map[string]interface{}{
 			"invoices": []map[string]interface{}{
@@ -305,11 +311,11 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	invoice.Id = resultInvoice.Id
 	invoice.Number = resultInvoice.Number
 
-	// For OSS invoices, add vat_moss_details as a separate API call.
-	// Nesting inside the invoice payload is silently ignored by wFirma.
+	// Fallback: if vat_moss_details was silently ignored during creation,
+	// try setting it via invoices/edit. This ensures the OSS evidence is attached.
 	if isOSS {
-		if err := c.addVatMossDetails(ctx, invoice.Id, params.ClientDetails, countryCode); err != nil {
-			log.Warn("add vat_moss_details (non-fatal)", sl.Err(err))
+		if err := c.editVatMossDetails(ctx, invoice.Id, params.ClientDetails, countryCode); err != nil {
+			log.Warn("edit vat_moss_details fallback (non-fatal)", sl.Err(err))
 		}
 	}
 
@@ -386,11 +392,9 @@ func extractInvoiceErrors(resp *InvoiceResponse) string {
 	return strings.Join(msgs, "; ")
 }
 
-// addVatMossDetails sends a vat_moss_details/add request to attach OSS evidence
-// to an existing invoice. Must be called after invoice creation because wFirma
-// silently ignores vat_moss_details nested in the invoices/add payload.
-func (c *Client) addVatMossDetails(ctx context.Context, invoiceID string, client *entity.ClientDetails, countryCode string) error {
-	// Evidence 1: shipping/billing address
+// buildVatMossDetails constructs the OSS evidence wrapper for an invoice.
+// Uses the customer's address as evidence type A and the delivery country as evidence type F.
+func buildVatMossDetails(client *entity.ClientDetails, countryCode string) *VatMossDetailWrapper {
 	var addrParts []string
 	if client.Street != "" {
 		addrParts = append(addrParts, client.Street)
@@ -409,18 +413,30 @@ func (c *Client) addVatMossDetails(ctx context.Context, invoiceID string, client
 		evidence1Desc = countryCode
 	}
 
+	return &VatMossDetailWrapper{
+		Detail: &VatMossDetail{
+			Type:                 ossServiceCodeGoods,
+			Evidence1Type:        "A",
+			Evidence1Description: evidence1Desc,
+			Evidence2Type:        "F",
+			Evidence2Description: "Order delivery address: " + countryCode,
+		},
+	}
+}
+
+// editVatMossDetails attaches OSS evidence to an existing invoice via invoices/edit.
+// Used as a fallback in case vat_moss_details nested in invoices/add is silently ignored.
+// vat_moss_details is NOT a standalone API controller — only invoices/edit works.
+func (c *Client) editVatMossDetails(ctx context.Context, invoiceID string, client *entity.ClientDetails, countryCode string) error {
+	moss := buildVatMossDetails(client, countryCode)
+
 	payload := map[string]interface{}{
 		"api": map[string]interface{}{
-			"vat_moss_details": []map[string]interface{}{
+			"invoices": []map[string]interface{}{
 				{
-					"vat_moss_detail": map[string]interface{}{
-						"object_name":           "Invoice",
-						"object_id":             invoiceID,
-						"type":                  ossServiceCodeGoods,
-						"evidence1_type":        "A",
-						"evidence1_description": evidence1Desc,
-						"evidence2_type":        "F",
-						"evidence2_description": "Order delivery address: " + countryCode,
+					"invoice": map[string]interface{}{
+						"id":               invoiceID,
+						"vat_moss_details": moss,
 					},
 				},
 			},
@@ -428,17 +444,16 @@ func (c *Client) addVatMossDetails(ctx context.Context, invoiceID string, client
 	}
 
 	if debugPayload, err := json.Marshal(payload); err == nil {
-		c.log.With(slog.String("payload", string(debugPayload))).Debug("vat_moss_details add request")
+		c.log.With(slog.String("payload", string(debugPayload))).Debug("invoices/edit vat_moss_details request")
 	}
 
-	res, err := c.request(ctx, "vat_moss_details", "add", payload)
+	res, err := c.request(ctx, "invoices", "edit/"+invoiceID, payload)
 	if err != nil {
-		return fmt.Errorf("vat_moss_details/add: %w", err)
+		return fmt.Errorf("invoices/edit vat_moss_details: %w", err)
 	}
 
-	c.log.With(slog.String("response", string(res))).Debug("vat_moss_details add response")
+	c.log.With(slog.String("response", string(res))).Debug("invoices/edit vat_moss_details response")
 
-	// Check for error in response.
 	var resp struct {
 		Status struct {
 			Code    string `json:"code"`
@@ -446,10 +461,10 @@ func (c *Client) addVatMossDetails(ctx context.Context, invoiceID string, client
 		} `json:"status"`
 	}
 	if err = json.Unmarshal(res, &resp); err != nil {
-		return fmt.Errorf("parse vat_moss_details response: %w", err)
+		return fmt.Errorf("parse invoices/edit response: %w", err)
 	}
 	if resp.Status.Code == "ERROR" {
-		return fmt.Errorf("vat_moss_details error: %s", resp.Status.Message)
+		return fmt.Errorf("invoices/edit vat_moss_details: %s", resp.Status.Message)
 	}
 	return nil
 }
