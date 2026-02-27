@@ -136,28 +136,45 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 	diff = c.Total - itemsTotal
 }
 
-// TaxRate calculates the tax rate as a percentage based on the tax value and the net sub-total.
-// When SubTotal is available (OpenCart orders), it is used directly because the order_total
-// "sub_total" row is always the correct net amount regardless of discounts or the OrderPRO
-// module's inflated per-product tax values.
-// Falls back to deriving net from Total for non-OpenCart orders (e.g. direct API calls).
+// TaxRate calculates the VAT rate percentage from available order data.
+//
+// Two discount patterns exist in OpenCart and they require different formulas:
+//   - Pre-tax discounts (coupons): tax is on (SubTotal - coupon), so the correct
+//     taxable base is Total - Shipping - TaxValue. ("from-total" method)
+//   - Post-tax discounts (B2B volume): tax is on SubTotal, discount is subtracted
+//     from the gross amount. ("from-subtotal" method)
+//
+// Since VAT rates are always whole numbers, we compute both and pick the result
+// whose fractional part is closest to zero.
 func (c *CheckoutParams) TaxRate() int {
 	if c.TaxValue == 0 {
 		return 0
 	}
-	// Prefer SubTotal from order_total — it is always the correct net base for tax.
+
+	// Method 1: derive net from Total — correct for pre-tax discounts (coupons).
+	var rateFromTotal float64
+	if net := float64(c.Total) - float64(c.Shipping) - float64(c.TaxValue); net > 0 {
+		rateFromTotal = float64(c.TaxValue) * 100 / net
+	}
+
+	// Method 2: use SubTotal from order_total — correct for post-tax discounts
+	// (B2B volume) where OpenCart's OrderPRO module inflates per-product tax.
 	if c.SubTotal > 0 {
-		return int(math.Round(float64(c.TaxValue) * 100 / float64(c.SubTotal)))
+		rateFromSubTotal := float64(c.TaxValue) * 100 / float64(c.SubTotal)
+		if fracPart(rateFromSubTotal) < fracPart(rateFromTotal) {
+			return int(math.Round(rateFromSubTotal))
+		}
 	}
-	// Fallback: derive net from Total (works when there are no discounts).
-	if c.Total <= c.TaxValue {
+
+	if rateFromTotal <= 0 {
 		return 0
 	}
-	net := float64(c.Total) - float64(c.Shipping) - float64(c.TaxValue)
-	if net <= 0 {
-		return 0
-	}
-	return int(math.Round(float64(c.TaxValue) * 100 / net))
+	return int(math.Round(rateFromTotal))
+}
+
+// fracPart returns the distance from f to its nearest integer.
+func fracPart(f float64) float64 {
+	return math.Abs(f - math.Round(f))
 }
 
 type LineItem struct {
