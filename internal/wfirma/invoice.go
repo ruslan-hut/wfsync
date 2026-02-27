@@ -346,6 +346,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		slog.String("email", params.ClientDetails.Email),
 		slog.String("name", params.ClientDetails.Name),
 		slog.String("country", params.ClientDetails.Country),
+		slog.String("tax_id", params.ClientDetails.TaxId),
 		slog.String("customer_group", formatCustomerGroup(params.CustomerGroup)),
 		slog.String("currency", params.Currency),
 		slog.String("tg_topic", entity.TopicInvoice),
