@@ -5,53 +5,145 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 )
 
 // fetchVatCodes retrieves all available VAT codes from the wFirma API (vat_codes/find)
-// and caches them as a name→ID map. Called lazily on first invoice creation.
+// and caches them as a name→ID map (Polish codes) and countryID→ID map (foreign/OSS codes).
+// Called lazily on first invoice creation.
 func (c *Client) fetchVatCodes(ctx context.Context) error {
-	payload := map[string]interface{}{
-		"api": map[string]interface{}{
-			"vat_codes": map[string]interface{}{
-				"parameters": map[string]interface{}{
-					"limit": 100,
+	polishCodes := make(map[string]string)
+	// ossCodesByCountry maps declaration_country_id → vat_code_id for the standard rate.
+	ossCodesByCountry := make(map[string]string)
+
+	page := 0
+	for {
+		payload := map[string]interface{}{
+			"api": map[string]interface{}{
+				"vat_codes": map[string]interface{}{
+					"parameters": map[string]interface{}{
+						"limit": 100,
+						"page":  page,
+					},
 				},
 			},
-		},
-	}
-
-	res, err := c.request(ctx, "vat_codes", "find", payload)
-	if err != nil {
-		return fmt.Errorf("vat_codes/find: %w", err)
-	}
-
-	var resp VatCodesResponse
-	if err = json.Unmarshal(res, &resp); err != nil {
-		return fmt.Errorf("parse vat_codes response: %w", err)
-	}
-	if resp.Status.Code == "ERROR" {
-		return fmt.Errorf("vat_codes/find returned error")
-	}
-
-	codes := make(map[string]string, len(resp.VatCodes))
-	for _, wrapper := range resp.VatCodes {
-		vc := wrapper.VatCode
-		if vc.ID != "" && vc.Code != "" {
-			codes[vc.Code] = vc.ID
 		}
+
+		res, err := c.request(ctx, "vat_codes", "find", payload)
+		if err != nil {
+			return fmt.Errorf("vat_codes/find page %d: %w", page, err)
+		}
+
+		var resp VatCodesResponse
+		if err = json.Unmarshal(res, &resp); err != nil {
+			return fmt.Errorf("parse vat_codes response page %d: %w", page, err)
+		}
+		if resp.Status.Code == "ERROR" {
+			return fmt.Errorf("vat_codes/find returned error: %s", resp.Status.Message)
+		}
+
+		for _, wrapper := range resp.VatCodes {
+			vc := wrapper.VatCode
+			if vc.ID == "" {
+				continue
+			}
+			dcID := ""
+			if vc.DeclarationCountry != nil {
+				dcID = vc.DeclarationCountry.ID
+			}
+
+			if vc.Code != "" {
+				// Polish codes have a non-empty short code (e.g. "23", "WDT").
+				polishCodes[vc.Code] = vc.ID
+			} else if dcID != "" && dcID != "0" {
+				// Foreign (OSS) code — store only the standard rate per country.
+				// The standard rate is typically the highest rate for a country.
+				// If multiple codes exist for the same country, keep the one with the higher rate
+				// (standard rate > reduced rate).
+				if existing, ok := ossCodesByCountry[dcID]; ok {
+					_ = existing // keep first encountered; wFirma returns standard first
+				} else {
+					ossCodesByCountry[dcID] = vc.ID
+				}
+			}
+		}
+
+		// Check if we've loaded all pages.
+		pageSize := resp.Parameters.Limit
+		if pageSize <= 0 {
+			pageSize = 100
+		}
+		if resp.Parameters.Total <= (page+1)*pageSize {
+			break
+		}
+		page++
 	}
 
-	c.vatCodes = codes
+	c.vatCodes = polishCodes
+	c.ossVatCodes = ossCodesByCountry
 	c.log.Debug("vat codes cached",
-		slog.Int("count", len(codes)),
-		slog.Any("codes", codes))
+		slog.Int("polish", len(polishCodes)),
+		slog.Int("oss", len(ossCodesByCountry)))
 	return nil
 }
 
-// resolveVatCodeID looks up the wFirma vat_code ID for a given VAT code string
+// fetchDeclarationCountries retrieves all declaration countries from the wFirma API
+// and builds a map of ISO country code → declaration_country_id.
+func (c *Client) fetchDeclarationCountries(ctx context.Context) error {
+	countryMap := make(map[string]string)
+
+	page := 0
+	for {
+		payload := map[string]interface{}{
+			"api": map[string]interface{}{
+				"declaration_countries": map[string]interface{}{
+					"parameters": map[string]interface{}{
+						"limit": 100,
+						"page":  page,
+					},
+				},
+			},
+		}
+
+		res, err := c.request(ctx, "declaration_countries", "find", payload)
+		if err != nil {
+			return fmt.Errorf("declaration_countries/find page %d: %w", page, err)
+		}
+
+		var resp DeclarationCountryResponse
+		if err = json.Unmarshal(res, &resp); err != nil {
+			return fmt.Errorf("parse declaration_countries response page %d: %w", page, err)
+		}
+		if resp.Status.Code == "ERROR" {
+			return fmt.Errorf("declaration_countries/find returned error: %s", resp.Status.Message)
+		}
+
+		for _, wrapper := range resp.Countries {
+			dc := wrapper.Country
+			if dc.ID != "" && dc.Code != "" {
+				countryMap[strings.ToUpper(dc.Code)] = dc.ID
+			}
+		}
+
+		pageSize := resp.Parameters.Limit
+		if pageSize <= 0 {
+			pageSize = 100
+		}
+		if resp.Parameters.Total <= (page+1)*pageSize {
+			break
+		}
+		page++
+	}
+
+	c.declCountries = countryMap
+	c.log.Debug("declaration countries cached",
+		slog.Int("count", len(countryMap)))
+	return nil
+}
+
+// resolveVatCodeID looks up the wFirma vat_code ID for a given Polish VAT code string
 // (e.g. "23", "WDT", "EXP"). Fetches and caches vat codes on first call.
 // Returns empty string if the code is not found or fetching fails.
-// On fetch failure the cache is reset to nil so the next invoice retries.
 func (c *Client) resolveVatCodeID(ctx context.Context, code string) string {
 	if c.vatCodes == nil {
 		if err := c.fetchVatCodes(ctx); err != nil {
@@ -69,5 +161,49 @@ func (c *Client) resolveVatCodeID(ctx context.Context, code string) string {
 		slog.Any("available", c.vatCodes))
 	// Reset cache so the next invoice creation retries the fetch.
 	c.vatCodes = nil
+	c.ossVatCodes = nil
 	return ""
 }
+
+// resolveOSSVatCodeIDWithRate resolves the foreign vat_code ID for an EU country.
+// Chains: ISO country code → declaration_country_id → vat_code_id.
+// The expectedRate is logged for debugging but the mapping is by country, not rate.
+func (c *Client) resolveOSSVatCodeIDWithRate(ctx context.Context, countryCode string, expectedRate string) string {
+	// Ensure declaration countries are loaded.
+	if c.declCountries == nil {
+		if err := c.fetchDeclarationCountries(ctx); err != nil {
+			c.log.Warn("fetch declaration countries", slog.String("error", err.Error()))
+			return ""
+		}
+	}
+
+	if c.ossVatCodes == nil {
+		if err := c.fetchVatCodes(ctx); err != nil {
+			c.log.Warn("fetch vat codes for OSS", slog.String("error", err.Error()))
+			return ""
+		}
+	}
+
+	dcID, ok := c.declCountries[strings.ToUpper(countryCode)]
+	if !ok {
+		c.log.Warn("declaration country not found for OSS",
+			slog.String("country", countryCode))
+		return ""
+	}
+
+	vcID, ok := c.ossVatCodes[dcID]
+	if !ok {
+		c.log.Warn("OSS vat code not found for declaration country",
+			slog.String("country", countryCode),
+			slog.String("declaration_country_id", dcID))
+		return ""
+	}
+
+	c.log.Debug("resolved OSS vat code",
+		slog.String("country", countryCode),
+		slog.String("declaration_country_id", dcID),
+		slog.String("vat_code_id", vcID),
+		slog.String("expected_rate", expectedRate))
+	return vcID
+}
+

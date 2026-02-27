@@ -73,12 +73,28 @@ Two-step approach:
 
 Created invoice as `type: "normal_draft"` hoping to edit the draft (bypassing "księgi rachunkowe") and then approve it. API rejected the draft creation entirely — `normal_draft` type not supported for this account (requires KSeF module).
 
-## Solution (Current — API-Level Nesting)
+## Solution (Current — Foreign vat_code IDs)
 
-### Rationale
+### Discovery
 
-Nesting `vat_moss_details` inside the `invoice` object (as a singular relation) was silently ignored.
-The new approach places `vat_moss_details` at the **`api` level** as a sibling of `invoices`, similar to how other related modules like `payments` are structured.
+Examining a working OSS invoice (FV 627/2025, Germany 19%) created through the wFirma UI revealed:
+- Line items use `vat_code: {"id": "617"}` — a **foreign** vat_code specific to Germany
+- `type_of_sale` is empty
+- No `vat_moss_details` present
+
+The wFirma `vat_codes/find` endpoint returns **both** Polish and foreign codes (144 total):
+- Polish codes (IDs 222-234): have a non-empty `code` field ("23", "WDT", etc.) and `declaration_country.id = "0"`
+- Foreign codes (IDs 607+): have an empty `code` field, a numeric `rate`, and `declaration_country.id > 0`
+
+### Resolution chain
+
+```
+ISO country code → declaration_country_id → foreign vat_code_id
+```
+
+1. `declaration_countries/find` maps ISO codes to internal IDs (e.g. SE → 205, DE → 146)
+2. `vat_codes/find` returns foreign codes with `declaration_country.id` references (e.g. 205 → vat_code 687)
+3. Use `vat_code: {"id": "687"}` on line items — the API applies SE 25% correctly
 
 ### Payload structure
 
@@ -88,26 +104,18 @@ The new approach places `vat_moss_details` at the **`api` level** as a sibling o
     "invoices": [{
       "invoice": {
         "type": "normal",
-        "type_of_sale": "[\"SW\"]",
         "invoicecontents": [
-          {"invoicecontent": {"name": "Product", "vat": "25", "price": 20.63, ...}}
+          {"invoicecontent": {"name": "Product", "vat_code": {"id": "687"}, "price": 20.63, ...}}
         ]
-      }
-    }],
-    "vat_moss_details": [{
-      "vat_moss_detail": {
-        "type": "BA",
-        "evidence1_type": "A",
-        "evidence1_description": "Street, Zip, City, Country",
-        "evidence2_type": "F",
-        "evidence2_description": "Order delivery address: SE"
       }
     }]
   }
 }
 ```
 
-#### OSS detection logic
+No `type_of_sale` or `vat_moss_details` needed.
+
+### OSS detection logic
 
 ```
 isOSS = !isB2B && isEU && countryCode != "" && countryCode != "PL"
@@ -117,20 +125,14 @@ isOSS = !isB2B && isEU && countryCode != "" && countryCode != "PL"
 - Polish B2C uses standard Polish rates
 - Only non-PL EU B2C triggers OSS
 
-#### VAT rate on line items
+### Key vat_code examples
 
-For OSS invoices, always use the **plain `vat` field** with the numeric rate (e.g. `"25"`).
-Never use `vat_code` IDs for OSS — all IDs from `vat_codes/find` are Polish.
-
-## `vat_moss_details` Fields
-
-| Field | Description | Values |
-|---|---|---|
-| `type` | Service code | `BA`, `BB` (goods/WSTO); `SA`-`SE` (services); `TA`-`TK` (telecom) |
-| `evidence1_type` | First evidence type | `A` (address), `B` (IP), `C` (bank), `D` (SIM), `E` (landline), `F` (other) |
-| `evidence1_description` | First evidence detail | Customer's shipping/billing address |
-| `evidence2_type` | Second evidence type | Same codes as above |
-| `evidence2_description` | Second evidence detail | Delivery country or other proof |
+| Country | declaration_country_id | vat_code_id | Rate |
+|---|---|---|---|
+| DE | 146 | 617 | 19% |
+| SE | 205 | 687 | 25% |
+| DK | 43 | 616 | 25% |
+| HR | 39 | 633 | 25% |
 
 ## wFirma Account Requirements
 
@@ -145,7 +147,7 @@ The following must be enabled in wFirma Settings → Taxes → VAT:
 |---|---|---|---|---|
 | 11562 | IE | 23% | 3 (B2C) | Inconclusive — IE rate = PL rate |
 | 11321 | ES | 21% | 7 (B2B) | Not OSS — B2B uses WDT |
-| 11594 | SE | 25% | 3 (B2C) | Rate reset to 23% (before fix) |
+| 11594 | SE | 25% | 3 (B2C) | Rate reset to 23% (before fix) — pending retest with foreign vat_code |
 
 ## References
 

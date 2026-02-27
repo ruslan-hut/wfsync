@@ -72,7 +72,9 @@ type Client struct {
 	appID     string
 	filePath  string
 	log       *slog.Logger
-	vatCodes  map[string]string // cached vat code name → wFirma ID (fetched via vat_codes/find)
+	vatCodes      map[string]string // cached Polish vat code name → wFirma ID (e.g. "23" → "222")
+	ossVatCodes   map[string]string // cached declaration_country_id → wFirma vat_code ID for foreign rates
+	declCountries map[string]string // cached ISO country code → declaration_country_id (e.g. "SE" → "205")
 }
 
 // Config holds wFirma API credentials (currently unused — credentials come from config.Config).

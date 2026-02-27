@@ -63,8 +63,9 @@ type InvoiceWrapper struct {
 
 // VatCodesResponse is the top-level response for vat_codes/find action.
 type VatCodesResponse struct {
-	VatCodes map[string]VatCodeWrapper `json:"vat_codes"`
-	Status   Status                    `json:"status"`
+	VatCodes   map[string]VatCodeWrapper `json:"vat_codes"`
+	Status     Status                    `json:"status"`
+	Parameters FindParameters            `json:"parameters"`
 }
 
 type VatCodeWrapper struct {
@@ -72,9 +73,30 @@ type VatCodeWrapper struct {
 }
 
 // VatCodeData represents a single VAT code returned by the wFirma API.
+// Polish codes have a non-empty Code (e.g. "23", "WDT") and DeclarationCountry.ID == "0".
+// Foreign (OSS) codes have an empty Code, a numeric Rate, and DeclarationCountry.ID > 0.
 type VatCodeData struct {
+	ID                 string              `json:"id"`
+	Code               string              `json:"code"`                // short code, e.g. "23", "WDT"; empty for foreign codes
+	Rate               string              `json:"rate"`                // numeric rate, e.g. "19.00", "25.00"
+	DeclarationCountry *DeclarationCountry `json:"declaration_country"` // country reference; ID == "0" for Polish codes
+}
+
+// DeclarationCountryResponse is the top-level response for declaration_countries/find.
+type DeclarationCountryResponse struct {
+	Countries  map[string]DeclarationCountryWrapper `json:"declaration_countries"`
+	Status     Status                               `json:"status"`
+	Parameters FindParameters                       `json:"parameters"`
+}
+
+type DeclarationCountryWrapper struct {
+	Country DeclarationCountry `json:"declaration_country"`
+}
+
+// DeclarationCountry maps a wFirma internal ID to an ISO 3166-1 alpha-2 country code.
+type DeclarationCountry struct {
 	ID   string `json:"id"`
-	Code string `json:"code"` // short code, e.g. "23", "8", "WDT", "EXP"
+	Code string `json:"code"` // ISO 3166-1 alpha-2, e.g. "SE", "DE"
 }
 
 // InvoiceFindResponse is the top-level response for invoices/find action.
