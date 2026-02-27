@@ -169,15 +169,27 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		}
 	}
 
+	// Determine if this is an EU OSS sale (B2C to another EU country).
+	// wFirma requires type_of_sale to accept destination-country VAT rates.
+	isEU := false
+	if vp != nil {
+		isEU = vp.IsEUCountry(countryCode)
+	} else {
+		isEU = euCountries[countryCode]
+	}
+	isOSS := !isB2B && isEU && countryCode != "" && countryCode != "PL"
+
 	// Pre-resolve distinct vat codes to wFirma IDs once per invoice.
-	// Avoids repeated API warnings for the same code across line items.
+	// Skip for OSS — all IDs from vat_codes/find are Polish and force Polish VAT.
 	vatCodeIDCache := make(map[string]string)
-	for _, code := range []string{goodsVat, shippingVatCode} {
-		if code == "" {
-			continue
-		}
-		if _, ok := vatCodeIDCache[code]; !ok {
-			vatCodeIDCache[code] = c.resolveVatCodeID(ctx, code)
+	if !isOSS {
+		for _, code := range []string{goodsVat, shippingVatCode} {
+			if code == "" {
+				continue
+			}
+			if _, ok := vatCodeIDCache[code]; !ok {
+				vatCodeIDCache[code] = c.resolveVatCodeID(ctx, code)
+			}
 		}
 	}
 
@@ -193,10 +205,13 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			Price: float64(line.Price) / 100.0,
 			Unit:  "szt.",
 		}
-		// Prefer vat_code with wFirma ID over the plain "vat" string field.
-		// The API resets non-standard rates (e.g. EU destination-country rates) to 23%
-		// when the plain "vat" field is used.
-		if vcID := vatCodeIDCache[vatCode]; vcID != "" {
+		// For OSS invoices, always use the plain "vat" field with the numeric rate.
+		// vat_code IDs from vat_codes/find are all Polish — using them forces Polish
+		// VAT even when the rate number matches (e.g. "23" resolves to Polish 23%, not IE 23%).
+		// For non-OSS invoices, prefer vat_code ID for unambiguous rate selection.
+		if isOSS {
+			content.Vat = vatCode
+		} else if vcID := vatCodeIDCache[vatCode]; vcID != "" {
 			content.VatCode = &VatCodeRef{ID: vcID}
 		} else {
 			content.Vat = vatCode
@@ -217,37 +232,25 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	issueDate := params.Created.Format("2006-01-02")
 	paymentDate := params.Created.AddDate(0, 0, defaultPaymentDays).Format("2006-01-02")
 
-	// Determine if this is an EU OSS sale (B2C to another EU country).
-	// wFirma requires type_of_sale to accept destination-country VAT rates.
-	isEU := false
-	if vp != nil {
-		isEU = vp.IsEUCountry(countryCode)
-	} else {
-		isEU = euCountries[countryCode]
-	}
 	var typeOfSale string
-	var vatMossDetails []*VatMossDetailLine
-	isOSS := !isB2B && isEU && countryCode != "" && countryCode != "PL"
 	if isOSS {
 		typeOfSale = `["` + typeOfSaleSW + `"]`
-		vatMossDetails = buildVatMossDetails(params.ClientDetails, countryCode)
 	}
 
 	invoice := &Invoice{
-		Contractor:     contractor,
-		Type:           string(invType),
-		PriceType:      "brutto",
-		PaymentMethod:  defaultPaymentMethod,
-		PaymentDate:    paymentDate,
-		DisposalDate:   issueDate, // date of sale defaults to the issue date
-		Total:          total,
-		IdExternal:     params.OrderId,
-		Description:    "Numer zamówienia: " + params.OrderId,
-		Date:           issueDate,
-		Currency:       strings.ToUpper(params.Currency),
-		TypeOfSale:     typeOfSale,
-		Contents:       contents,
-		VatMossDetails: vatMossDetails,
+		Contractor:    contractor,
+		Type:          string(invType),
+		PriceType:     "brutto",
+		PaymentMethod: defaultPaymentMethod,
+		PaymentDate:   paymentDate,
+		DisposalDate:  issueDate, // date of sale defaults to the issue date
+		Total:         total,
+		IdExternal:    params.OrderId,
+		Description:   "Numer zamówienia: " + params.OrderId,
+		Date:          issueDate,
+		Currency:      strings.ToUpper(params.Currency),
+		TypeOfSale:    typeOfSale,
+		Contents:      contents,
 	}
 
 	addPayload := map[string]interface{}{
@@ -301,6 +304,15 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 
 	invoice.Id = resultInvoice.Id
 	invoice.Number = resultInvoice.Number
+
+	// For OSS invoices, add vat_moss_details as a separate API call.
+	// Nesting inside the invoice payload is silently ignored by wFirma.
+	if isOSS {
+		if err := c.addVatMossDetails(ctx, invoice.Id, params.ClientDetails, countryCode); err != nil {
+			log.Warn("add vat_moss_details (non-fatal)", sl.Err(err))
+		}
+	}
+
 	if c.db != nil {
 		err = c.db.SaveInvoice(invoice.Id, invoice)
 		if err != nil {
@@ -373,10 +385,10 @@ func extractInvoiceErrors(resp *InvoiceResponse) string {
 	return strings.Join(msgs, "; ")
 }
 
-// buildVatMossDetails constructs the OSS evidence payload for EU B2C invoices.
-// Uses the customer's shipping address as primary evidence (type "A") and the
-// order's country-specific context as secondary evidence (type "F").
-func buildVatMossDetails(client *entity.ClientDetails, countryCode string) []*VatMossDetailLine {
+// addVatMossDetails sends a vat_moss_details/add request to attach OSS evidence
+// to an existing invoice. Must be called after invoice creation because wFirma
+// silently ignores vat_moss_details nested in the invoices/add payload.
+func (c *Client) addVatMossDetails(ctx context.Context, invoiceID string, client *entity.ClientDetails, countryCode string) error {
 	// Evidence 1: shipping/billing address
 	var addrParts []string
 	if client.Street != "" {
@@ -396,17 +408,49 @@ func buildVatMossDetails(client *entity.ClientDetails, countryCode string) []*Va
 		evidence1Desc = countryCode
 	}
 
-	return []*VatMossDetailLine{
-		{
-			Detail: &VatMossDetail{
-				Type:                 ossServiceCodeGoods,
-				Evidence1Type:        "A",
-				Evidence1Description: evidence1Desc,
-				Evidence2Type:        "F",
-				Evidence2Description: "Order delivery address: " + countryCode,
+	payload := map[string]interface{}{
+		"api": map[string]interface{}{
+			"vat_moss_details": []map[string]interface{}{
+				{
+					"vat_moss_detail": map[string]interface{}{
+						"object_name":           "Invoice",
+						"object_id":             invoiceID,
+						"type":                  ossServiceCodeGoods,
+						"evidence1_type":        "A",
+						"evidence1_description": evidence1Desc,
+						"evidence2_type":        "F",
+						"evidence2_description": "Order delivery address: " + countryCode,
+					},
+				},
 			},
 		},
 	}
+
+	if debugPayload, err := json.Marshal(payload); err == nil {
+		c.log.With(slog.String("payload", string(debugPayload))).Debug("vat_moss_details add request")
+	}
+
+	res, err := c.request(ctx, "vat_moss_details", "add", payload)
+	if err != nil {
+		return fmt.Errorf("vat_moss_details/add: %w", err)
+	}
+
+	c.log.With(slog.String("response", string(res))).Debug("vat_moss_details add response")
+
+	// Check for error in response.
+	var resp struct {
+		Status struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"status"`
+	}
+	if err = json.Unmarshal(res, &resp); err != nil {
+		return fmt.Errorf("parse vat_moss_details response: %w", err)
+	}
+	if resp.Status.Code == "ERROR" {
+		return fmt.Errorf("vat_moss_details error: %s", resp.Status.Message)
+	}
+	return nil
 }
 
 // addPayment registers a payment against an existing invoice in wFirma (payments/add).
