@@ -46,7 +46,7 @@ Called `https://api2.wfirma.pl/vat_moss_details/add` — returned XML error:
 
 Nested `vat_moss_details` inside the invoice payload using **array** format (like `invoicecontents`). The API silently ignored it. Tested with Ireland (23%) so the rate issue was inconclusive — IE and PL both use 23%.
 
-## Solution (Current Implementation)
+## Solution (Previous Attempt — Failed)
 
 ### Discovery
 
@@ -57,21 +57,38 @@ The wFirma API documentation lists `vat_moss_details` as a **"pelny, pojedynczy"
 - Correct: `"vat_moss_details": {"vat_moss_detail": {...}}`
 - Wrong: `"vat_moss_details": [{"vat_moss_detail": {...}}]`
 
-### Implementation
+### What failed
 
 Two-step approach:
 
 1. **Primary**: Nest `vat_moss_details` in `invoices/add` payload with singular format
-2. **Fallback**: After creation, call `invoices/edit/{id}` with `vat_moss_details` in case the API ignores it during `add`
+2. **Fallback**: After creation, call `invoices/edit/{id}` with `vat_moss_details`
 
-#### Invoice payload structure
+**Result (order #11594, SE 25%):**
+- `invoices/add` silently ignored `vat_moss_details` — all line items came back with `vat_code: {"id": 222}` (Polish 23%)
+- `invoices/edit` fallback failed: "Nie można modyfikować dokumentów, gdy rodzajem ewidencji są księgi rachunkowe" (Cannot modify documents when record type is full accounting books)
+- `type_of_sale: ["SW"]` was accepted, but without `vat_moss_details` the VAT was still Polish 23%
+
+## Solution (Current — Draft Approach)
+
+### Rationale
+
+Finalized invoices (`type: "normal"`) are immediately booked into "księgi rachunkowe" (full accounting books) and become immutable via API. Draft invoices (`type: "normal_draft"`) are **editable** because they aren't booked yet.
+
+### Three-step flow for OSS invoices
+
+1. **Create as draft**: `invoices/add` with `type: "normal_draft"` — includes `vat_moss_details`, `type_of_sale`, and plain `vat` on line items
+2. **Edit the draft**: `invoices/edit/{id}` to attach `vat_moss_details` — drafts bypass the "księgi rachunkowe" restriction
+3. **Approve the draft**: `invoices/edit/{id}` changing `type` to `"normal"` — assigns a number and books it
+
+#### Create payload (step 1)
 
 ```json
 {
   "api": {
     "invoices": [{
       "invoice": {
-        "type": "normal",
+        "type": "normal_draft",
         "type_of_sale": "[\"SW\"]",
         "invoicecontents": [
           {"invoicecontent": {"name": "Product", "vat": "25", "price": 20.63, ...}}
@@ -85,6 +102,38 @@ Two-step approach:
             "evidence2_description": "Order delivery address: SE"
           }
         }
+      }
+    }]
+  }
+}
+```
+
+#### Edit draft payload (step 2)
+
+```json
+{
+  "api": {
+    "invoices": [{
+      "invoice": {
+        "id": "{draft_id}",
+        "vat_moss_details": {
+          "vat_moss_detail": { ... }
+        }
+      }
+    }]
+  }
+}
+```
+
+#### Approve draft payload (step 3)
+
+```json
+{
+  "api": {
+    "invoices": [{
+      "invoice": {
+        "id": "{draft_id}",
+        "type": "normal"
       }
     }]
   }
