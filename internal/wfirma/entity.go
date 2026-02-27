@@ -23,8 +23,9 @@ package wfirma
 // OSS (One-Stop Shop) invoices:
 //   For EU B2C sales to non-PL countries, the correct foreign vat_code ID must be used
 //   on line items. These IDs are resolved via declaration_countries/find → vat_codes/find.
-//   Example: Sweden 25% → declaration_country 205 → vat_code 687.
-//   Using the correct vat_code ID is sufficient — no type_of_sale or vat_moss_details needed.
+//   Example: Sweden 25% → declaration_country 205 → vat_code 688.
+//   Additionally, vat_moss_details must be provided as a singular nested object inside the
+//   invoice — the API validates that type, evidence1_type, and evidence2_type are non-empty.
 //
 // Note: the API computes totals from invoicecontents automatically.
 // The "total" field is included for local reference but ignored by the API on create.
@@ -45,8 +46,25 @@ type Invoice struct {
 	Date           string                  `json:"date" bson:"date"`                                     // invoice issue date, format "YYYY-MM-DD"
 	Currency       string                  `json:"currency" bson:"currency"`                             // uppercase ISO 4217: "PLN", "EUR"
 	TypeOfSale     string                  `json:"type_of_sale,omitempty" bson:"type_of_sale,omitempty"` // JSON array, e.g. '["SW"]' for OSS goods
-	Contents []*ContentLine          `json:"invoicecontents" bson:"invoicecontents"`
-	Errors   map[string]ErrorWrapper `json:"errors,omitempty" bson:"errors,omitempty"`
+	Contents       []*ContentLine          `json:"invoicecontents" bson:"invoicecontents"`
+	VatMossDetails *VatMossDetailWrapper   `json:"vat_moss_details,omitempty" bson:"vat_moss_details,omitempty"`
+	Errors         map[string]ErrorWrapper `json:"errors,omitempty" bson:"errors,omitempty"`
+}
+
+// VatMossDetailWrapper wraps a VatMossDetail for the wFirma API singular relation.
+// The API expects: "vat_moss_details": {"vat_moss_detail": {...}}
+type VatMossDetailWrapper struct {
+	Detail *VatMossDetail `json:"vat_moss_detail" bson:"vat_moss_detail"`
+}
+
+// VatMossDetail represents OSS evidence attached to an invoice.
+// Required when using foreign vat_code IDs — the API validates all fields are non-empty.
+type VatMossDetail struct {
+	Type                 string `json:"type" bson:"type"`                                   // "BA"/"BB" (goods), "SA"-"SE" (services)
+	Evidence1Type        string `json:"evidence1_type" bson:"evidence1_type"`               // "A" (address), "B" (IP), "C" (bank), "D" (SIM), "E" (landline), "F" (other)
+	Evidence1Description string `json:"evidence1_description" bson:"evidence1_description"` // e.g. customer's address
+	Evidence2Type        string `json:"evidence2_type" bson:"evidence2_type"`               // same codes as above
+	Evidence2Description string `json:"evidence2_description" bson:"evidence2_description"` // e.g. delivery country
 }
 
 // Content represents a single line item in an invoice (invoicecontent).

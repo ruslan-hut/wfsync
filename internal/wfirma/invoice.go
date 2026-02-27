@@ -250,6 +250,11 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		Contents:      contents,
 	}
 
+	// OSS invoices require vat_moss_details with evidence of the buyer's country.
+	if isOSS {
+		invoice.VatMossDetails = buildVatMossDetails(params.ClientDetails, countryCode)
+	}
+
 	addPayload := map[string]interface{}{
 		"api": map[string]interface{}{
 			"invoices": []map[string]interface{}{
@@ -378,6 +383,38 @@ func extractInvoiceErrors(resp *InvoiceResponse) string {
 		return "unknown error"
 	}
 	return strings.Join(msgs, "; ")
+}
+
+// buildVatMossDetails constructs the OSS evidence wrapper for an invoice.
+// Uses the customer's address as evidence type A and the delivery country as evidence type F.
+func buildVatMossDetails(client *entity.ClientDetails, countryCode string) *VatMossDetailWrapper {
+	var addrParts []string
+	if client.Street != "" {
+		addrParts = append(addrParts, client.Street)
+	}
+	if client.ZipCode != "" {
+		addrParts = append(addrParts, client.ZipCode)
+	}
+	if client.City != "" {
+		addrParts = append(addrParts, client.City)
+	}
+	if client.Country != "" {
+		addrParts = append(addrParts, client.Country)
+	}
+	evidence1Desc := strings.Join(addrParts, ", ")
+	if evidence1Desc == "" {
+		evidence1Desc = countryCode
+	}
+
+	return &VatMossDetailWrapper{
+		Detail: &VatMossDetail{
+			Type:                 "BA", // goods (WSTO)
+			Evidence1Type:        "A",  // billing/shipping address
+			Evidence1Description: evidence1Desc,
+			Evidence2Type:        "F",  // other commercially relevant info
+			Evidence2Description: "Order delivery address: " + countryCode,
+		},
+	}
 }
 
 // addPayment registers a payment against an existing invoice in wFirma (payments/add).
