@@ -24,9 +24,8 @@ import (
 type invoiceType string
 
 const (
-	invoiceProforma  invoiceType = "proforma"    // proforma invoice (przedpłata)
-	invoiceNormal    invoiceType = "normal"       // standard VAT invoice (faktura VAT)
-	invoiceNormalDft invoiceType = "normal_draft" // draft VAT invoice — editable, not yet booked
+	invoiceProforma invoiceType = "proforma" // proforma invoice (przedpłata)
+	invoiceNormal   invoiceType = "normal"   // standard VAT invoice (faktura VAT)
 
 	// defaultPaymentMethod is used for all created invoices.
 	// Supported values: "transfer", "cash", "compensation", "cod", "payment_card".
@@ -238,18 +237,9 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		typeOfSale = `["` + typeOfSaleSW + `"]`
 	}
 
-	// For OSS invoices, create as a draft first. Finalized invoices land in
-	// "księgi rachunkowe" (full accounting books) and cannot be edited via API.
-	// Drafts are editable, so we can attach vat_moss_details in a second step
-	// and then approve the draft to finalize it.
-	createType := invType
-	if isOSS && invType == invoiceNormal {
-		createType = invoiceNormalDft
-	}
-
 	invoice := &Invoice{
 		Contractor:    contractor,
-		Type:          string(createType),
+		Type:          string(invType),
 		PriceType:     "brutto",
 		PaymentMethod: defaultPaymentMethod,
 		PaymentDate:   paymentDate,
@@ -263,20 +253,27 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		Contents:      contents,
 	}
 
-	// For OSS invoices, attach vat_moss_details as a singular nested relation.
-	// This is required for wFirma to accept destination-country VAT rates.
-	if isOSS {
-		invoice.VatMossDetails = buildVatMossDetails(params.ClientDetails, countryCode)
-	}
-
-	addPayload := map[string]interface{}{
-		"api": map[string]interface{}{
-			"invoices": []map[string]interface{}{
-				{
-					"invoice": invoice,
-				},
+	// For OSS invoices, attach vat_moss_details at the api level as a sibling of invoices.
+	// Nesting it inside the invoice object (invoice.VatMossDetails) was silently ignored
+	// by the API. Placing it at the api level follows the pattern used for other
+	// related modules like payments.
+	apiPayload := map[string]interface{}{
+		"invoices": []map[string]interface{}{
+			{
+				"invoice": invoice,
 			},
 		},
+	}
+	if isOSS {
+		moss := buildVatMossDetails(params.ClientDetails, countryCode)
+		apiPayload["vat_moss_details"] = []map[string]interface{}{
+			{
+				"vat_moss_detail": moss.Detail,
+			},
+		}
+	}
+	addPayload := map[string]interface{}{
+		"api": apiPayload,
 	}
 
 	if debugPayload, err := json.Marshal(addPayload); err == nil {
@@ -300,6 +297,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		errMsg := extractInvoiceErrors(&addResp)
 		log.With(
 			slog.String("error", errMsg),
+			slog.String("response", string(addRes)),
 			slog.String("tg_topic", entity.TopicError),
 		).Warn("invoice creation error")
 		return nil, fmt.Errorf("wFirma error: %s", errMsg)
@@ -321,19 +319,12 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	invoice.Id = resultInvoice.Id
 	invoice.Number = resultInvoice.Number
 
-	// OSS draft flow: the invoice was created as normal_draft so it's editable.
-	// Step 1: attach vat_moss_details via edit (drafts bypass the "księgi rachunkowe" restriction).
-	// Step 2: approve the draft by changing type to "normal", which assigns a number and books it.
-	if isOSS && invType == invoiceNormal {
+	// Fallback: if vat_moss_details was ignored during creation, try attaching
+	// it via invoices/edit. This may fail with "księgi rachunkowe" accounts
+	// but is kept as a belt-and-suspenders measure.
+	if isOSS {
 		if err := c.editVatMossDetails(ctx, invoice.Id, params.ClientDetails, countryCode); err != nil {
-			log.Warn("edit vat_moss_details on draft", sl.Err(err))
-		}
-		approvedNumber, err := c.approveDraft(ctx, invoice.Id)
-		if err != nil {
-			log.With(slog.String("tg_topic", entity.TopicError)).
-				Warn("approve OSS draft failed — invoice remains as draft", sl.Err(err))
-		} else if approvedNumber != "" {
-			invoice.Number = approvedNumber
+			log.Warn("edit vat_moss_details fallback (non-fatal)", sl.Err(err))
 		}
 	}
 
@@ -390,7 +381,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 }
 
 // extractInvoiceErrors collects all error messages from the invoice response,
-// including contractor-level validation errors.
+// including contractor-level validation errors and the top-level status message.
 func extractInvoiceErrors(resp *InvoiceResponse) string {
 	var msgs []string
 	for _, wrapper := range resp.Invoices {
@@ -403,6 +394,9 @@ func extractInvoiceErrors(resp *InvoiceResponse) string {
 				msgs = append(msgs, fmt.Sprintf("contractor.%s: %s", ew.Error.Field, ew.Error.Message))
 			}
 		}
+	}
+	if len(msgs) == 0 && resp.Status.Message != "" {
+		return resp.Status.Message
 	}
 	if len(msgs) == 0 {
 		return "unknown error"
@@ -487,50 +481,6 @@ func (c *Client) editVatMossDetails(ctx context.Context, invoiceID string, clien
 		return fmt.Errorf("invoices/edit vat_moss_details: %s", resp.Status.Message)
 	}
 	return nil
-}
-
-// approveDraft finalizes a draft invoice by changing its type from "normal_draft" to "normal".
-// This assigns an invoice number and books it into the accounting ledger.
-// Returns the new invoice number (fullnumber) if available.
-func (c *Client) approveDraft(ctx context.Context, invoiceID string) (string, error) {
-	payload := map[string]interface{}{
-		"api": map[string]interface{}{
-			"invoices": []map[string]interface{}{
-				{
-					"invoice": map[string]interface{}{
-						"id":   invoiceID,
-						"type": string(invoiceNormal),
-					},
-				},
-			},
-		},
-	}
-
-	if debugPayload, err := json.Marshal(payload); err == nil {
-		c.log.With(slog.String("payload", string(debugPayload))).Debug("invoices/edit approve draft request")
-	}
-
-	res, err := c.request(ctx, "invoices", "edit/"+invoiceID, payload)
-	if err != nil {
-		return "", fmt.Errorf("approve draft: %w", err)
-	}
-
-	c.log.With(slog.String("response", string(res))).Debug("invoices/edit approve draft response")
-
-	var resp InvoiceResponse
-	if err = json.Unmarshal(res, &resp); err != nil {
-		return "", fmt.Errorf("parse approve draft response: %w", err)
-	}
-	if resp.Status.Code == "ERROR" {
-		errMsg := extractInvoiceErrors(&resp)
-		return "", fmt.Errorf("approve draft: %s", errMsg)
-	}
-
-	var number string
-	if wrapper, ok := resp.Invoices["0"]; ok {
-		number = wrapper.Invoice.Number
-	}
-	return number, nil
 }
 
 // addPayment registers a payment against an existing invoice in wFirma (payments/add).

@@ -69,71 +69,38 @@ Two-step approach:
 - `invoices/edit` fallback failed: "Nie można modyfikować dokumentów, gdy rodzajem ewidencji są księgi rachunkowe" (Cannot modify documents when record type is full accounting books)
 - `type_of_sale: ["SW"]` was accepted, but without `vat_moss_details` the VAT was still Polish 23%
 
-## Solution (Current — Draft Approach)
+### Attempt 5: Draft approach (`normal_draft`)
+
+Created invoice as `type: "normal_draft"` hoping to edit the draft (bypassing "księgi rachunkowe") and then approve it. API rejected the draft creation entirely — `normal_draft` type not supported for this account (requires KSeF module).
+
+## Solution (Current — API-Level Nesting)
 
 ### Rationale
 
-Finalized invoices (`type: "normal"`) are immediately booked into "księgi rachunkowe" (full accounting books) and become immutable via API. Draft invoices (`type: "normal_draft"`) are **editable** because they aren't booked yet.
+Nesting `vat_moss_details` inside the `invoice` object (as a singular relation) was silently ignored.
+The new approach places `vat_moss_details` at the **`api` level** as a sibling of `invoices`, similar to how other related modules like `payments` are structured.
 
-### Three-step flow for OSS invoices
-
-1. **Create as draft**: `invoices/add` with `type: "normal_draft"` — includes `vat_moss_details`, `type_of_sale`, and plain `vat` on line items
-2. **Edit the draft**: `invoices/edit/{id}` to attach `vat_moss_details` — drafts bypass the "księgi rachunkowe" restriction
-3. **Approve the draft**: `invoices/edit/{id}` changing `type` to `"normal"` — assigns a number and books it
-
-#### Create payload (step 1)
+### Payload structure
 
 ```json
 {
   "api": {
     "invoices": [{
       "invoice": {
-        "type": "normal_draft",
+        "type": "normal",
         "type_of_sale": "[\"SW\"]",
         "invoicecontents": [
           {"invoicecontent": {"name": "Product", "vat": "25", "price": 20.63, ...}}
-        ],
-        "vat_moss_details": {
-          "vat_moss_detail": {
-            "type": "BA",
-            "evidence1_type": "A",
-            "evidence1_description": "Street, Zip, City, Country",
-            "evidence2_type": "F",
-            "evidence2_description": "Order delivery address: SE"
-          }
-        }
+        ]
       }
-    }]
-  }
-}
-```
-
-#### Edit draft payload (step 2)
-
-```json
-{
-  "api": {
-    "invoices": [{
-      "invoice": {
-        "id": "{draft_id}",
-        "vat_moss_details": {
-          "vat_moss_detail": { ... }
-        }
-      }
-    }]
-  }
-}
-```
-
-#### Approve draft payload (step 3)
-
-```json
-{
-  "api": {
-    "invoices": [{
-      "invoice": {
-        "id": "{draft_id}",
-        "type": "normal"
+    }],
+    "vat_moss_details": [{
+      "vat_moss_detail": {
+        "type": "BA",
+        "evidence1_type": "A",
+        "evidence1_description": "Street, Zip, City, Country",
+        "evidence2_type": "F",
+        "evidence2_description": "Order delivery address: SE"
       }
     }]
   }

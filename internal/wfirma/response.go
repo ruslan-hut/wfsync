@@ -44,7 +44,8 @@ type ErrorMethod struct {
 
 // Status is included in every wFirma API response. Code is "OK" or "ERROR".
 type Status struct {
-	Code string `json:"code"`
+	Code    string `json:"code"`
+	Message string `json:"message,omitempty"` // top-level error message, present when Code == "ERROR"
 }
 
 // InvoiceResponse is the top-level response for invoices/add action.
