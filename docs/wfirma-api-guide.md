@@ -14,6 +14,7 @@ A practical guide for working with the [wFirma API](https://doc.wfirma.pl/) base
 - [VAT Codes](#vat-codes)
 - [Declaration Countries](#declaration-countries)
 - [VAT Handling](#vat-handling)
+- [WFSync API VAT Defaults](#wfsync-api-vat-defaults)
 - [OSS Invoices (EU B2C)](#oss-invoices-eu-b2c)
 - [Pagination](#pagination)
 - [Searching and Filtering](#searching-and-filtering)
@@ -320,6 +321,36 @@ Country is EU, customer is B2C?
 ### VIES validation
 
 For B2B EU transactions, validate the customer's VAT number against [VIES](https://ec.europa.eu/taxation_customs/vies/). A failed validation means the transaction falls back to domestic (Polish) VAT rates. We treat VIES as non-blocking — log the result but don't fail the invoice if the service is down.
+
+## WFSync API VAT Defaults
+
+When using the WFSync payload endpoints (`POST /v1/wf/invoice`, `POST /v1/wf/proforma`), the caller may not know or provide the exact tax amount. The system handles this automatically:
+
+### Customer group
+
+The `customer_group` field controls B2B vs B2C treatment:
+
+- **`-1`** — explicit B2B flag for API callers (no OpenCart dependency)
+- **`0`** (or omit) — B2C (default)
+- **`6, 7, 16, 18, 19`** — OpenCart B2B groups (used internally)
+
+### VAT rate when `tax_value` is not provided
+
+When `tax_value` is 0 or missing, the VAT rate is inferred from the country code:
+
+| Scenario | VAT rate applied |
+|---|---|
+| PL or no country | 23% (Polish standard) |
+| EU B2C | Destination-country standard rate (e.g. DE 19%, SE 25%) |
+| EU B2B + `tax_id` | 0% WDT |
+| EU B2B without `tax_id` | 23% (Polish rate) |
+| Non-EU | 0% EXP (export) |
+
+The destination-country rate is resolved from the dynamic VAT database first (updated from vatlookup.eu), with a hardcoded fallback map as a last resort.
+
+### VAT rate when `tax_value` is provided
+
+The rate is calculated as `tax_value / (total - shipping - tax_value) * 100`. For EU B2C orders, this calculated rate is cross-checked against the internal VAT database — if they differ, the internal rate takes priority and a warning is logged.
 
 ## OSS Invoices (EU B2C)
 

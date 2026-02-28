@@ -275,12 +275,16 @@ POST /v1/wf/proforma
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `client_details` | object | Yes | Customer information |
+| `client_details` | object | Yes | Customer information (see [ClientDetails](#clientdetails)) |
 | `line_items` | array | Yes | Order line items (min: 1) |
 | `total` | integer | Yes | Total amount in minor units (min: 1) |
 | `currency` | string | Yes | Currency code: `PLN` or `EUR` |
 | `order_id` | string | Yes | Unique order identifier (1-32 chars) |
 | `success_url` | string | Yes | URL (required for validation) |
+| `customer_group` | integer | No | `-1` for B2B, `0` or omit for B2C. See [VAT & Customer Group](#vat--customer-group) |
+| `tax_value` | integer | No | Tax amount in minor units. When omitted, VAT rate is auto-detected from country. See [VAT & Customer Group](#vat--customer-group) |
+| `sub_total` | integer | No | Subtotal before tax in minor units. Improves VAT rate calculation accuracy |
+| `shipping` | integer | No | Shipping amount in minor units |
 
 #### Example Request
 
@@ -351,12 +355,16 @@ POST /v1/wf/invoice
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `client_details` | object | Yes | Customer information |
+| `client_details` | object | Yes | Customer information (see [ClientDetails](#clientdetails)) |
 | `line_items` | array | Yes | Order line items (min: 1) |
 | `total` | integer | Yes | Total amount in minor units (min: 1) |
 | `currency` | string | Yes | Currency code: `PLN` or `EUR` |
 | `order_id` | string | Yes | Unique order identifier (1-32 chars) |
 | `success_url` | string | Yes | URL (required for validation) |
+| `customer_group` | integer | No | `-1` for B2B, `0` or omit for B2C. See [VAT & Customer Group](#vat--customer-group) |
+| `tax_value` | integer | No | Tax amount in minor units. When omitted, VAT rate is auto-detected from country. See [VAT & Customer Group](#vat--customer-group) |
+| `sub_total` | integer | No | Subtotal before tax in minor units. Improves VAT rate calculation accuracy |
+| `shipping` | integer | No | Shipping amount in minor units |
 
 #### Example Request
 
@@ -539,6 +547,80 @@ curl -X POST "https://api.example.com/v1/wf/sync/push?from=2025-01-01&to=2025-01
 | 401 | Unauthorized |
 | 403 | User lacks `WFirmaAllowInvoice` permission |
 | 500 | Wfirma or database unavailable |
+
+---
+
+## VAT & Customer Group
+
+Applies to `POST /v1/wf/proforma` and `POST /v1/wf/invoice` endpoints.
+
+### Customer group
+
+Use `customer_group` to control B2B vs B2C treatment:
+
+| Value | Meaning |
+|-------|---------|
+| `-1` | **B2B** — explicit B2B flag for API callers |
+| `0` (or omit) | **B2C** — default, consumer invoice |
+
+B2B affects VAT handling for EU customers: B2B + valid `tax_id` gets 0% WDT (intra-community delivery), B2B without `tax_id` gets 23% Polish rate. B2C always uses the destination-country rate (OSS scheme).
+
+### VAT rate auto-detection
+
+When `tax_value` is omitted (or 0), the VAT rate is determined automatically from the customer's country:
+
+| Country | B2C result | B2B + tax_id result | B2B without tax_id result |
+|---------|------------|---------------------|---------------------------|
+| PL (or empty) | 23% | 23% | 23% |
+| EU country | Destination-country rate (e.g. 19% for DE, 25% for SE) | 0% WDT | 23% |
+| Non-EU | 0% EXP (export) | 0% EXP | 0% EXP |
+
+When `tax_value` **is** provided, the rate is calculated from the order totals (`tax_value / (total - shipping - tax_value) * 100`). This calculated rate is cross-checked against the internal VAT database for EU countries.
+
+### Examples
+
+**B2C invoice for a German customer (auto VAT):**
+
+```json
+{
+  "client_details": {
+    "name": "Max Mustermann",
+    "email": "max@example.de",
+    "country": "DE",
+    "city": "Berlin",
+    "street": "Hauptstr. 1",
+    "zip_code": "10115"
+  },
+  "line_items": [{"name": "Product", "qty": 1, "price": 5000}],
+  "total": 5000,
+  "currency": "EUR",
+  "order_id": "DE-001",
+  "success_url": "https://example.com"
+}
+```
+
+Result: 19% VAT (German rate), OSS invoice with `vat_moss_details`.
+
+**B2B invoice for a German customer with VAT number:**
+
+```json
+{
+  "client_details": {
+    "name": "GmbH Berlin",
+    "email": "billing@gmbh.de",
+    "country": "DE",
+    "tax_id": "DE123456789"
+  },
+  "line_items": [{"name": "Product", "qty": 1, "price": 5000}],
+  "total": 5000,
+  "currency": "EUR",
+  "order_id": "DE-002",
+  "success_url": "https://example.com",
+  "customer_group": -1
+}
+```
+
+Result: 0% WDT (intra-community delivery).
 
 ---
 
