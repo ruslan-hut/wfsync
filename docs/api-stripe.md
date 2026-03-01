@@ -353,6 +353,21 @@ POST /webhook/event
 - The webhook must be configured and reachable for capture/cancel operations to work
 - After a successful checkout, the webhook stores the PaymentIntent ID needed for capture
 - Configure your Stripe webhook URL to point to this endpoint
+- When wFirma invoice creation fails during webhook processing (e.g., API downtime), the job is automatically enqueued for retry with exponential backoff if the retry queue is enabled (see [Configuration](#retry-queue-configuration))
+
+#### Retry Queue Configuration
+
+When enabled, failed invoice registrations triggered by Stripe webhooks are persisted to MongoDB and retried automatically with exponential backoff. This ensures invoices are eventually created even when the wFirma API is temporarily unavailable.
+
+```yaml
+retry_queue:
+  enabled: true
+  interval_min: 5       # polling interval in minutes
+  max_retries: 10       # max retry attempts before giving up
+  base_delay_sec: 60    # base delay for exponential backoff (delay = base * 2^(attempt-1))
+```
+
+Requires MongoDB to be enabled. Retry jobs are stored in the `retry_jobs` collection. Failed jobs emit Telegram notifications with the `error` topic; successful retries emit `payment` topic notifications.
 
 ---
 

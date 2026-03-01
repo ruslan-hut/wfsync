@@ -58,7 +58,7 @@ Configuration via YAML files:
 - `wfsync-dev.yml` - Development environment
 - `wfsync.yml` - Production environment
 
-Key config sections: `listen`, `stripe`, `wfirma`, `mongo`, `opencart`, `telegram`
+Key config sections: `listen`, `stripe`, `wfirma`, `mongo`, `opencart`, `telegram`, `retry_queue`
 
 ## API Endpoints
 
@@ -144,6 +144,7 @@ GitHub Actions CI/CD:
 - `impl/core/core.go` - Main business logic orchestration
 - `internal/http-server/api/api.go` - Route definitions
 - `entity/checkout-params.go` - Payment/order data structure
+- `impl/core/retryqueue.go` - Invoice retry queue with exponential backoff
 
 ## API Documentation
 
@@ -151,3 +152,4 @@ GitHub Actions CI/CD:
 - `docs/api-wfirma.md` - Wfirma endpoints documentation
 - `docs/api-stripe.md` - Stripe endpoints documentation
 - `docs/stripe-hold-capture.md` - Hold-capture flow guide
+- `docs/retry-queue.md` - Invoice retry queue documentation

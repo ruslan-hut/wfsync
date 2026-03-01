@@ -15,6 +15,12 @@
 | [stripe-hold-capture.md](stripe-hold-capture.md) | Step-by-step guide for Stripe hold/capture payment flow |
 | [wfirma-api-guide.md](wfirma-api-guide.md) | Comprehensive wFirma API guide — authentication, invoicing, VAT, OSS, edge cases |
 
+## Architecture
+
+| Document | Description |
+|---|---|
+| [retry-queue.md](retry-queue.md) | Invoice retry queue — exponential backoff, MongoDB persistence, configuration |
+
 ## Investigation Logs
 
 | Document | Description |
