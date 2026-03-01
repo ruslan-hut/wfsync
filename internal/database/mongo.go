@@ -21,6 +21,7 @@ const (
 	collectionInviteCodes     = "invite_codes"
 	collectionVATRates        = "vat_rates"
 	collectionVIESValidations = "vies_validations"
+	collectionRetryJobs       = "retry_jobs"
 )
 
 type MongoDB struct {
@@ -595,6 +596,84 @@ func (m *MongoDB) GetVIESValidation(countryCode, vatNumber string) (*entity.VIES
 		return nil, m.findError(err)
 	}
 	return &v, nil
+}
+
+// SaveRetryJob upserts a retry job by _id (which equals EventId).
+func (m *MongoDB) SaveRetryJob(job *entity.RetryJob) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionRetryJobs)
+	filter := bson.D{{"_id", job.ID}}
+	update := bson.D{{"$set", job}}
+	opts := options.Update().SetUpsert(true)
+	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	return err
+}
+
+// GetPendingRetryJobs returns retry jobs that are pending and due for processing.
+func (m *MongoDB) GetPendingRetryJobs() ([]*entity.RetryJob, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionRetryJobs)
+	filter := bson.D{
+		{"status", entity.RetryJobPending},
+		{"next_retry_at", bson.D{{"$lte", time.Now()}}},
+	}
+	opts := options.Find().SetSort(bson.D{{"next_retry_at", 1}})
+	cursor, err := collection.Find(m.ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer func(cursor *mongo.Cursor, ctx context.Context) {
+		_ = cursor.Close(ctx)
+	}(cursor, m.ctx)
+
+	var jobs []*entity.RetryJob
+	err = cursor.All(m.ctx, &jobs)
+	if err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
+// UpdateRetryJob replaces a retry job document by _id.
+func (m *MongoDB) UpdateRetryJob(job *entity.RetryJob) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionRetryJobs)
+	filter := bson.D{{"_id", job.ID}}
+	_, err = collection.ReplaceOne(m.ctx, filter, job)
+	return err
+}
+
+// GetRetryJobByEventId returns a retry job by its event_id.
+func (m *MongoDB) GetRetryJobByEventId(eventId string) (*entity.RetryJob, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionRetryJobs)
+	filter := bson.D{{"event_id", eventId}}
+	var job entity.RetryJob
+	err = collection.FindOne(m.ctx, filter).Decode(&job)
+	if err != nil {
+		return nil, m.findError(err)
+	}
+	return &job, nil
 }
 
 // MigrateExistingTelegramUsers sets existing enabled users to RoleAdmin + TierRealtime (idempotent).

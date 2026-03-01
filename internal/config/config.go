@@ -77,6 +77,13 @@ type VIES struct {
 	CacheHours int  `yaml:"cache_hours" env-default:"720"`
 }
 
+type RetryQueue struct {
+	Enabled      bool `yaml:"enabled" env-default:"false"`
+	IntervalMin  int  `yaml:"interval_min" env-default:"5"`
+	MaxRetries   int  `yaml:"max_retries" env-default:"10"`
+	BaseDelaySec int  `yaml:"base_delay_sec" env-default:"60"`
+}
+
 type Config struct {
 	Stripe   StripeConfig `yaml:"stripe"`
 	WFirma   WfirmaConfig `yaml:"wfirma"`
@@ -85,7 +92,8 @@ type Config struct {
 	OpenCart OpenCart     `yaml:"opencart"`
 	Telegram Telegram     `yaml:"telegram"`
 	VATRates VATRates     `yaml:"vatrates"`
-	VIES     VIES         `yaml:"vies"`
+	VIES       VIES       `yaml:"vies"`
+	RetryQueue RetryQueue `yaml:"retry_queue"`
 	Env      string       `yaml:"env" env-default:"local"`
 	Log      string       `yaml:"log"`
 	Location string       `yaml:"location" env-default:"UTC"`

@@ -32,13 +32,14 @@ type InvoiceService interface {
 }
 
 type Core struct {
-	sc       *stripeclient.StripeClient
-	oc       *occlient.Opencart
-	inv      InvoiceService
-	auth     AuthService
-	filePath string
-	fileUrl  string
-	log      *slog.Logger
+	sc         *stripeclient.StripeClient
+	oc         *occlient.Opencart
+	inv        InvoiceService
+	auth       AuthService
+	retryQueue *RetryQueue
+	filePath   string
+	fileUrl    string
+	log        *slog.Logger
 }
 
 func New(conf *config.Config, log *slog.Logger) Core {
@@ -59,6 +60,10 @@ func (c *Core) SetInvoiceService(inv InvoiceService) {
 
 func (c *Core) SetAuthService(auth AuthService) {
 	c.auth = auth
+}
+
+func (c *Core) SetRetryQueue(rq *RetryQueue) {
+	c.retryQueue = rq
 }
 
 func (c *Core) SetOpencart(oc *occlient.Opencart) {
@@ -154,7 +159,13 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 	if err != nil {
 		c.log.With(
 			sl.Err(err),
+			slog.String("event_id", evt.ID),
+			slog.String("order_id", params.OrderId),
 		).Error("register invoice")
+		if c.retryQueue != nil {
+			c.retryQueue.Enqueue(params, err.Error())
+		}
+		return
 	}
 	// save invoice id to a site database
 	if payment != nil && c.oc != nil {

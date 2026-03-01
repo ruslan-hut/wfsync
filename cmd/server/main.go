@@ -110,6 +110,19 @@ func main() {
 	handler.SetInvoiceService(wfirmaClient)
 	handler.SetOpencart(oc)
 
+	var retryQueue *core.RetryQueue
+	if conf.RetryQueue.Enabled && mongo != nil {
+		retryQueue = core.NewRetryQueue(log, conf.RetryQueue.IntervalMin, conf.RetryQueue.MaxRetries, conf.RetryQueue.BaseDelaySec)
+		retryQueue.SetDatabase(mongo)
+		retryQueue.SetInvoiceService(wfirmaClient)
+		retryQueue.SetOpencart(oc)
+		handler.SetRetryQueue(retryQueue)
+		retryQueue.Start()
+		log.Info("retry queue started",
+			slog.Int("interval_min", conf.RetryQueue.IntervalMin),
+			slog.Int("max_retries", conf.RetryQueue.MaxRetries))
+	}
+
 	authenticate := auth.New(mongo)
 	handler.SetAuthService(authenticate)
 
@@ -137,6 +150,10 @@ func main() {
 	// Stop background services
 	if oc != nil {
 		oc.Stop()
+	}
+
+	if retryQueue != nil {
+		retryQueue.Stop()
 	}
 
 	if vatService != nil {

@@ -86,7 +86,7 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 		return "", fmt.Errorf("no contractor id returned")
 	}
 	if contr.ID == "" {
-		c.log.Error("no contractor ID returned from wFirma", slog.Any("error", createRes))
+		c.log.Error("no contractor ID returned from wFirma", slog.String("response", string(createRes)))
 		return "", fmt.Errorf("no contractor id returned")
 	}
 	c.log.Debug("new contractor created",
