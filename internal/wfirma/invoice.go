@@ -119,12 +119,6 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			log.Debug("VIES validation passed",
 				slog.String("tax_id", params.ClientDetails.TaxId),
 				slog.String("country", countryCode))
-			//} else {
-			//	log.Warn("VIES validation failed",
-			//		slog.String("tax_id", params.ClientDetails.TaxId),
-			//		slog.String("country", countryCode),
-			//		slog.String("email", params.ClientDetails.Email),
-			//		slog.String("tg_topic", entity.TopicError))
 		}
 	}
 
@@ -261,10 +255,6 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 				},
 			},
 		},
-	}
-
-	if debugPayload, err := json.Marshal(addPayload); err == nil {
-		log.With(slog.String("payload", string(debugPayload))).Debug("invoice add request")
 	}
 
 	addRes, err := c.request(ctx, "invoices", "add", addPayload)
