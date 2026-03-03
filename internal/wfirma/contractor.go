@@ -10,7 +10,11 @@ import (
 )
 
 // createContractor registers a new contractor in wFirma and returns its ID.
-// Contractor fields: name, email, country (ISO 3166 alpha-2), zip, city, street, nip, tax_id_type.
+//
+// wFirma mandatory fields: name, zip, city (API returns validation error if any is empty).
+// The function defaults name to "Kontrahent <email>", zip to "01-001", city to "Warszawa".
+//
+// Optional fields sent: email, country (ISO 3166 alpha-2), street, nip, tax_id_type.
 // tax_id_type: "none" = no tax ID provided, "custom" = tax ID present in the nip field.
 // Using "none"/"custom" (instead of "other") allows wFirma to accept custom VAT rates on invoices.
 func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDetails) (string, error) {
