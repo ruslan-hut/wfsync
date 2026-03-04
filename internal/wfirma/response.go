@@ -202,15 +202,27 @@ type ContractorErrors struct {
 // InvoiceData represents the invoice object returned by the API.
 // Note: Total is a string in responses (the API returns it as a formatted decimal).
 type InvoiceData struct {
-	Id          string                  `json:"id,omitempty" bson:"id"`
-	Number      string                  `json:"fullnumber" bson:"number"` // full formatted invoice number, e.g. "FV 1/01/2025"
-	Type        string                  `json:"type" bson:"type"`
-	PriceType   string                  `json:"price_type" bson:"price_type"`
-	Total       string                  `json:"total" bson:"total"`
-	IdExternal  string                  `json:"id_external" bson:"id_external"`
-	Description string                  `json:"description" bson:"description"`
-	Date        string                  `json:"date" bson:"date"`
-	Currency    string                  `json:"currency" bson:"currency"`
-	Contractor  *ContractorErrors       `json:"contractor,omitempty" bson:"contractor,omitempty"`
-	Errors      map[string]ErrorWrapper `json:"errors,omitempty" bson:"errors,omitempty"`
+	Id              string                               `json:"id,omitempty" bson:"id"`
+	Number          string                               `json:"fullnumber" bson:"number"` // full formatted invoice number, e.g. "FV 1/01/2025"
+	Type            string                               `json:"type" bson:"type"`
+	PriceType       string                               `json:"price_type" bson:"price_type"`
+	Total           string                               `json:"total" bson:"total"`
+	IdExternal      string                               `json:"id_external" bson:"id_external"`
+	Description     string                               `json:"description" bson:"description"`
+	Date            string                               `json:"date" bson:"date"`
+	Currency        string                               `json:"currency" bson:"currency"`
+	Contractor      *ContractorErrors                    `json:"contractor,omitempty" bson:"contractor,omitempty"`
+	InvoiceContents map[string]InvoiceContentRespWrapper `json:"invoicecontents,omitempty"`
+	Errors          map[string]ErrorWrapper              `json:"errors,omitempty" bson:"errors,omitempty"`
+}
+
+// InvoiceContentRespWrapper wraps a single invoice content item in the API response.
+type InvoiceContentRespWrapper struct {
+	InvoiceContent InvoiceContentResp `json:"invoicecontent"`
+}
+
+// InvoiceContentResp captures the name and errors from an invoice content item in the response.
+type InvoiceContentResp struct {
+	Name   string                  `json:"name"`
+	Errors map[string]ErrorWrapper `json:"errors,omitempty"`
 }

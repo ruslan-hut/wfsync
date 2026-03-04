@@ -265,7 +265,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 
 	var addResp InvoiceResponse
 	if err = json.Unmarshal(addRes, &addResp); err != nil {
-		log.With(slog.String("response", string(addRes))).Warn("unmarshal invoice response")
+		log.With(slog.String("response", truncateBody(string(addRes)))).Warn("unmarshal invoice response")
 		return nil, fmt.Errorf("unmarshal invoice response: %w", err)
 	}
 
@@ -274,7 +274,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		errMsg := extractInvoiceErrors(&addResp)
 		log.With(
 			slog.String("error", errMsg),
-			slog.String("response", string(addRes)),
+			slog.String("response", truncateBody(string(addRes))),
 			slog.String("tg_topic", entity.TopicError),
 		).Warn("invoice creation error")
 		return nil, fmt.Errorf("wFirma error: %s", errMsg)
@@ -345,8 +345,17 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	return payment, nil
 }
 
+// truncateBody shortens a response body for logging. If the body exceeds 500 chars,
+// only the first 100 and last 100 chars are kept.
+func truncateBody(s string) string {
+	if len(s) <= 500 {
+		return s
+	}
+	return s[:100] + " ... [truncated] ... " + s[len(s)-100:]
+}
+
 // extractInvoiceErrors collects all error messages from the invoice response,
-// including contractor-level validation errors and the top-level status message.
+// including contractor-level and invoicecontent-level validation errors.
 func extractInvoiceErrors(resp *InvoiceResponse) string {
 	var msgs []string
 	for _, wrapper := range resp.Invoices {
@@ -357,6 +366,12 @@ func extractInvoiceErrors(resp *InvoiceResponse) string {
 		if inv.Contractor != nil {
 			for _, ew := range inv.Contractor.Errors {
 				msgs = append(msgs, fmt.Sprintf("contractor.%s: %s", ew.Error.Field, ew.Error.Message))
+			}
+		}
+		for idx, cw := range inv.InvoiceContents {
+			for _, ew := range cw.InvoiceContent.Errors {
+				msgs = append(msgs, fmt.Sprintf("invoicecontent[%s] %q: %s: %s",
+					idx, cw.InvoiceContent.Name, ew.Error.Field, ew.Error.Message))
 			}
 		}
 	}
@@ -395,7 +410,7 @@ func buildVatMossDetails(client *entity.ClientDetails, countryCode string) *VatM
 			Type:                 "BA", // goods (WSTO)
 			Evidence1Type:        "A",  // billing/shipping address
 			Evidence1Description: evidence1Desc,
-			Evidence2Type:        "F",  // other commercially relevant info
+			Evidence2Type:        "F", // other commercially relevant info
 			Evidence2Description: "Order delivery address: " + countryCode,
 		},
 	}
