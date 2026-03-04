@@ -61,17 +61,17 @@ type Database interface {
 
 // Client is the wFirma API client. Use NewClient to create one.
 type Client struct {
-	enabled   bool
-	hc        *http.Client
-	db        Database
-	vatRates  VATProvider
-	vies      VIESProvider
-	baseURL   string
-	accessKey string
-	secretKey string
-	appID     string
-	filePath  string
-	log       *slog.Logger
+	enabled       bool
+	hc            *http.Client
+	db            Database
+	vatRates      VATProvider
+	vies          VIESProvider
+	baseURL       string
+	accessKey     string
+	secretKey     string
+	appID         string
+	filePath      string
+	log           *slog.Logger
 	vatCodes      map[string]string // cached Polish vat code name → wFirma ID (e.g. "23" → "222")
 	ossVatCodes   map[string]string // cached declaration_country_id → wFirma vat_code ID for foreign rates
 	declCountries map[string]string // cached ISO country code → declaration_country_id (e.g. "SE" → "205")
@@ -87,7 +87,7 @@ type Config struct {
 func NewClient(conf *config.Config, logger *slog.Logger) *Client {
 	return &Client{
 		enabled:   conf.WFirma.Enabled,
-		hc:        &http.Client{Timeout: 20 * time.Second},
+		hc:        &http.Client{Timeout: 55 * time.Second},
 		baseURL:   "https://api2.wfirma.pl",
 		accessKey: conf.WFirma.AccessKey,
 		secretKey: conf.WFirma.SecretKey,

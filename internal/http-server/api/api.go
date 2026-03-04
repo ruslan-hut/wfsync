@@ -46,7 +46,7 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 	}
 
 	router := chi.NewRouter()
-	router.Use(timeout.Timeout(30 * time.Second)) // wfirma requests need long timeouts
+	router.Use(timeout.Timeout(60 * time.Second)) // wfirma requests need long timeouts
 	router.Use(middleware.RequestID)
 	router.Use(middleware.Recoverer)
 	router.Use(render.SetContentType(render.ContentTypeJSON))
@@ -86,7 +86,7 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 		Handler:      router,
 		ErrorLog:     httpLog,
 		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		WriteTimeout: 65 * time.Second, // must exceed the context deadline (60s) to avoid premature connection close
 		IdleTimeout:  60 * time.Second,
 	}
 
