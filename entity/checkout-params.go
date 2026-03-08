@@ -56,6 +56,9 @@ func (c *CheckoutParams) Bind(_ *http.Request) error {
 	if c.Created.IsZero() {
 		c.Created = time.Now()
 	}
+	if c.Shipping > 0 {
+		c.LineItems = append(c.LineItems, ShippingLineItem("", c.Shipping))
+	}
 	return validate.Struct(c)
 }
 
