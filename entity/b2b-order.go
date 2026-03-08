@@ -31,6 +31,7 @@ type B2BOrder struct {
 	TotalVAT        float64    `json:"total_vat"`
 	DiscountPercent float64    `json:"discount_percent"`
 	DiscountAmount  float64    `json:"discount_amount"`
+	Shipment        float64    `json:"shipment"`
 	CurrencyCode    string     `json:"currency_code" validate:"required,oneof=PLN EUR"`
 	CreatedAt       time.Time  `json:"created_at"`
 	Items           []*B2BItem `json:"items" validate:"required,min=1,dive"`
@@ -73,6 +74,11 @@ func (o *B2BOrder) ToCheckoutParams() *CheckoutParams {
 		Source:        SourceB2B,
 		TaxValue:      floatToCents(o.TotalVAT),
 		CustomerGroup: DefaultCustomerGroupB2B,
+	}
+
+	if o.Shipment > 0 {
+		params.Shipping = floatToCents(o.Shipment)
+		params.LineItems = append(params.LineItems, ShippingLineItem("", params.Shipping))
 	}
 
 	for _, item := range o.Items {

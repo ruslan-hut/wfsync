@@ -457,6 +457,7 @@ Requires `WFirmaAllowInvoice` permission.
 | `total_vat` | number | No | VAT amount in major units |
 | `discount_percent` | number | No | Discount percentage |
 | `discount_amount` | number | No | Discount amount in major units |
+| `shipment` | number | No | Delivery/shipping cost in major units. When set (> 0), a special shipping line item ("Zwrot kosztów transportu towarów") is added automatically |
 | `currency_code` | string | Yes | Currency code: `PLN` or `EUR` |
 | `created_at` | string | No | Order creation timestamp (ISO 8601) |
 | `items` | array | Yes | Order line items (min: 1, see [B2BItem](#b2bitem)) |
@@ -481,6 +482,7 @@ curl -X POST "https://api.example.com/v1/b2b/proforma" \
     "client_zipcode": "10115",
     "total": 150.00,
     "total_vat": 0,
+    "shipment": 15.00,
     "currency_code": "EUR",
     "items": [
       {
