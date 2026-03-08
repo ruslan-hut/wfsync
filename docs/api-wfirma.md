@@ -423,6 +423,144 @@ Returns `Payment` object:
 
 ---
 
+### Create B2B Proforma
+
+Creates a proforma invoice in Wfirma from a B2B order payload. The order is converted to `CheckoutParams` internally with B2B customer group and then processed through the standard proforma creation flow.
+
+```
+POST /v1/b2b/proforma
+```
+
+#### Permissions
+
+Requires `WFirmaAllowInvoice` permission.
+
+#### Request Body (B2BOrder)
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `order_uid` | string | Yes | Unique order identifier |
+| `order_number` | string | Yes | Order number (used as `order_id` in Wfirma) |
+| `client_uid` | string | No | Client unique identifier |
+| `client_name` | string | Yes | Client full name or company name |
+| `client_email` | string | Yes | Client email address |
+| `client_phone` | string | No | Client phone number |
+| `client_vat` | string | No | Client VAT number (tax ID) |
+| `client_country` | string | Yes | Country code (e.g., "PL", "DE") |
+| `client_city` | string | No | City name |
+| `client_address` | string | No | Street address |
+| `client_zipcode` | string | No | Postal code |
+| `store_uid` | string | No | Store identifier |
+| `status` | string | No | Order status |
+| `total` | number | Yes | Total amount in major units, e.g. `150.00` (must be > 0) |
+| `subtotal` | number | No | Subtotal before tax |
+| `total_vat` | number | No | VAT amount in major units |
+| `discount_percent` | number | No | Discount percentage |
+| `discount_amount` | number | No | Discount amount in major units |
+| `currency_code` | string | Yes | Currency code: `PLN` or `EUR` |
+| `created_at` | string | No | Order creation timestamp (ISO 8601) |
+| `items` | array | Yes | Order line items (min: 1, see [B2BItem](#b2bitem)) |
+
+**Note:** Unlike `/v1/wf/proforma`, amounts are in **major units** (e.g., `150.00` not `15000`). They are converted to minor units internally.
+
+#### Example Request
+
+```bash
+curl -X POST "https://api.example.com/v1/b2b/proforma" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "order_uid": "b2b-uid-001",
+    "order_number": "B2B-123456",
+    "client_name": "GmbH Berlin",
+    "client_email": "billing@gmbh.de",
+    "client_vat": "DE123456789",
+    "client_country": "DE",
+    "client_city": "Berlin",
+    "client_address": "Hauptstr. 1",
+    "client_zipcode": "10115",
+    "total": 150.00,
+    "total_vat": 0,
+    "currency_code": "EUR",
+    "items": [
+      {
+        "product_name": "Product A",
+        "product_sku": "SKU-001",
+        "quantity": 1,
+        "price": 100.00
+      },
+      {
+        "product_name": "Product B",
+        "product_sku": "SKU-002",
+        "quantity": 2,
+        "price": 25.00
+      }
+    ]
+  }'
+```
+
+#### Response
+
+Returns `Payment` object with the URL to the generated proforma PDF:
+
+```json
+{
+  "url": "https://files.example.com/uuid.pdf"
+}
+```
+
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `url` | string | Public URL to download the proforma PDF |
+
+#### Errors
+
+| Code | Description |
+|------|-------------|
+| 400 | Invalid request body or validation error |
+| 401 | User not found / unauthorized |
+| 403 | User lacks `WFirmaAllowInvoice` permission |
+| 500 | B2B service unavailable or proforma creation failed |
+
+---
+
+### Create B2B Invoice
+
+Creates an invoice in Wfirma from a B2B order payload. Identical request format to [Create B2B Proforma](#create-b2b-proforma) but creates a finalized invoice instead.
+
+```
+POST /v1/b2b/invoice
+```
+
+#### Permissions
+
+Requires `WFirmaAllowInvoice` permission.
+
+#### Request Body
+
+Same as [B2BOrder](#create-b2b-proforma) (see Create B2B Proforma).
+
+#### Response
+
+```json
+{
+  "url": "https://files.example.com/uuid.pdf"
+}
+```
+
+#### Errors
+
+| Code | Description |
+|------|-------------|
+| 400 | Invalid request body or validation error |
+| 401 | User not found / unauthorized |
+| 403 | User lacks `WFirmaAllowInvoice` permission |
+| 500 | B2B service unavailable or invoice creation failed |
+
+---
+
 ### Sync Invoices from Remote (Pull)
 
 Pulls invoices from Wfirma for a date range and syncs them to the local MongoDB collection. Upserts remote invoices locally and deletes local records that no longer exist on Wfirma.
@@ -648,6 +786,20 @@ Result: 0% WDT (intra-community delivery).
 | `price` | integer | Yes | Unit price in minor units (min: 1) |
 | `sku` | string | No | Product SKU |
 | `shipping` | boolean | No | Indicates if this is a shipping line item |
+
+### B2BItem
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `product_uid` | string | No | Product unique identifier |
+| `product_sku` | string | No | Product SKU |
+| `product_name` | string | Yes | Product/service name |
+| `quantity` | integer | Yes | Quantity (min: 1) |
+| `price` | number | Yes | Unit price in major units (must be > 0) |
+| `discount` | number | No | Discount amount |
+| `price_discount` | number | No | Discounted unit price (used instead of `price` when > 0) |
+| `tax` | number | No | Tax amount per item |
+| `total` | number | No | Total amount per item |
 
 ### Payment (Response)
 

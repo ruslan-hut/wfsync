@@ -78,6 +78,10 @@ All `/v1/*` endpoints require `Authorization: Bearer TOKEN`
 - `POST /v1/wf/proforma` - Create proforma from CheckoutParams payload
 - `POST /v1/wf/invoice` - Create invoice from CheckoutParams payload
 
+### B2B (Wfirma)
+- `POST /v1/b2b/proforma` - Create proforma from B2B order payload
+- `POST /v1/b2b/invoice` - Create invoice from B2B order payload
+
 ### Webhook
 - `POST /webhook/event` - Stripe webhook (signature-verified)
 
