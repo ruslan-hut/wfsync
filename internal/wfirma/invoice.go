@@ -272,12 +272,61 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	// Check top-level status first.
 	if addResp.Status.Code == "ERROR" {
 		errMsg := extractInvoiceErrors(&addResp)
-		log.With(
-			slog.String("error", errMsg),
-			slog.String("response", truncateBody(string(addRes))),
-			slog.String("tg_topic", entity.TopicError),
-		).Warn("invoice creation error")
-		return nil, fmt.Errorf("wFirma error: %s", errMsg)
+
+		// If the error is a stock error, retry without the Good reference on affected items.
+		// This sends them as plain text line items, bypassing wFirma stock tracking.
+		stockErrIdxs := extractStockErrorIndices(&addResp)
+		if len(stockErrIdxs) > 0 {
+			log.With(
+				slog.String("error", errMsg),
+				slog.String("tg_topic", entity.TopicError),
+			).Warn("stock error, retrying without good references")
+
+			for _, idx := range stockErrIdxs {
+				if idx < len(contents) {
+					contents[idx].Content.Good = nil
+				}
+			}
+			invoice.Contents = contents
+
+			addPayload = map[string]interface{}{
+				"api": map[string]interface{}{
+					"invoices": []map[string]interface{}{
+						{
+							"invoice": invoice,
+						},
+					},
+				},
+			}
+
+			addRes, err = c.request(ctx, "invoices", "add", addPayload)
+			if err != nil {
+				log.Error("retry add invoice", sl.Err(err))
+				return nil, fmt.Errorf("retry add invoice: %w", err)
+			}
+
+			addResp = InvoiceResponse{}
+			if err = json.Unmarshal(addRes, &addResp); err != nil {
+				return nil, fmt.Errorf("unmarshal retry invoice response: %w", err)
+			}
+
+			if addResp.Status.Code == "ERROR" {
+				retryErrMsg := extractInvoiceErrors(&addResp)
+				log.With(
+					slog.String("error", retryErrMsg),
+					slog.String("response", truncateBody(string(addRes))),
+					slog.String("tg_topic", entity.TopicError),
+				).Warn("retry invoice creation error")
+				return nil, fmt.Errorf("wFirma error (retry): %s", retryErrMsg)
+			}
+		} else {
+			log.With(
+				slog.String("error", errMsg),
+				slog.String("response", truncateBody(string(addRes))),
+				slog.String("tg_topic", entity.TopicError),
+			).Warn("invoice creation error")
+			return nil, fmt.Errorf("wFirma error: %s", errMsg)
+		}
 	}
 
 	var resultInvoice InvoiceData
@@ -382,6 +431,26 @@ func extractInvoiceErrors(resp *InvoiceResponse) string {
 		return "unknown error"
 	}
 	return strings.Join(msgs, "; ")
+}
+
+// extractStockErrorIndices returns the integer indices of invoice content items
+// that have a stock-related error ("Stan magazynowy nie może być ujemny").
+// These items should be retried without their Good reference to bypass stock tracking.
+func extractStockErrorIndices(resp *InvoiceResponse) []int {
+	var indices []int
+	for _, wrapper := range resp.Invoices {
+		for idxStr, cw := range wrapper.Invoice.InvoiceContents {
+			for _, ew := range cw.InvoiceContent.Errors {
+				if strings.Contains(ew.Error.Message, "Stan magazynowy") {
+					idx, err := strconv.Atoi(idxStr)
+					if err == nil {
+						indices = append(indices, idx)
+					}
+				}
+			}
+		}
+	}
+	return indices
 }
 
 // buildVatMossDetails constructs the OSS evidence wrapper for an invoice.
