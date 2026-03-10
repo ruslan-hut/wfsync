@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"wfsync/entity"
 	"wfsync/lib/sl"
 
@@ -224,8 +225,10 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	}
 
 	total := float64(params.Total) / 100.0
-	issueDate := params.Created.Format("2006-01-02")
-	paymentDate := params.Created.AddDate(0, 0, defaultPaymentDays).Format("2006-01-02")
+	now := time.Now()
+	issueDate := now.Format("2006-01-02")
+	disposalDate := params.Created.Format("2006-01-02")
+	paymentDate := now.AddDate(0, 0, defaultPaymentDays).Format("2006-01-02")
 
 	invoice := &Invoice{
 		Contractor:    contractor,
@@ -233,7 +236,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		PriceType:     "brutto",
 		PaymentMethod: defaultPaymentMethod,
 		PaymentDate:   paymentDate,
-		DisposalDate:  issueDate, // date of sale defaults to the issue date
+		DisposalDate:  disposalDate, // date of sale reflects the original order date
 		Total:         total,
 		IdExternal:    params.OrderId,
 		Description:   "Numer zamówienia: " + params.OrderId,
