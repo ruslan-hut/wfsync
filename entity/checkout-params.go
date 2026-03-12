@@ -218,12 +218,29 @@ func (c *ClientDetails) CountryCode() string {
 		return ""
 	}
 	if len(c.Country) == 2 {
-		return c.Country
+		return strings.ToUpper(c.Country)
 	}
 	country := countries.ByName(c.Country)
 	code := country.Alpha2()
 	if len(code) == 2 {
 		return code
+	}
+	// Fallback: try the part before comma (e.g. "France, Metropolitan" → "France").
+	if i := strings.IndexByte(c.Country, ','); i > 0 {
+		country = countries.ByName(strings.TrimSpace(c.Country[:i]))
+		code = country.Alpha2()
+		if len(code) == 2 {
+			return code
+		}
+	}
+	// Fallback: extract country code from the EU VAT number prefix (e.g. "FR04952161859" → "FR").
+	if len(c.TaxId) >= 2 {
+		prefix := strings.ToUpper(c.TaxId[:2])
+		if prefix[0] >= 'A' && prefix[0] <= 'Z' && prefix[1] >= 'A' && prefix[1] <= 'Z' {
+			if countries.ByName(prefix).IsValid() {
+				return prefix
+			}
+		}
 	}
 	return ""
 }
