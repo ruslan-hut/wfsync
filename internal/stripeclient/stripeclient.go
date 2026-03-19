@@ -220,47 +220,60 @@ func (s *StripeClient) handleAmountCapturable(evt *stripe.Event) *entity.Checkou
 		slog.String("status", string(pi.Status)),
 	).Debug("payment intent amount capturable")
 
-	// Find the existing checkout params saved during hold creation.
-	// The checkout session ID is stored in the PaymentIntent's metadata
-	// or we can look it up from the latest_checkout session.
-	var params *entity.CheckoutParams
-
-	// Try to find by event ID first (deduplication)
-	params, _ = s.db.GetCheckoutParamsForEvent(evt.ID)
-	if params != nil && params.OrderId != "" {
-		log.With(slog.String("order_id", params.OrderId)).Debug("event already processed")
-		return params
+	// Deduplication: check if this event was already processed
+	if s.db != nil {
+		existing, _ := s.db.GetCheckoutParamsForEvent(evt.ID)
+		if existing != nil && existing.OrderId != "" {
+			log.With(slog.String("order_id", existing.OrderId)).Debug("event already processed")
+			return existing
+		}
 	}
 
-	// Look up by checkout session from the PaymentIntent metadata
-	orderId := pi.Metadata["order_id"]
-	if orderId == "" {
-		log.Warn("no order_id in payment intent metadata")
+	// Find the checkout session that created this PaymentIntent.
+	// The session was saved to MongoDB during hold creation and contains the order_id.
+	sessionID := evt.GetObjectValue("latest_charge", "payment_intent")
+	if sessionID == "" {
+		// Search for the checkout session via Stripe API
+		iter := s.sc.CheckoutSessions.List(&stripe.CheckoutSessionListParams{
+			PaymentIntent: stripe.String(piID),
+		})
+		if iter.Next() {
+			sess := iter.CheckoutSession()
+			sessionID = sess.ID
+		}
+		if err := iter.Err(); err != nil {
+			log.With(sl.Err(err)).Error("list checkout sessions for payment intent")
+		}
+	}
+
+	if sessionID == "" {
+		log.Warn("no checkout session found for payment intent")
 		return nil
 	}
 
-	// Build params from the PaymentIntent data
-	params = &entity.CheckoutParams{
-		OrderId:   orderId,
-		PaymentId: pi.ID,
-		EventId:   evt.ID,
-		Total:     pi.Amount,
-		Currency:  string(pi.Currency),
-		Status:    string(pi.Status),
-		Created:   time.Now(),
-		Modified:  time.Now(),
-		Source:    entity.SourceStripe,
-		Payload:   pi,
+	// Look up the saved checkout params by session_id
+	var params *entity.CheckoutParams
+	if s.db != nil {
+		params, _ = s.db.GetCheckoutParamsSession(sessionID)
 	}
 
-	if s.testMode && !strings.HasPrefix(params.OrderId, "test_") {
-		params.OrderId = "test_" + params.OrderId
+	if params == nil || params.OrderId == "" {
+		log.With(slog.String("session_id", sessionID)).Warn("checkout params not found in database")
+		return nil
 	}
+
+	// Update with payment intent data
+	params.PaymentId = pi.ID
+	params.EventId = evt.ID
+	params.Status = string(pi.Status)
+	params.Total = pi.Amount
+	params.Modified = time.Now()
 
 	s.saveCheckoutParams(params)
 
 	log.With(
 		slog.String("order_id", params.OrderId),
+		slog.String("session_id", sessionID),
 		slog.Int64("amount", pi.Amount),
 	).Info("hold confirmed, payment intent capturable")
 
