@@ -220,30 +220,28 @@ func (s *StripeClient) handleAmountCapturable(evt *stripe.Event) *entity.Checkou
 		slog.String("status", string(pi.Status)),
 	).Debug("payment intent amount capturable")
 
-	// Deduplication: check if this event was already processed
-	if s.db != nil {
-		existing, _ := s.db.GetCheckoutParamsForEvent(evt.ID)
-		if existing != nil && existing.OrderId != "" {
-			log.With(slog.String("order_id", existing.OrderId)).Debug("event already processed")
-			return existing
-		}
+	if s.db == nil {
+		log.Warn("database not configured")
+		return nil
 	}
 
-	// Find the checkout session that created this PaymentIntent.
-	// The session was saved to MongoDB during hold creation and contains the order_id.
-	sessionID := evt.GetObjectValue("latest_charge", "payment_intent")
-	if sessionID == "" {
-		// Search for the checkout session via Stripe API
-		iter := s.sc.CheckoutSessions.List(&stripe.CheckoutSessionListParams{
-			PaymentIntent: stripe.String(piID),
-		})
-		if iter.Next() {
-			sess := iter.CheckoutSession()
-			sessionID = sess.ID
-		}
-		if err := iter.Err(); err != nil {
-			log.With(sl.Err(err)).Error("list checkout sessions for payment intent")
-		}
+	// Deduplication: check if this event was already processed
+	existing, _ := s.db.GetCheckoutParamsForEvent(evt.ID)
+	if existing != nil && existing.OrderId != "" {
+		log.With(slog.String("order_id", existing.OrderId)).Debug("event already processed")
+		return existing
+	}
+
+	// Find the checkout session that created this PaymentIntent via Stripe API
+	iter := s.sc.CheckoutSessions.List(&stripe.CheckoutSessionListParams{
+		PaymentIntent: stripe.String(piID),
+	})
+	var sessionID string
+	if iter.Next() {
+		sessionID = iter.CheckoutSession().ID
+	}
+	if err := iter.Err(); err != nil {
+		log.With(sl.Err(err)).Error("list checkout sessions for payment intent")
 	}
 
 	if sessionID == "" {
@@ -251,10 +249,13 @@ func (s *StripeClient) handleAmountCapturable(evt *stripe.Event) *entity.Checkou
 		return nil
 	}
 
+	log.With(slog.String("session_id", sessionID)).Debug("found checkout session")
+
 	// Look up the saved checkout params by session_id
-	var params *entity.CheckoutParams
-	if s.db != nil {
-		params, _ = s.db.GetCheckoutParamsSession(sessionID)
+	params, err := s.db.GetCheckoutParamsSession(sessionID)
+	if err != nil {
+		log.With(sl.Err(err), slog.String("session_id", sessionID)).Error("get checkout params from database")
+		return nil
 	}
 
 	if params == nil || params.OrderId == "" {
