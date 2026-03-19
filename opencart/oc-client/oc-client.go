@@ -290,6 +290,17 @@ func (oc *Opencart) SaveInvoiceId(orderId string, invoiceId, invoiceFile string)
 	return oc.db.UpdateInvoice(id, invoiceId, invoiceFile)
 }
 
+func (oc *Opencart) SavePaymentData(orderId string, paymentId, status string, amount int64) error {
+	if oc.db == nil || orderId == "" {
+		return nil
+	}
+	id, err := strconv.ParseInt(orderId, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid order id: %s", orderId)
+	}
+	return oc.db.UpdatePayment(id, paymentId, status, amount)
+}
+
 func (oc *Opencart) UpdateOrderWithProforma(orderId int64, proformaId, proformaFile string) error {
 	return oc.db.UpdateProforma(orderId, proformaId, proformaFile)
 }

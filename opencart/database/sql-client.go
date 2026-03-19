@@ -77,6 +77,15 @@ func NewSQLClient(conf *config.Config) (*MySql, error) {
 	if err = sdb.addColumnIfNotExists("order", "wf_file_invoice", "VARCHAR(64) NOT NULL DEFAULT ''"); err != nil {
 		return nil, err
 	}
+	if err = sdb.addColumnIfNotExists("order", "wf_payment_status", "VARCHAR(32) NOT NULL DEFAULT ''"); err != nil {
+		return nil, err
+	}
+	if err = sdb.addColumnIfNotExists("order", "wf_payment_id", "VARCHAR(64) NOT NULL DEFAULT ''"); err != nil {
+		return nil, err
+	}
+	if err = sdb.addColumnIfNotExists("order", "wf_payment_amount", "BIGINT NOT NULL DEFAULT 0"); err != nil {
+		return nil, err
+	}
 
 	loc, err := time.LoadLocation(conf.Location)
 	if err != nil {
@@ -394,6 +403,18 @@ func (s *MySql) UpdateInvoice(orderId int64, invoiceId, invoiceFile string) erro
 		return err
 	}
 	_, err = stmt.Exec(invoiceId, invoiceFile, orderId)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *MySql) UpdatePayment(orderId int64, paymentId, status string, amount int64) error {
+	stmt, err := s.stmtUpdateOrderPayment()
+	if err != nil {
+		return err
+	}
+	_, err = stmt.Exec(status, paymentId, amount, orderId)
 	if err != nil {
 		return err
 	}

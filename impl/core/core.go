@@ -95,6 +95,20 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 		return
 	}
 
+	// save payment data to OpenCart regardless of paid status
+	if c.oc != nil && params.OrderId != "" {
+		status := "pending"
+		if params.Paid {
+			status = "paid"
+		}
+		if err := c.oc.SavePaymentData(params.OrderId, params.PaymentId, status, params.Total); err != nil {
+			c.log.With(
+				sl.Err(err),
+				slog.String("order_id", params.OrderId),
+			).Error("save payment data")
+		}
+	}
+
 	if !params.Paid {
 		return
 	}
