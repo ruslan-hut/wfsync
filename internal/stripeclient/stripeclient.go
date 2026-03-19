@@ -263,14 +263,17 @@ func (s *StripeClient) handleAmountCapturable(evt *stripe.Event) *entity.Checkou
 		return nil
 	}
 
-	// Update with payment intent data
+	// Update existing record with payment intent data
 	params.PaymentId = pi.ID
 	params.EventId = evt.ID
 	params.Status = string(pi.Status)
 	params.Total = pi.Amount
 	params.Modified = time.Now()
 
-	s.saveCheckoutParams(params)
+	// Save using session_id filter to update the existing record (not insert a new one)
+	if err = s.db.SaveCheckoutParams(params); err != nil {
+		log.With(sl.Err(err)).Error("update checkout params")
+	}
 
 	log.With(
 		slog.String("order_id", params.OrderId),

@@ -158,8 +158,18 @@ func (m *MongoDB) SaveCheckoutParams(params *entity.CheckoutParams) error {
 
 	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
 
-	// When event_id is present, upsert to avoid duplicate records from the same Stripe event
-	// (the webhook handler saves first, then the invoice flow updates the same document).
+	// Prefer session_id as the upsert key when available — the hold record is created
+	// with session_id before any event_id exists, so subsequent webhook updates
+	// must match on session_id to update the same document.
+	if params.SessionId != "" {
+		filter := bson.D{{"session_id", params.SessionId}}
+		update := bson.D{{"$set", params}}
+		opts := options.Update().SetUpsert(true)
+		_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+		return err
+	}
+
+	// Fallback: upsert by event_id for records without a session (e.g. invoice webhooks)
 	if params.EventId != "" {
 		filter := bson.D{{"event_id", params.EventId}}
 		update := bson.D{{"$set", params}}
