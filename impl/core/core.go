@@ -19,6 +19,11 @@ import (
 	"github.com/stripe/stripe-go/v76"
 )
 
+const (
+	// OrderStatusHoldConfirmed is the OpenCart order status set when a Stripe hold is successfully confirmed.
+	OrderStatusHoldConfirmed = 17
+)
+
 type AuthService interface {
 	UserByToken(token string) (*entity.User, error)
 }
@@ -109,6 +114,18 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 				sl.Err(err),
 				slog.String("order_id", params.OrderId),
 			).Error("save payment data")
+		}
+
+		// Update OpenCart order status when hold is confirmed
+		if params.Status == string(stripe.PaymentIntentStatusRequiresCapture) {
+			comment := fmt.Sprintf("Hold confirmed: %d %s (pi: %s)",
+				params.Total, params.Currency, params.PaymentId)
+			if err := c.oc.ChangeOrderStatus(params.OrderId, OrderStatusHoldConfirmed, comment); err != nil {
+				c.log.With(
+					sl.Err(err),
+					slog.String("order_id", params.OrderId),
+				).Error("change order status")
+			}
 		}
 	}
 

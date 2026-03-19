@@ -292,6 +292,18 @@ func (oc *Opencart) SaveInvoiceId(orderId string, invoiceId, invoiceFile string)
 	return oc.db.UpdateInvoice(id, invoiceId, invoiceFile)
 }
 
+func (oc *Opencart) ChangeOrderStatus(orderId string, statusId int, comment string) error {
+	if oc.db == nil || orderId == "" {
+		return nil
+	}
+	orderId = strings.TrimPrefix(orderId, "test_")
+	id, err := strconv.ParseInt(orderId, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid order id: %s", orderId)
+	}
+	return oc.db.ChangeOrderStatus(id, statusId, comment)
+}
+
 func (oc *Opencart) SavePaymentData(orderId string, paymentId, status string, amount int64) error {
 	if oc.db == nil || orderId == "" {
 		return nil
