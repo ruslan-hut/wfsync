@@ -109,7 +109,7 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 		if params.Paid {
 			status = "paid"
 		}
-		if err := c.oc.SavePaymentData(params.OrderId, params.PaymentId, status, params.Total); err != nil {
+		if err := c.oc.SavePaymentData(params.OrderId, params.PaymentId, params.SessionId, status, params.Total); err != nil {
 			c.log.With(
 				sl.Err(err),
 				slog.String("order_id", params.OrderId),

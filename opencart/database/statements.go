@@ -81,7 +81,8 @@ func (s *MySql) stmtUpdateOrderPayment() (*sql.Stmt, error) {
 		`UPDATE %sorder SET
                    wf_payment_status = ?,
                    wf_payment_id = ?,
-                   wf_payment_amount = ?
+                   wf_payment_amount = ?,
+                   wf_payment_session = ?
                    WHERE order_id = ?`,
 		s.prefix,
 	)

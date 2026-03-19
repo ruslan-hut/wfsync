@@ -304,7 +304,7 @@ func (oc *Opencart) ChangeOrderStatus(orderId string, statusId int, comment stri
 	return oc.db.ChangeOrderStatus(id, statusId, comment)
 }
 
-func (oc *Opencart) SavePaymentData(orderId string, paymentId, status string, amount int64) error {
+func (oc *Opencart) SavePaymentData(orderId string, paymentId, sessionId, status string, amount int64) error {
 	if oc.db == nil || orderId == "" {
 		return nil
 	}
@@ -313,7 +313,7 @@ func (oc *Opencart) SavePaymentData(orderId string, paymentId, status string, am
 	if err != nil {
 		return fmt.Errorf("invalid order id: %s", orderId)
 	}
-	return oc.db.UpdatePayment(id, paymentId, status, amount)
+	return oc.db.UpdatePayment(id, paymentId, sessionId, status, amount)
 }
 
 func (oc *Opencart) UpdateOrderWithProforma(orderId int64, proformaId, proformaFile string) error {
