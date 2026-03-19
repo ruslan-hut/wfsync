@@ -199,24 +199,72 @@ func (s *StripeClient) handleInvoiceFinalized(evt *stripe.Event) *entity.Checkou
 }
 
 func (s *StripeClient) handleAmountCapturable(evt *stripe.Event) *entity.CheckoutParams {
-	invID := evt.GetObjectValue("id")
+	piID := evt.GetObjectValue("id")
 	log := s.log.With(
 		slog.Any("event_type", evt.Type),
 		slog.String("event_id", evt.ID),
-		slog.String("id", invID),
+		slog.String("payment_intent_id", piID),
 	)
-	pi, err := s.sc.PaymentIntents.Get(invID, nil)
+
+	pi, err := s.sc.PaymentIntents.Get(piID, nil)
 	if err != nil {
 		log.With(
 			sl.Err(err),
 		).Error("get payment intent from stripe")
+		return nil
 	}
+
 	log.With(
 		slog.Int64("amount", pi.Amount),
 		slog.String("currency", string(pi.Currency)),
 		slog.String("status", string(pi.Status)),
-	).Debug("fetching payment intent from stripe")
-	return nil
+	).Debug("payment intent amount capturable")
+
+	// Find the existing checkout params saved during hold creation.
+	// The checkout session ID is stored in the PaymentIntent's metadata
+	// or we can look it up from the latest_checkout session.
+	var params *entity.CheckoutParams
+
+	// Try to find by event ID first (deduplication)
+	params, _ = s.db.GetCheckoutParamsForEvent(evt.ID)
+	if params != nil && params.OrderId != "" {
+		log.With(slog.String("order_id", params.OrderId)).Debug("event already processed")
+		return params
+	}
+
+	// Look up by checkout session from the PaymentIntent metadata
+	orderId := pi.Metadata["order_id"]
+	if orderId == "" {
+		log.Warn("no order_id in payment intent metadata")
+		return nil
+	}
+
+	// Build params from the PaymentIntent data
+	params = &entity.CheckoutParams{
+		OrderId:   orderId,
+		PaymentId: pi.ID,
+		EventId:   evt.ID,
+		Total:     pi.Amount,
+		Currency:  string(pi.Currency),
+		Status:    string(pi.Status),
+		Created:   time.Now(),
+		Modified:  time.Now(),
+		Source:    entity.SourceStripe,
+		Payload:   pi,
+	}
+
+	if s.testMode && !strings.HasPrefix(params.OrderId, "test_") {
+		params.OrderId = "test_" + params.OrderId
+	}
+
+	s.saveCheckoutParams(params)
+
+	log.With(
+		slog.String("order_id", params.OrderId),
+		slog.Int64("amount", pi.Amount),
+	).Info("hold confirmed, payment intent capturable")
+
+	return params
 }
 
 func (s *StripeClient) checkCustomer(sess *stripe.CheckoutSession) {

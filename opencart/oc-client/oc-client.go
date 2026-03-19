@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -283,6 +284,7 @@ func (oc *Opencart) SaveInvoiceId(orderId string, invoiceId, invoiceFile string)
 	if oc.db == nil || orderId == "" {
 		return nil
 	}
+	orderId = strings.TrimPrefix(orderId, "test_")
 	id, err := strconv.ParseInt(orderId, 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid order id: %s", orderId)
@@ -294,6 +296,7 @@ func (oc *Opencart) SavePaymentData(orderId string, paymentId, status string, am
 	if oc.db == nil || orderId == "" {
 		return nil
 	}
+	orderId = strings.TrimPrefix(orderId, "test_")
 	id, err := strconv.ParseInt(orderId, 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid order id: %s", orderId)
