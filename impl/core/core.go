@@ -384,11 +384,29 @@ func (c *Core) StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment,
 }
 
 func (c *Core) StripeCaptureAmount(sessionId string, amount int64) (*entity.Payment, error) {
-	return c.sc.CaptureAmount(sessionId, amount)
+	pm, err := c.sc.CaptureAmount(sessionId, amount)
+	if err != nil {
+		return nil, err
+	}
+	if c.oc != nil && pm.OrderId != "" {
+		if saveErr := c.oc.SavePaymentData(pm.OrderId, pm.Id, sessionId, "paid", pm.Amount); saveErr != nil {
+			c.log.With(sl.Err(saveErr), slog.String("order_id", pm.OrderId)).Error("update payment status after capture")
+		}
+	}
+	return pm, nil
 }
 
 func (c *Core) StripeCancelPayment(sessionId, reason string) (*entity.Payment, error) {
-	return c.sc.CancelPayment(sessionId, reason)
+	pm, err := c.sc.CancelPayment(sessionId, reason)
+	if err != nil {
+		return nil, err
+	}
+	if c.oc != nil && pm.OrderId != "" {
+		if saveErr := c.oc.SavePaymentData(pm.OrderId, pm.Id, sessionId, "canceled", pm.Amount); saveErr != nil {
+			c.log.With(sl.Err(saveErr), slog.String("order_id", pm.OrderId)).Error("update payment status after cancel")
+		}
+	}
+	return pm, nil
 }
 
 func (c *Core) StripePayAmount(_ context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
