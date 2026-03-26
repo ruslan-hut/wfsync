@@ -61,9 +61,13 @@ func (c *Client) RegisterProforma(ctx context.Context, params *entity.CheckoutPa
 	return c.invoice(ctx, invoiceProforma, params)
 }
 
-// maxInvoiceItems is the maximum number of line items per single wFirma invoice.
-// Orders exceeding this limit are split into multiple invoices with part numbers.
-const maxInvoiceItems = 200
+// softInvoiceLimit is the threshold below which an order is sent as a single invoice
+// even if it exceeds maxInvoiceItems. Orders with fewer than softInvoiceLimit items
+// are never split; orders at or above it are split into chunks of maxInvoiceItems.
+const (
+	maxInvoiceItems  = 200
+	softInvoiceLimit = 220
+)
 
 // invoice builds and sends an invoices/add request to the wFirma API.
 // Flow: validate params → find/create contractor → build invoice with contents → POST to API → persist result.
@@ -236,7 +240,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	paymentDate := now.AddDate(0, 0, defaultPaymentDays).Format("2006-01-02")
 
 	// Split contents into chunks of maxInvoiceItems.
-	chunks := chunkContents(contents, maxInvoiceItems)
+	chunks := chunkContents(contents, maxInvoiceItems, softInvoiceLimit)
 	totalParts := len(chunks)
 
 	var firstPayment *entity.Payment
@@ -420,8 +424,9 @@ func (c *Client) submitInvoice(ctx context.Context, log *slog.Logger, inv *Invoi
 }
 
 // chunkContents splits a slice of content lines into chunks of at most size elements.
-func chunkContents(contents []*ContentLine, size int) [][]*ContentLine {
-	if len(contents) <= size {
+// If the total number of items is below softLimit, no split is performed.
+func chunkContents(contents []*ContentLine, size, softLimit int) [][]*ContentLine {
+	if len(contents) < softLimit {
 		return [][]*ContentLine{contents}
 	}
 	var chunks [][]*ContentLine
