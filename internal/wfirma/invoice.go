@@ -61,8 +61,18 @@ func (c *Client) RegisterProforma(ctx context.Context, params *entity.CheckoutPa
 	return c.invoice(ctx, invoiceProforma, params)
 }
 
+// softInvoiceLimit is the threshold below which an order is sent as a single invoice
+// even if it exceeds maxInvoiceItems. Orders with fewer than softInvoiceLimit items
+// are never split; orders at or above it are split into chunks of maxInvoiceItems.
+const (
+	maxInvoiceItems  = 200
+	softInvoiceLimit = 220
+)
+
 // invoice builds and sends an invoices/add request to the wFirma API.
 // Flow: validate params → find/create contractor → build invoice with contents → POST to API → persist result.
+// Orders with more than maxInvoiceItems line items are automatically split into
+// multiple invoices, each annotated with a part number in the description.
 func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entity.CheckoutParams) (*entity.Payment, error) {
 	log := c.log.With(slog.String("session_id", params.SessionId), slog.String("order_id", params.OrderId))
 	defer func() {
@@ -224,38 +234,112 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		})
 	}
 
-	total := float64(params.Total) / 100.0
 	now := time.Now()
 	issueDate := now.Format("2006-01-02")
 	disposalDate := params.Created.Format("2006-01-02")
 	paymentDate := now.AddDate(0, 0, defaultPaymentDays).Format("2006-01-02")
 
-	invoice := &Invoice{
-		Contractor:    contractor,
-		Type:          string(invType),
-		PriceType:     "brutto",
-		PaymentMethod: defaultPaymentMethod,
-		PaymentDate:   paymentDate,
-		DisposalDate:  disposalDate, // date of sale reflects the original order date
-		Total:         total,
-		IdExternal:    params.OrderId,
-		Description:   "Numer zamówienia: " + params.OrderId,
-		Date:          issueDate,
-		Currency:      strings.ToUpper(params.Currency),
-		Contents:      contents,
+	// Split contents into chunks of maxInvoiceItems.
+	chunks := chunkContents(contents, maxInvoiceItems, softInvoiceLimit)
+	totalParts := len(chunks)
+
+	var firstPayment *entity.Payment
+
+	for partIdx, chunk := range chunks {
+		partNum := partIdx + 1
+
+		// Calculate the total for this chunk from its line items.
+		var chunkTotal float64
+		for _, cl := range chunk {
+			chunkTotal += cl.Content.Price * float64(cl.Content.Count)
+		}
+
+		description := "Numer zamówienia: " + params.OrderId
+		if totalParts > 1 {
+			description = fmt.Sprintf("Numer zamówienia: %s (część %d/%d)", params.OrderId, partNum, totalParts)
+		}
+
+		inv := &Invoice{
+			Contractor:    contractor,
+			Type:          string(invType),
+			PriceType:     "brutto",
+			PaymentMethod: defaultPaymentMethod,
+			PaymentDate:   paymentDate,
+			DisposalDate:  disposalDate,
+			Total:         chunkTotal,
+			IdExternal:    params.OrderId,
+			Description:   description,
+			Date:          issueDate,
+			Currency:      strings.ToUpper(params.Currency),
+			Contents:      chunk,
+		}
+
+		if isOSS {
+			inv.VatMossDetails = buildVatMossDetails(params.ClientDetails, countryCode)
+		}
+
+		resultInv, err := c.submitInvoice(ctx, log, inv, chunk)
+		if err != nil {
+			return nil, err
+		}
+
+		inv.Id = resultInv.Id
+		inv.Number = resultInv.Number
+
+		if c.db != nil {
+			if saveErr := c.db.SaveInvoice(inv.Id, inv); saveErr != nil {
+				log.Error("save invoice", sl.Err(saveErr))
+			}
+		}
+
+		c.log.With(
+			slog.String("wfirma_id", inv.Id),
+			slog.String("wfirma_number", inv.Number),
+			slog.String("order_id", params.OrderId),
+			slog.String("total", fmt.Sprintf("%.2f", chunkTotal)),
+			slog.String("tax", goodsVat),
+			slog.Bool("oss", isOSS),
+			slog.String("email", params.ClientDetails.Email),
+			slog.String("name", params.ClientDetails.Name),
+			slog.String("country", params.ClientDetails.Country),
+			slog.String("tax_id", params.ClientDetails.TaxId),
+			slog.String("customer_group", formatCustomerGroup(params.CustomerGroup)),
+			slog.String("currency", params.Currency),
+			slog.String("part", fmt.Sprintf("%d/%d", partNum, totalParts)),
+			slog.String("tg_topic", entity.TopicInvoice),
+		).Info("invoice created")
+
+		if firstPayment == nil {
+			firstPayment = &entity.Payment{
+				Amount:  int64(chunkTotal * 100),
+				Id:      inv.Id,
+				OrderId: params.OrderId,
+			}
+		}
 	}
 
-	// OSS invoices require vat_moss_details with evidence of the buyer's country.
-	if isOSS {
-		invoice.VatMossDetails = buildVatMossDetails(params.ClientDetails, countryCode)
+	// Persist the first invoice ID back to checkout params.
+	if c.db != nil && firstPayment != nil {
+		if invType == invoiceProforma {
+			params.ProformaId = firstPayment.Id
+		} else {
+			params.InvoiceId = firstPayment.Id
+		}
+		if err := c.db.UpdateCheckoutParams(params); err != nil {
+			log.Error("update checkout params", sl.Err(err))
+		}
 	}
 
+	return firstPayment, nil
+}
+
+// submitInvoice sends an invoices/add request and handles error responses,
+// including automatic retry without Good references on stock errors.
+func (c *Client) submitInvoice(ctx context.Context, log *slog.Logger, inv *Invoice, contents []*ContentLine) (*InvoiceData, error) {
 	addPayload := map[string]interface{}{
 		"api": map[string]interface{}{
 			"invoices": []map[string]interface{}{
-				{
-					"invoice": invoice,
-				},
+				{"invoice": inv},
 			},
 		},
 	}
@@ -272,12 +356,9 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		return nil, fmt.Errorf("unmarshal invoice response: %w", err)
 	}
 
-	// Check top-level status first.
 	if addResp.Status.Code == "ERROR" {
 		errMsg := extractInvoiceErrors(&addResp)
 
-		// If the error is a stock error, retry without the Good reference on affected items.
-		// This sends them as plain text line items, bypassing wFirma stock tracking.
 		stockErrIdxs := extractStockErrorIndices(&addResp)
 		if len(stockErrIdxs) > 0 {
 			log.With(
@@ -290,14 +371,12 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 					contents[idx].Content.Good = nil
 				}
 			}
-			invoice.Contents = contents
+			inv.Contents = contents
 
 			addPayload = map[string]interface{}{
 				"api": map[string]interface{}{
 					"invoices": []map[string]interface{}{
-						{
-							"invoice": invoice,
-						},
+						{"invoice": inv},
 					},
 				},
 			}
@@ -332,69 +411,33 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		}
 	}
 
-	var resultInvoice InvoiceData
+	var result InvoiceData
 	if wrapper, ok := addResp.Invoices["0"]; ok {
-		resultInvoice = wrapper.Invoice
+		result = wrapper.Invoice
 	}
-	if resultInvoice.Id == "" {
+	if result.Id == "" {
 		log.With(slog.String("response", string(addRes))).Warn("no invoice id in response")
 		return nil, fmt.Errorf("no invoice id returned from wFirma")
 	}
 
-	invoice.Id = resultInvoice.Id
-	invoice.Number = resultInvoice.Number
+	return &result, nil
+}
 
-	if c.db != nil {
-		err = c.db.SaveInvoice(invoice.Id, invoice)
-		if err != nil {
-			log.Error("save invoice",
-				sl.Err(err))
-		}
-		if invType == invoiceProforma {
-			params.ProformaId = invoice.Id
-		} else {
-			params.InvoiceId = invoice.Id
-		}
-		err = c.db.UpdateCheckoutParams(params)
-		if err != nil {
-			log.Error("update checkout params",
-				sl.Err(err))
-		}
+// chunkContents splits a slice of content lines into chunks of at most size elements.
+// If the total number of items is below softLimit, no split is performed.
+func chunkContents(contents []*ContentLine, size, softLimit int) [][]*ContentLine {
+	if len(contents) < softLimit {
+		return [][]*ContentLine{contents}
 	}
-
-	payment := &entity.Payment{
-		Amount:  int64(invoice.Total * 100),
-		Id:      invoice.Id,
-		OrderId: params.OrderId,
+	var chunks [][]*ContentLine
+	for i := 0; i < len(contents); i += size {
+		end := i + size
+		if end > len(contents) {
+			end = len(contents)
+		}
+		chunks = append(chunks, contents[i:end])
 	}
-
-	c.log.With(
-		slog.String("wfirma_id", invoice.Id),
-		slog.String("wfirma_number", invoice.Number),
-		slog.String("order_id", params.OrderId),
-		slog.String("total", fmt.Sprintf("%.2f", total)),
-		slog.String("tax", goodsVat),
-		slog.Bool("oss", isOSS),
-		slog.String("email", params.ClientDetails.Email),
-		slog.String("name", params.ClientDetails.Name),
-		slog.String("country", params.ClientDetails.Country),
-		slog.String("tax_id", params.ClientDetails.TaxId),
-		slog.String("customer_group", formatCustomerGroup(params.CustomerGroup)),
-		slog.String("currency", params.Currency),
-		slog.String("tg_topic", entity.TopicInvoice),
-	).Info("invoice created")
-
-	// *** payment creation is disabled ***
-	//if params.Paid {
-	//	err = c.addPayment(ctx, *invoice)
-	//	if err != nil {
-	//		log.Error("add payment",
-	//			slog.String("wfirma_id", invoice.Id),
-	//			sl.Err(err))
-	//	}
-	//}
-
-	return payment, nil
+	return chunks
 }
 
 // truncateBody shortens a response body for logging. If the body exceeds 500 chars,
