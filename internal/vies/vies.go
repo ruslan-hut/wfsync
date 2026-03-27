@@ -135,7 +135,7 @@ func (s *Service) ValidateTaxId(taxId string) bool {
 		slog.String("name", validation.Name),
 		slog.Bool("valid", validation.Valid),
 		slog.String("validated_at", validation.ValidatedAt.Format(time.RFC3339)),
-	).Info("VIES validation passed")
+	).Info("VIES validation completed")
 
 	return resp.IsValid
 }
