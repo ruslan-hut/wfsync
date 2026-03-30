@@ -8,11 +8,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"time"
 	"wfsync/entity"
 	"wfsync/internal/config"
 	"wfsync/internal/stripeclient"
+	"wfsync/internal/wfirma"
 	"wfsync/lib/sl"
 	occlient "wfsync/opencart/oc-client"
 
@@ -34,12 +36,19 @@ type InvoiceService interface {
 	RegisterProforma(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 	SyncFromRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
 	SyncToRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
+	FindInvoices(ctx context.Context, from, to string) ([]*entity.LocalInvoice, error)
+}
+
+// PaymentDatabase provides access to payment-related data in MongoDB.
+type PaymentDatabase interface {
+	GetStripeOrderIds(orderIds []string) (map[string]bool, error)
 }
 
 type Core struct {
 	sc         *stripeclient.StripeClient
 	oc         *occlient.Opencart
 	inv        InvoiceService
+	db         PaymentDatabase
 	auth       AuthService
 	retryQueue *RetryQueue
 	filePath   string
@@ -65,6 +74,10 @@ func (c *Core) SetInvoiceService(inv InvoiceService) {
 
 func (c *Core) SetAuthService(auth AuthService) {
 	c.auth = auth
+}
+
+func (c *Core) SetPaymentDatabase(db PaymentDatabase) {
+	c.db = db
 }
 
 func (c *Core) SetRetryQueue(rq *RetryQueue) {
@@ -494,6 +507,127 @@ func (c *Core) B2BCreateProforma(ctx context.Context, order *entity.B2BOrder) (*
 func (c *Core) B2BCreateInvoice(ctx context.Context, order *entity.B2BOrder) (*entity.Payment, error) {
 	params := order.ToCheckoutParams()
 	return c.WFirmaRegisterInvoice(ctx, params)
+}
+
+// InvoiceList returns a merged invoice list from WFirma, OpenCart, and MongoDB.
+// WFirma is the preferred source for contractor name and date when both sources have data.
+func (c *Core) InvoiceList(ctx context.Context, from, to string) ([]*entity.InvoiceListItem, error) {
+	if c.inv == nil {
+		return nil, fmt.Errorf("invoice service not connected")
+	}
+
+	// Step 1: fetch WFirma invoices
+	wfInvoices, err := c.inv.FindInvoices(ctx, from, to)
+	if err != nil {
+		c.log.With(sl.Err(err)).Warn("find wfirma invoices for list")
+		wfInvoices = nil // continue without wfirma data
+	}
+
+	// Index WFirma invoices by IdExternal (order_id)
+	wfByOrder := make(map[string]*entity.LocalInvoice, len(wfInvoices))
+	wfMatched := make(map[string]bool)
+	for _, inv := range wfInvoices {
+		if inv.IdExternal != "" {
+			wfByOrder[inv.IdExternal] = inv
+		}
+	}
+
+	// Step 2: fetch OpenCart orders
+	var ocOrders []*entity.OrderSummary
+	if c.oc != nil {
+		ocOrders, err = c.oc.GetOrdersByDateRange(from, to)
+		if err != nil {
+			c.log.With(sl.Err(err)).Warn("get opencart orders for list")
+			ocOrders = nil
+		}
+	}
+
+	// Collect all order IDs for MongoDB lookup
+	orderIds := make([]string, 0, len(ocOrders)+len(wfInvoices))
+	for _, o := range ocOrders {
+		orderIds = append(orderIds, o.OrderId)
+	}
+	for _, inv := range wfInvoices {
+		if inv.IdExternal != "" {
+			orderIds = append(orderIds, inv.IdExternal)
+		}
+	}
+
+	// Step 3: fetch Stripe info from MongoDB
+	var stripeOrders map[string]bool
+	if c.db != nil && len(orderIds) > 0 {
+		stripeOrders, err = c.db.GetStripeOrderIds(orderIds)
+		if err != nil {
+			c.log.With(sl.Err(err)).Warn("get stripe order ids for list")
+		}
+	}
+
+	// Step 4: merge
+	var items []*entity.InvoiceListItem
+
+	// Process OpenCart orders first
+	for _, oc := range ocOrders {
+		item := &entity.InvoiceListItem{
+			Date:           oc.DateAdded.Format("2006-01-02"),
+			OrderStatus:    oc.OrderStatus,
+			OrderId:        oc.OrderId,
+			ContractorName: oc.ClientName,
+			IsB2B:          wfirma.IsB2BCustomerGroup(oc.CustomerGroup),
+			IsStripe:       stripeOrders[oc.OrderId],
+			Currency:       oc.Currency,
+		}
+		if oc.Currency == "PLN" {
+			item.TotalPLN = oc.Total
+		} else if oc.Currency == "EUR" {
+			item.TotalEUR = oc.Total
+		}
+
+		// If WFirma invoice exists for this order, prefer WFirma data
+		if wf, ok := wfByOrder[oc.OrderId]; ok {
+			wfMatched[oc.OrderId] = true
+			item.InvoiceNumber = wf.Number
+			item.Date = wf.Date // prefer WFirma date
+			if wf.Contractor != nil && wf.Contractor.Name != "" {
+				item.ContractorName = wf.Contractor.Name // prefer WFirma contractor
+			}
+		} else if oc.InvoiceId != "" {
+			// OpenCart has wf_invoice but not found in WFirma date range
+			item.InvoiceNumber = oc.InvoiceId
+		}
+
+		items = append(items, item)
+	}
+
+	// Add WFirma-only invoices (not matched by OpenCart)
+	for _, inv := range wfInvoices {
+		if inv.IdExternal != "" && wfMatched[inv.IdExternal] {
+			continue
+		}
+		item := &entity.InvoiceListItem{
+			Date:          inv.Date,
+			OrderId:       inv.IdExternal,
+			InvoiceNumber: inv.Number,
+			IsStripe:      stripeOrders[inv.IdExternal],
+			Currency:      inv.Currency,
+		}
+		if inv.Contractor != nil {
+			item.ContractorName = inv.Contractor.Name
+		}
+		total := int64(inv.Total * 100)
+		if inv.Currency == "PLN" {
+			item.TotalPLN = total
+		} else if inv.Currency == "EUR" {
+			item.TotalEUR = total
+		}
+		items = append(items, item)
+	}
+
+	// Sort by date ascending
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Date < items[j].Date
+	})
+
+	return items, nil
 }
 
 func (c *Core) WFirmaSyncFromRemote(ctx context.Context, from, to string) (*entity.SyncResult, error) {

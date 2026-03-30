@@ -108,6 +108,9 @@ func main() {
 	handler := core.New(conf, log)
 	handler.SetStripeClient(stripeClient)
 	handler.SetInvoiceService(wfirmaClient)
+	if mongo != nil {
+		handler.SetPaymentDatabase(mongo)
+	}
 	handler.SetOpencart(oc)
 
 	var retryQueue *core.RetryQueue

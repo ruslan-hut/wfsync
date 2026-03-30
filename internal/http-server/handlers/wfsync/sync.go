@@ -19,6 +19,7 @@ import (
 type Core interface {
 	WFirmaSyncFromRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
 	WFirmaSyncToRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
+	InvoiceList(ctx context.Context, from, to string) ([]*entity.InvoiceListItem, error)
 }
 
 var datePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
@@ -92,6 +93,44 @@ func SyncToRemote(logger *slog.Logger, handler Core) http.HandlerFunc {
 		if err != nil {
 			log.Error("sync to remote", sl.Err(err))
 			render.JSON(w, r, response.Error(fmt.Sprintf("Sync failed: %v", err)))
+			return
+		}
+
+		render.JSON(w, r, response.Ok(result))
+	}
+}
+
+// InvoiceList handles GET /v1/wf/list — returns merged invoice list from WFirma + OpenCart + MongoDB.
+func InvoiceList(logger *slog.Logger, handler Core) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		mod := sl.Module("http.handlers.wfsync")
+		user := cont.GetUser(r.Context())
+
+		log := logger.With(
+			mod,
+			slog.String("request_id", middleware.GetReqID(r.Context())),
+			slog.String("user", user.Username),
+		)
+
+		if !user.WFirmaAllowInvoice {
+			log.Warn("invoice list not allowed")
+			render.Status(r, 403)
+			render.JSON(w, r, response.Error("Invoice list not allowed"))
+			return
+		}
+
+		from := r.URL.Query().Get("from")
+		to := r.URL.Query().Get("to")
+		if !datePattern.MatchString(from) || !datePattern.MatchString(to) {
+			render.Status(r, 400)
+			render.JSON(w, r, response.Error("Invalid date format, expected YYYY-MM-DD"))
+			return
+		}
+
+		result, err := handler.InvoiceList(r.Context(), from, to)
+		if err != nil {
+			log.Error("invoice list", sl.Err(err))
+			render.JSON(w, r, response.Error(fmt.Sprintf("Request failed: %v", err)))
 			return
 		}
 

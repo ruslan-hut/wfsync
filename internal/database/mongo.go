@@ -233,6 +233,47 @@ func (m *MongoDB) GetCheckoutParamsSession(sessionId string) (*entity.CheckoutPa
 	return &params, nil
 }
 
+// GetStripeOrderIds returns a set of order IDs that have a non-empty session_id
+// in the checkout_params collection. Used to determine which orders were paid via Stripe.
+func (m *MongoDB) GetStripeOrderIds(orderIds []string) (map[string]bool, error) {
+	if len(orderIds) == 0 {
+		return nil, nil
+	}
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
+	filter := bson.D{
+		{"order_id", bson.D{{"$in", orderIds}}},
+		{"session_id", bson.D{{"$ne", ""}}},
+	}
+
+	cursor, err := collection.Find(m.ctx, filter, options.Find().SetProjection(bson.D{{"order_id", 1}}))
+	if err != nil {
+		return nil, err
+	}
+	defer func(cursor *mongo.Cursor, ctx context.Context) {
+		_ = cursor.Close(ctx)
+	}(cursor, m.ctx)
+
+	result := make(map[string]bool)
+	for cursor.Next(m.ctx) {
+		var doc struct {
+			OrderId string `bson:"order_id"`
+		}
+		if err = cursor.Decode(&doc); err != nil {
+			return nil, err
+		}
+		if doc.OrderId != "" {
+			result[doc.OrderId] = true
+		}
+	}
+	return result, cursor.Err()
+}
+
 func (m *MongoDB) GetProductBySku(sku string) (*entity.Product, error) {
 	connection, err := m.connect()
 	if err != nil {

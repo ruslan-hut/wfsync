@@ -192,11 +192,29 @@ func unmarshalFlexInt(raw json.RawMessage) int {
 	return 0
 }
 
-// ContractorErrors captures only the errors from a contractor embedded in an invoice response.
-// Separate from Contractor because the invoice response returns contractor.id as a JSON number,
-// while other endpoints return it as a string.
+// ContractorErrors captures contractor fields from an invoice response.
+// Named "Errors" historically because the invoices/add response only returns errors,
+// but invoices/find also returns name and ID.
 type ContractorErrors struct {
+	ID     string                  `json:"id,omitempty"`
+	Name   string                  `json:"name,omitempty"`
 	Errors map[string]ErrorWrapper `json:"errors,omitempty"`
+}
+
+// UnmarshalJSON handles the wFirma API returning contractor.id as either a string or number.
+func (ce *ContractorErrors) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ID     json.RawMessage         `json:"id"`
+		Name   string                  `json:"name"`
+		Errors map[string]ErrorWrapper `json:"errors"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	ce.Name = raw.Name
+	ce.Errors = raw.Errors
+	ce.ID = unmarshalFlexString(raw.ID)
+	return nil
 }
 
 // InvoiceData represents the invoice object returned by the API.

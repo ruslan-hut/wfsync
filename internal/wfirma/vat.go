@@ -107,6 +107,11 @@ func resolveGoodsVatCode(taxRate int, countryCode string, hasTaxId bool, b2b boo
 	return strconv.Itoa(taxRate)
 }
 
+// IsB2BCustomerGroup returns true if the given customer group ID is a B2B group.
+func IsB2BCustomerGroup(group int) bool {
+	return b2bCustomerGroups[group]
+}
+
 // formatCustomerGroup returns a human-readable label like "3 (B2C)" or "6 (B2B)".
 func formatCustomerGroup(group int) string {
 	if b2bCustomerGroups[group] {

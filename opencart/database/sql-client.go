@@ -319,6 +319,52 @@ func (s *MySql) OrderSearchId(orderId int64) (*entity.CheckoutParams, error) {
 	return s.addOrderData(orderId, &order)
 }
 
+// OrderSearchByDateRange returns lightweight order summaries for orders within a date range.
+// Unlike OrderSearchStatus/OrderSearchId, this skips line items and tax details.
+func (s *MySql) OrderSearchByDateRange(from, to string) ([]*entity.OrderSummary, error) {
+	stmt, err := s.stmtSelectOrdersByDateRange()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := stmt.Query(from, to)
+	if err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+
+	var orders []*entity.OrderSummary
+	for rows.Next() {
+		var o entity.OrderSummary
+		var firstName, lastName string
+		var total float64
+
+		if err = rows.Scan(
+			&o.OrderId,
+			&o.DateAdded,
+			&firstName,
+			&lastName,
+			&o.Email,
+			&o.Currency,
+			&o.CurrencyValue,
+			&total,
+			&o.InvoiceId,
+			&o.CustomerGroup,
+			&o.OrderStatus,
+		); err != nil {
+			return nil, err
+		}
+
+		o.ClientName = firstName + " " + lastName
+		o.Total = int64(math.Round(total * o.CurrencyValue * 100))
+		orders = append(orders, &o)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	return orders, nil
+}
+
 // addOrderData retrieves and calculates tax, line items, and shipping costs for a specific order and updates its details.
 func (s *MySql) addOrderData(orderId int64, order *entity.CheckoutParams) (*entity.CheckoutParams, error) {
 	var err error

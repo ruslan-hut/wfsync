@@ -273,6 +273,14 @@ func (oc *Opencart) handleByStatus(statusRequest, statusResult int, handler Chec
 	}
 }
 
+// GetOrdersByDateRange returns lightweight order summaries for a date range (YYYY-MM-DD).
+func (oc *Opencart) GetOrdersByDateRange(from, to string) ([]*entity.OrderSummary, error) {
+	if oc.db == nil {
+		return nil, fmt.Errorf("database not connected")
+	}
+	return oc.db.OrderSearchByDateRange(from, to)
+}
+
 func (oc *Opencart) GetOrder(orderId int64) (*entity.CheckoutParams, error) {
 	if oc.db == nil {
 		return nil, fmt.Errorf("database not connected")

@@ -65,6 +65,7 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 			wf.Post("/invoice", wfinvoice.CreateInvoice(log, handler))
 			wf.Post("/sync/pull", wfsync.SyncFromRemote(log, handler))
 			wf.Post("/sync/push", wfsync.SyncToRemote(log, handler))
+			wf.Get("/list", wfsync.InvoiceList(log, handler))
 		})
 		rootApi.Route("/st", func(st chi.Router) {
 			st.Post("/hold", payment.Hold(log, handler))

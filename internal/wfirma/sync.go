@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"wfsync/entity"
 	"wfsync/lib/sl"
 )
@@ -77,6 +78,40 @@ func (c *Client) findInvoices(ctx context.Context, from, to string, invType invo
 	}
 
 	return all, nil
+}
+
+// FindInvoices returns all normal invoices from wFirma matching a date range.
+// Converts API response data to entity.LocalInvoice to avoid leaking internal types.
+func (c *Client) FindInvoices(ctx context.Context, from, to string) ([]*entity.LocalInvoice, error) {
+	if !c.enabled {
+		return nil, fmt.Errorf("wFirma is disabled")
+	}
+	data, err := c.findInvoices(ctx, from, to, invoiceNormal)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]*entity.LocalInvoice, 0, len(data))
+	for _, inv := range data {
+		li := &entity.LocalInvoice{
+			Id:         inv.Id,
+			Number:     inv.Number,
+			Type:       inv.Type,
+			Date:       inv.Date,
+			Currency:   inv.Currency,
+			IdExternal: inv.IdExternal,
+		}
+		if t, err := strconv.ParseFloat(inv.Total, 64); err == nil {
+			li.Total = t
+		}
+		if inv.Contractor != nil {
+			li.Contractor = &entity.LocalContractor{
+				ID:   inv.Contractor.ID,
+				Name: inv.Contractor.Name,
+			}
+		}
+		result = append(result, li)
+	}
+	return result, nil
 }
 
 // SyncFromRemote pulls invoices from wFirma for the given date range and syncs them to local DB.

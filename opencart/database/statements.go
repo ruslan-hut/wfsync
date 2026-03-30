@@ -148,6 +148,28 @@ func (s *MySql) stmtSelectOrderStatus() (*sql.Stmt, error) {
 	return s.prepareStmt("selectOrderStatus", query)
 }
 
+func (s *MySql) stmtSelectOrdersByDateRange() (*sql.Stmt, error) {
+	query := fmt.Sprintf(
+		`SELECT
+			order_id,
+			date_added,
+			firstname,
+			lastname,
+			email,
+			currency_code,
+			currency_value,
+			total,
+			wf_invoice,
+			customer_group_id,
+			order_status_id
+		 FROM %sorder
+		 WHERE date_added >= ? AND date_added < DATE_ADD(?, INTERVAL 1 DAY)
+		 ORDER BY date_added`,
+		s.prefix,
+	)
+	return s.prepareStmt("selectOrdersByDateRange", query)
+}
+
 func (s *MySql) stmtSelectOrderId() (*sql.Stmt, error) {
 	query := fmt.Sprintf(
 		`SELECT
