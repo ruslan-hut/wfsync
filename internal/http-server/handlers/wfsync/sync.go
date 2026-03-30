@@ -2,10 +2,12 @@ package wfsync
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"wfsync/entity"
 	"wfsync/lib/api/cont"
 	"wfsync/lib/api/response"
@@ -134,6 +136,58 @@ func InvoiceList(logger *slog.Logger, handler Core) http.HandlerFunc {
 			return
 		}
 
+		if r.URL.Query().Get("format") == "csv" {
+			writeInvoiceListCSV(w, result, from, to)
+			return
+		}
+
 		render.JSON(w, r, response.Ok(result))
 	}
+}
+
+// writeInvoiceListCSV writes the invoice list as a CSV file response.
+func writeInvoiceListCSV(w http.ResponseWriter, items []*entity.InvoiceListItem, from, to string) {
+	fileName := fmt.Sprintf("invoices_%s_%s.csv", from, to)
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))
+
+	cw := csv.NewWriter(w)
+	defer cw.Flush()
+
+	// Header row
+	_ = cw.Write([]string{
+		"Date", "Order Status", "Order ID", "Invoice Number",
+		"Contractor Name", "B2B", "Stripe", "Total PLN", "Total EUR", "Currency",
+	})
+
+	for _, item := range items {
+		_ = cw.Write([]string{
+			item.Date,
+			strconv.Itoa(item.OrderStatus),
+			item.OrderId,
+			item.InvoiceNumber,
+			item.ContractorName,
+			boolYesNo(item.IsB2B),
+			boolYesNo(item.IsStripe),
+			formatCents(item.TotalPLN),
+			formatCents(item.TotalEUR),
+			item.Currency,
+		})
+	}
+}
+
+func boolYesNo(v bool) string {
+	if v {
+		return "Yes"
+	}
+	return "No"
+}
+
+// formatCents converts minor units (cents) to a decimal string, e.g. 12345 → "123.45".
+// Returns empty string for zero values.
+func formatCents(v int64) string {
+	if v == 0 {
+		return ""
+	}
+	return strconv.FormatFloat(float64(v)/100, 'f', 2, 64)
 }
