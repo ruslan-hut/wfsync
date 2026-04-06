@@ -28,7 +28,26 @@ type Contractor struct {
 	Email     string                  `json:"email,omitempty" bson:"email,omitempty"`
 	Name      string                  `json:"name,omitempty" bson:"name,omitempty"`
 	Zip       string                  `json:"zip,omitempty" bson:"zip,omitempty"`
-	ErrorsRaw map[string]ErrorWrapper `json:"errors,omitempty" bson:"errors,omitempty"`
+	ErrorsRaw ErrorsMap `json:"errors,omitempty" bson:"errors,omitempty"`
+}
+
+// ErrorsMap is a map of field-level validation errors returned by the wFirma API.
+// The API inconsistently returns this as either a JSON object (when errors exist)
+// or a JSON boolean `false` (when no errors). This type handles both.
+type ErrorsMap map[string]ErrorWrapper
+
+// UnmarshalJSON accepts a JSON object as a normal map, or `false`/`null` as nil.
+func (em *ErrorsMap) UnmarshalJSON(data []byte) error {
+	if string(data) == "false" || string(data) == "null" {
+		*em = nil
+		return nil
+	}
+	var m map[string]ErrorWrapper
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	*em = m
+	return nil
 }
 
 // ErrorWrapper / ErrorDetail represent field-level validation errors returned by the API.
@@ -196,17 +215,17 @@ func unmarshalFlexInt(raw json.RawMessage) int {
 // Named "Errors" historically because the invoices/add response only returns errors,
 // but invoices/find also returns name and ID.
 type ContractorErrors struct {
-	ID     string                  `json:"id,omitempty"`
-	Name   string                  `json:"name,omitempty"`
-	Errors map[string]ErrorWrapper `json:"errors,omitempty"`
+	ID     string    `json:"id,omitempty"`
+	Name   string    `json:"name,omitempty"`
+	Errors ErrorsMap `json:"errors,omitempty"`
 }
 
 // UnmarshalJSON handles the wFirma API returning contractor.id as either a string or number.
 func (ce *ContractorErrors) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		ID     json.RawMessage         `json:"id"`
-		Name   string                  `json:"name"`
-		Errors map[string]ErrorWrapper `json:"errors"`
+		ID     json.RawMessage `json:"id"`
+		Name   string          `json:"name"`
+		Errors ErrorsMap       `json:"errors"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -231,7 +250,7 @@ type InvoiceData struct {
 	Currency        string                               `json:"currency" bson:"currency"`
 	Contractor      *ContractorErrors                    `json:"contractor,omitempty" bson:"contractor,omitempty"`
 	InvoiceContents map[string]InvoiceContentRespWrapper `json:"invoicecontents,omitempty"`
-	Errors          map[string]ErrorWrapper              `json:"errors,omitempty" bson:"errors,omitempty"`
+	Errors          ErrorsMap                            `json:"errors,omitempty" bson:"errors,omitempty"`
 }
 
 // InvoiceContentRespWrapper wraps a single invoice content item in the API response.
@@ -241,6 +260,6 @@ type InvoiceContentRespWrapper struct {
 
 // InvoiceContentResp captures the name and errors from an invoice content item in the response.
 type InvoiceContentResp struct {
-	Name   string                  `json:"name"`
-	Errors map[string]ErrorWrapper `json:"errors,omitempty"`
+	Name   string    `json:"name"`
+	Errors ErrorsMap `json:"errors,omitempty"`
 }

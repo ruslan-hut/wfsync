@@ -43,7 +43,7 @@ type Invoice struct {
 	Currency       string                  `json:"currency" bson:"currency"`                             // uppercase ISO 4217: "PLN", "EUR"
 	Contents       []*ContentLine          `json:"invoicecontents" bson:"invoicecontents"`
 	VatMossDetails *VatMossDetailWrapper   `json:"vat_moss_details,omitempty" bson:"vat_moss_details,omitempty"`
-	Errors         map[string]ErrorWrapper `json:"errors,omitempty" bson:"errors,omitempty"`
+	Errors         ErrorsMap               `json:"errors,omitempty" bson:"errors,omitempty"`
 }
 
 // VatMossDetailWrapper wraps a VatMossDetail for the wFirma API singular relation.
