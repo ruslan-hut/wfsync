@@ -59,6 +59,11 @@ func (c *CheckoutParams) Bind(_ *http.Request) error {
 	if c.Shipping > 0 {
 		c.LineItems = append(c.LineItems, ShippingLineItem("", c.Shipping))
 	}
+	// Auto-detect B2B: when a TaxId is provided and no customer group is set,
+	// treat the order as B2B so that EU VAT rules (WDT) apply correctly.
+	if c.ClientDetails != nil && c.ClientDetails.TaxId != "" && c.CustomerGroup == 0 {
+		c.CustomerGroup = -1
+	}
 	return validate.Struct(c)
 }
 
