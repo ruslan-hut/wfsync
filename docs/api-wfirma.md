@@ -503,19 +503,40 @@ curl -X POST "https://api.example.com/v1/b2b/proforma" \
 
 #### Response
 
-Returns `Payment` object with the URL to the generated proforma PDF:
+Returns the URL of the generated proforma PDF plus a list of every document URL produced for the order.
+
+Single-document order (most common):
 
 ```json
 {
-  "url": "https://files.example.com/uuid.pdf"
+  "url": "https://files.example.com/uuid-1.pdf",
+  "urls": [
+    "https://files.example.com/uuid-1.pdf"
+  ]
 }
 ```
+
+Split order (when the order has more than 220 line items, wFirma invoices are capped at 200 items per document and the order is split into multiple proformas):
+
+```json
+{
+  "url": "https://files.example.com/uuid-1.pdf",
+  "urls": [
+    "https://files.example.com/uuid-1.pdf",
+    "https://files.example.com/uuid-2.pdf",
+    "https://files.example.com/uuid-3.pdf"
+  ]
+}
+```
+
+Each part is a complete, standalone proforma in wFirma, with `(część N/M)` appended to the description. All parts share the same external order id.
 
 #### Response Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `url` | string | Public URL to download the proforma PDF |
+| `url` | string | Public URL of the first generated proforma PDF. Kept for backward compatibility — equal to `urls[0]`. |
+| `urls` | string[] | Public URLs of every proforma PDF produced for the order. Always populated; contains a single entry for non-split orders and one entry per part for split orders (in part order, 1..N). |
 
 #### Errors
 
@@ -546,11 +567,38 @@ Same as [B2BOrder](#create-b2b-proforma) (see Create B2B Proforma).
 
 #### Response
 
+Same shape as [Create B2B Proforma](#create-b2b-proforma) — the `url` field holds the first invoice PDF URL, and `urls` lists every part. Orders with more than 220 line items are split into multiple invoices (max 200 items each); each part is a standalone wFirma invoice with `(część N/M)` appended to its description.
+
+Single-document order:
+
 ```json
 {
-  "url": "https://files.example.com/uuid.pdf"
+  "url": "https://files.example.com/uuid-1.pdf",
+  "urls": [
+    "https://files.example.com/uuid-1.pdf"
+  ]
 }
 ```
+
+Split order (e.g. 450 line items → 3 invoices of 200/200/50):
+
+```json
+{
+  "url": "https://files.example.com/uuid-1.pdf",
+  "urls": [
+    "https://files.example.com/uuid-1.pdf",
+    "https://files.example.com/uuid-2.pdf",
+    "https://files.example.com/uuid-3.pdf"
+  ]
+}
+```
+
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `url` | string | Public URL of the first generated invoice PDF. Equal to `urls[0]`. |
+| `urls` | string[] | Public URLs of every invoice PDF produced for the order, in part order (1..N). |
 
 #### Errors
 

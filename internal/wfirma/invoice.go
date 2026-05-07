@@ -244,6 +244,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	totalParts := len(chunks)
 
 	var firstPayment *entity.Payment
+	var parts []*entity.Payment
 
 	for partIdx, chunk := range chunks {
 		partNum := partIdx + 1
@@ -309,13 +310,21 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			slog.String("tg_topic", entity.TopicInvoice),
 		).Info("invoice created")
 
-		if firstPayment == nil {
-			firstPayment = &entity.Payment{
-				Amount:  int64(chunkTotal * 100),
-				Id:      inv.Id,
-				OrderId: params.OrderId,
-			}
+		partPayment := &entity.Payment{
+			Amount:  int64(chunkTotal * 100),
+			Id:      inv.Id,
+			OrderId: params.OrderId,
 		}
+		parts = append(parts, partPayment)
+		if firstPayment == nil {
+			firstPayment = partPayment
+		}
+	}
+
+	// Expose all parts only when the order was actually split, so single-document
+	// responses stay backward compatible (no extra parts payload).
+	if firstPayment != nil && len(parts) > 1 {
+		firstPayment.Parts = parts
 	}
 
 	// Persist the first invoice ID back to checkout params.

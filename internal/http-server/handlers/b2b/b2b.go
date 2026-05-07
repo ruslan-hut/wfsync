@@ -18,8 +18,28 @@ type Core interface {
 	B2BCreateInvoice(ctx context.Context, order *entity.B2BOrder) (*entity.Payment, error)
 }
 
+// urlResponse carries the URL of the first generated document plus the full list.
+// URL stays for backward compatibility with clients that read a single field;
+// URLs is the authoritative list and contains every part when the order was
+// split across multiple wFirma invoices (and a single entry otherwise).
 type urlResponse struct {
-	URL string `json:"url"`
+	URL  string   `json:"url"`
+	URLs []string `json:"urls"`
+}
+
+// buildURLResponse extracts the URL list from a payment, including all split parts.
+func buildURLResponse(payment *entity.Payment) urlResponse {
+	urls := []string{payment.Link}
+	if len(payment.Parts) > 1 {
+		urls = urls[:0]
+		for _, part := range payment.Parts {
+			if part == nil || part.Link == "" {
+				continue
+			}
+			urls = append(urls, part.Link)
+		}
+	}
+	return urlResponse{URL: payment.Link, URLs: urls}
 }
 
 type errorResponse struct {
@@ -78,7 +98,7 @@ func CreateProforma(logger *slog.Logger, handler Core) http.HandlerFunc {
 			slog.String("proforma_id", payment.Id),
 		).Debug("proforma created")
 
-		render.JSON(w, r, urlResponse{URL: payment.Link})
+		render.JSON(w, r, buildURLResponse(payment))
 	}
 }
 
@@ -134,6 +154,6 @@ func CreateInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 			slog.String("invoice_id", payment.Id),
 		).Debug("invoice created")
 
-		render.JSON(w, r, urlResponse{URL: payment.Link})
+		render.JSON(w, r, buildURLResponse(payment))
 	}
 }

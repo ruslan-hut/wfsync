@@ -335,6 +335,12 @@ func (c *Core) WFirmaRegisterProforma(ctx context.Context, params *entity.Checko
 	payment.Link = link
 	payment.InvoiceFile = fileName
 
+	// When the order was split into multiple wFirma documents, mirror the file
+	// download for every part so the API can hand back all PDFs, not just the first.
+	if err := c.downloadParts(ctx, payment); err != nil {
+		return nil, err
+	}
+
 	return payment, nil
 }
 
@@ -369,7 +375,38 @@ func (c *Core) WFirmaRegisterInvoice(ctx context.Context, params *entity.Checkou
 	payment.Link = link
 	payment.InvoiceFile = fileName
 
+	if err := c.downloadParts(ctx, payment); err != nil {
+		return nil, err
+	}
+
 	return payment, nil
+}
+
+// downloadParts fetches the PDF for every additional split part on the payment
+// and fills in Link/InvoiceFile in place. The first part is assumed to already
+// carry its own file fields (downloaded by the caller); the slice is iterated
+// uniformly because Parts mirrors the first part as its head element.
+func (c *Core) downloadParts(ctx context.Context, payment *entity.Payment) error {
+	if payment == nil || len(payment.Parts) <= 1 {
+		return nil
+	}
+	for _, part := range payment.Parts {
+		if part == nil {
+			continue
+		}
+		if part.Id == payment.Id {
+			part.Link = payment.Link
+			part.InvoiceFile = payment.InvoiceFile
+			continue
+		}
+		fileName, link, err := c.downloadInvoice(ctx, "", part.Id)
+		if err != nil {
+			return err
+		}
+		part.Link = link
+		part.InvoiceFile = fileName
+	}
+	return nil
 }
 
 func (c *Core) downloadInvoice(ctx context.Context, fileName, paymentId string) (string, string, error) {
