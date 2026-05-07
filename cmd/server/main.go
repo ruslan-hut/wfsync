@@ -88,6 +88,17 @@ func main() {
 	wfirmaClient := wfirma.NewClient(conf, log)
 	wfirmaClient.SetDatabase(mongo)
 
+	// Sync wFirma company (bank) accounts into the local DB on startup so the
+	// invoice flow can pick the right account by currency. Non-fatal — if this
+	// fails, invoice creation still works using config fallback or wFirma defaults.
+	if mongo != nil && conf.WFirma.Enabled {
+		go func() {
+			if _, err := wfirmaClient.SyncBankAccounts(context.Background()); err != nil {
+				log.Warn("sync bank accounts", sl.Err(err))
+			}
+		}()
+	}
+
 	var vatService *vatrates.Service
 	if conf.VATRates.Enabled {
 		vatService = vatrates.New(conf, log)

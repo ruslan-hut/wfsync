@@ -43,7 +43,15 @@ type Invoice struct {
 	Currency       string                  `json:"currency" bson:"currency"`                             // uppercase ISO 4217: "PLN", "EUR"
 	Contents       []*ContentLine          `json:"invoicecontents" bson:"invoicecontents"`
 	VatMossDetails *VatMossDetailWrapper   `json:"vat_moss_details,omitempty" bson:"vat_moss_details,omitempty"`
+	CompanyAccount *CompanyAccountRef      `json:"company_account,omitempty" bson:"company_account,omitempty"`
 	Errors         ErrorsMap               `json:"errors,omitempty" bson:"errors,omitempty"`
+}
+
+// CompanyAccountRef references a wFirma company (bank) account by its internal ID.
+// Used to select which bank account is shown on the invoice — typically chosen
+// per-currency since a wFirma company account is bound to a single currency.
+type CompanyAccountRef struct {
+	ID string `json:"id" bson:"id"`
 }
 
 // VatMossDetailWrapper wraps a VatMossDetail for the wFirma API singular relation.

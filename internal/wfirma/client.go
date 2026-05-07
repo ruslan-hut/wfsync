@@ -57,6 +57,8 @@ type Database interface {
 	GetInvoicesByDateRange(from, to, invType string) ([]*entity.LocalInvoice, error)
 	DeleteInvoiceById(id string) error
 	UpdateInvoiceNumber(id, number string) error
+	SaveBankAccount(account *entity.BankAccount) error
+	GetAllowedBankAccount(currency string) (*entity.BankAccount, error)
 }
 
 // Client is the wFirma API client. Use NewClient to create one.

@@ -22,6 +22,7 @@ const (
 	collectionVATRates        = "vat_rates"
 	collectionVIESValidations = "vies_validations"
 	collectionRetryJobs       = "retry_jobs"
+	collectionBankAccounts    = "wfirma_bank_accounts"
 )
 
 type MongoDB struct {
@@ -725,6 +726,63 @@ func (m *MongoDB) GetRetryJobByEventId(eventId string) (*entity.RetryJob, error)
 		return nil, m.findError(err)
 	}
 	return &job, nil
+}
+
+// SaveBankAccount upserts a wFirma company_account record by ID. Fields synced
+// from wFirma overwrite existing values, but is_allowed is preserved on update
+// (and defaults to false on first insert) so operator toggles survive re-sync.
+func (m *MongoDB) SaveBankAccount(account *entity.BankAccount) error {
+	connection, err := m.connect()
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionBankAccounts)
+	filter := bson.D{{"id", account.ID}}
+	update := bson.D{
+		{"$set", bson.D{
+			{"id", account.ID},
+			{"name", account.Name},
+			{"bank_name", account.BankName},
+			{"number", account.Number},
+			{"swift", account.Swift},
+			{"currency", account.Currency},
+			{"status", account.Status},
+			{"visibility", account.Visibility},
+			{"synced_at", account.SyncedAt},
+		}},
+		{"$setOnInsert", bson.D{
+			{"is_allowed", false},
+		}},
+	}
+	opts := options.Update().SetUpsert(true)
+	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	return err
+}
+
+// GetAllowedBankAccount returns the single allowed bank account for the given
+// currency, or nil (with no error) if none is marked allowed for that currency.
+// If multiple are flagged for the same currency, the first match is returned —
+// operators are expected to keep at most one allowed per currency.
+func (m *MongoDB) GetAllowedBankAccount(currency string) (*entity.BankAccount, error) {
+	connection, err := m.connect()
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(connection)
+
+	collection := connection.Database(m.database).Collection(collectionBankAccounts)
+	filter := bson.D{{"currency", currency}, {"is_allowed", true}}
+	var account entity.BankAccount
+	err = collection.FindOne(m.ctx, filter).Decode(&account)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("mongodb find: %w", err)
+	}
+	return &account, nil
 }
 
 // MigrateExistingTelegramUsers sets existing enabled users to RoleAdmin + TierRealtime (idempotent).

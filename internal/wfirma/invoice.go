@@ -279,6 +279,18 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			inv.VatMossDetails = buildVatMossDetails(params.ClientDetails, countryCode)
 		}
 
+		// Select the wFirma company account by invoice currency from the local
+		// bank-account cache (populated by SyncBankAccounts, curated via the
+		// is_allowed flag). If none is marked allowed for this currency, omit
+		// the field — wFirma uses its default account.
+		if c.db != nil {
+			if ba, dbErr := c.db.GetAllowedBankAccount(strings.ToUpper(params.Currency)); dbErr != nil {
+				log.Warn("lookup allowed bank account", sl.Err(dbErr))
+			} else if ba != nil {
+				inv.CompanyAccount = &CompanyAccountRef{ID: ba.ID}
+			}
+		}
+
 		resultInv, err := c.submitInvoice(ctx, log, inv, chunk)
 		if err != nil {
 			return nil, err
