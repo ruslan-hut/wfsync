@@ -2,8 +2,8 @@
 
 ## Workflow Settings
 
-- **Never run builds or tests** - the user will build and test manually and report any errors
-- Do not run `go build`, `go test`, `go run`, or similar commands to verify changes
+- **Always verify Go changes with `go build ./...`**. Run `go test -short ./...` when applicable.
+- Do not run `go run` to start the service — the user runs it manually.
 
 ## Project Overview
 

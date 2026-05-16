@@ -17,6 +17,15 @@ import (
 	"github.com/go-chi/render"
 )
 
+// userName returns u.Username, or "" if u is nil. Used in log fields built before
+// the explicit nil check so we don't deref a nil user when auth is missing.
+func userName(u *entity.User) string {
+	if u == nil {
+		return ""
+	}
+	return u.Username
+}
+
 type Core interface {
 	WFirmaInvoiceDownload(ctx context.Context, invID string) (io.ReadCloser, *entity.FileMeta, error)
 	WFirmaOrderToInvoice(ctx context.Context, orderId int64, useCurrentDate bool) (*entity.CheckoutParams, error)
@@ -36,7 +45,7 @@ func Download(logger *slog.Logger, handler Core) http.HandlerFunc {
 			mod,
 			slog.String("request_id", middleware.GetReqID(r.Context())),
 			slog.String("invoice_id", invoiceId),
-			slog.String("user", user.Username),
+			slog.String("user", userName(user)),
 		)
 
 		if handler == nil {
@@ -82,7 +91,7 @@ func OrderToInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 			mod,
 			slog.String("request_id", middleware.GetReqID(r.Context())),
 			slog.String("order_id", orderId),
-			slog.String("user", user.Username),
+			slog.String("user", userName(user)),
 		)
 		if user == nil {
 			log.Error("user not found")
@@ -138,7 +147,7 @@ func FileProforma(logger *slog.Logger, handler Core) http.HandlerFunc {
 			mod,
 			slog.String("request_id", middleware.GetReqID(r.Context())),
 			slog.String("order_id", orderId),
-			slog.String("user", user.Username),
+			slog.String("user", userName(user)),
 		)
 		if user == nil {
 			log.Error("user not found")
@@ -185,7 +194,7 @@ func FileInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 			mod,
 			slog.String("request_id", middleware.GetReqID(r.Context())),
 			slog.String("order_id", orderId),
-			slog.String("user", user.Username),
+			slog.String("user", userName(user)),
 		)
 		if user == nil {
 			log.Error("user not found")
@@ -230,7 +239,7 @@ func CreateProforma(logger *slog.Logger, handler Core) http.HandlerFunc {
 		log := logger.With(
 			mod,
 			slog.String("request_id", middleware.GetReqID(r.Context())),
-			slog.String("user", user.Username),
+			slog.String("user", userName(user)),
 		)
 		if user == nil {
 			log.Error("user not found")
@@ -277,7 +286,7 @@ func CreateInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 		log := logger.With(
 			mod,
 			slog.String("request_id", middleware.GetReqID(r.Context())),
-			slog.String("user", user.Username),
+			slog.String("user", userName(user)),
 		)
 		if user == nil {
 			log.Error("user not found")

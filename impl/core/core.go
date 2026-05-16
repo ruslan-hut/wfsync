@@ -89,6 +89,10 @@ func (c *Core) SetOpencart(oc *occlient.Opencart) {
 		c.log.Warn("opencart client is nil, some features may not work")
 		return
 	}
+	if c.oc != nil {
+		c.log.Warn("opencart already set; ignoring second SetOpencart to avoid goroutine leak")
+		return
+	}
 	c.oc = oc.WithUrlHandler(c.StripePayAmount)
 	c.oc = oc.WithProformaHandler(c.WFirmaRegisterProforma)
 	c.oc = oc.WithInvoiceHandler(c.WFirmaRegisterInvoice)

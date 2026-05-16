@@ -26,9 +26,20 @@ const (
 )
 
 type MongoDB struct {
-	ctx           context.Context
 	clientOptions *options.ClientOptions
 	database      string
+}
+
+// opTimeout bounds the duration of a single MongoDB operation. Avoids
+// indefinite blocking when the DB stalls or the network is degraded.
+const opTimeout = 30 * time.Second
+
+// opCtx returns a fresh per-operation context with timeout. Each public method
+// uses this since request-scoped context is not propagated through the current
+// interface; a per-op deadline is a strict improvement over the prior
+// long-lived context.Background().
+func (m *MongoDB) opCtx() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), opTimeout)
 }
 
 func NewMongoClient(conf *config.Config) *MongoDB {
@@ -45,23 +56,22 @@ func NewMongoClient(conf *config.Config) *MongoDB {
 		})
 	}
 	client := &MongoDB{
-		ctx:           context.Background(),
 		clientOptions: clientOptions,
 		database:      conf.Mongo.Database,
 	}
 	return client
 }
 
-func (m *MongoDB) connect() (*mongo.Client, error) {
-	connection, err := mongo.Connect(m.ctx, m.clientOptions)
+func (m *MongoDB) connect(ctx context.Context) (*mongo.Client, error) {
+	connection, err := mongo.Connect(ctx, m.clientOptions)
 	if err != nil {
 		return nil, fmt.Errorf("mongodb connect: %w", err)
 	}
 	return connection, nil
 }
 
-func (m *MongoDB) disconnect(connection *mongo.Client) {
-	_ = connection.Disconnect(m.ctx)
+func (m *MongoDB) disconnect(ctx context.Context, connection *mongo.Client) {
+	_ = connection.Disconnect(ctx)
 }
 
 // Close is a no-op since connections are created per-operation.
@@ -78,50 +88,58 @@ func (m *MongoDB) findError(err error) error {
 }
 
 func (m *MongoDB) Save(key string, value interface{}) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(key)
-	_, err = collection.InsertOne(m.ctx, value)
+	_, err = collection.InsertOne(ctx, value)
 	return err
 }
 
 func (m *MongoDB) GetUser(token string) (*entity.User, error) {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionUsers)
 	filter := bson.D{{"token", token}}
 	var user entity.User
-	err = collection.FindOne(m.ctx, filter).Decode(&user)
-	return &user, err
+	if err = collection.FindOne(ctx, filter).Decode(&user); err != nil {
+		return nil, m.findError(err)
+	}
+	return &user, nil
 }
 
 func (m *MongoDB) GetTelegramUsers() ([]*entity.User, error) {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionUsers)
 	filter := bson.D{{"telegram_id", bson.D{{"$gt", 0}}}, {"telegram_enabled", true}}
-	cursor, err := collection.Find(m.ctx, filter)
+	cursor, err := collection.Find(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
 	defer func(cursor *mongo.Cursor, ctx context.Context) {
 		_ = cursor.Close(ctx)
-	}(cursor, m.ctx)
+	}(cursor, ctx)
 
 	var users []*entity.User
-	err = cursor.All(m.ctx, &users)
+	err = cursor.All(ctx, &users)
 	if err != nil {
 		return nil, err
 	}
@@ -129,27 +147,31 @@ func (m *MongoDB) GetTelegramUsers() ([]*entity.User, error) {
 }
 
 func (m *MongoDB) SetTelegramEnabled(id int64, isActive bool, logLevel int) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 	collection := connection.Database(m.database).Collection(collectionUsers)
 	filter := bson.D{{"telegram_id", id}}
 	update := bson.D{{"$set", bson.D{
 		{"telegram_enabled", isActive},
 		{"log_level", logLevel},
 	}}}
-	_, err = collection.UpdateOne(m.ctx, filter, update)
+	_, err = collection.UpdateOne(ctx, filter, update)
 	return err
 }
 
 func (m *MongoDB) SaveCheckoutParams(params *entity.CheckoutParams) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	now := time.Now()
 	if params.Created.IsZero() {
@@ -166,7 +188,7 @@ func (m *MongoDB) SaveCheckoutParams(params *entity.CheckoutParams) error {
 		filter := bson.D{{"session_id", params.SessionId}}
 		update := bson.D{{"$set", params}}
 		opts := options.Update().SetUpsert(true)
-		_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+		_, err = collection.UpdateOne(ctx, filter, update, opts)
 		return err
 	}
 
@@ -175,20 +197,22 @@ func (m *MongoDB) SaveCheckoutParams(params *entity.CheckoutParams) error {
 		filter := bson.D{{"event_id", params.EventId}}
 		update := bson.D{{"$set", params}}
 		opts := options.Update().SetUpsert(true)
-		_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+		_, err = collection.UpdateOne(ctx, filter, update, opts)
 		return err
 	}
 
-	_, err = collection.InsertOne(m.ctx, params)
+	_, err = collection.InsertOne(ctx, params)
 	return err
 }
 
 func (m *MongoDB) UpdateCheckoutParams(params *entity.CheckoutParams) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
 	filter := bson.D{{"order_id", params.OrderId}}
@@ -198,20 +222,22 @@ func (m *MongoDB) UpdateCheckoutParams(params *entity.CheckoutParams) error {
 		{"closed", time.Now()},
 	}}}
 	opts := options.Update().SetUpsert(true)
-	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	_, err = collection.UpdateOne(ctx, filter, update, opts)
 	return err
 }
 
 func (m *MongoDB) GetCheckoutParamsForEvent(eventId string) (*entity.CheckoutParams, error) {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
 	filter := bson.D{{"event_id", eventId}}
 	var params entity.CheckoutParams
-	err = collection.FindOne(m.ctx, filter).Decode(&params)
+	err = collection.FindOne(ctx, filter).Decode(&params)
 	if err != nil {
 		return nil, m.findError(err)
 	}
@@ -219,15 +245,17 @@ func (m *MongoDB) GetCheckoutParamsForEvent(eventId string) (*entity.CheckoutPar
 }
 
 func (m *MongoDB) GetCheckoutParamsSession(sessionId string) (*entity.CheckoutParams, error) {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
 	filter := bson.D{{"session_id", sessionId}}
 	var params entity.CheckoutParams
-	err = collection.FindOne(m.ctx, filter).Decode(&params)
+	err = collection.FindOne(ctx, filter).Decode(&params)
 	if err != nil {
 		return nil, m.findError(err)
 	}
@@ -240,11 +268,13 @@ func (m *MongoDB) GetStripeOrderIds(orderIds []string) (map[string]bool, error) 
 	if len(orderIds) == 0 {
 		return nil, nil
 	}
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
 	filter := bson.D{
@@ -252,16 +282,16 @@ func (m *MongoDB) GetStripeOrderIds(orderIds []string) (map[string]bool, error) 
 		{"session_id", bson.D{{"$ne", ""}}},
 	}
 
-	cursor, err := collection.Find(m.ctx, filter, options.Find().SetProjection(bson.D{{"order_id", 1}}))
+	cursor, err := collection.Find(ctx, filter, options.Find().SetProjection(bson.D{{"order_id", 1}}))
 	if err != nil {
 		return nil, err
 	}
 	defer func(cursor *mongo.Cursor, ctx context.Context) {
 		_ = cursor.Close(ctx)
-	}(cursor, m.ctx)
+	}(cursor, ctx)
 
 	result := make(map[string]bool)
-	for cursor.Next(m.ctx) {
+	for cursor.Next(ctx) {
 		var doc struct {
 			OrderId string `bson:"order_id"`
 		}
@@ -276,16 +306,18 @@ func (m *MongoDB) GetStripeOrderIds(orderIds []string) (map[string]bool, error) 
 }
 
 func (m *MongoDB) GetProductBySku(sku string) (*entity.Product, error) {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionProducts)
 	filter := bson.D{{"sku", sku}}
 	var product entity.Product
-	err = collection.FindOne(m.ctx, filter).Decode(&product)
+	err = collection.FindOne(ctx, filter).Decode(&product)
 	if err != nil {
 		return nil, m.findError(err)
 	}
@@ -293,43 +325,49 @@ func (m *MongoDB) GetProductBySku(sku string) (*entity.Product, error) {
 }
 
 func (m *MongoDB) SaveProduct(product *entity.Product) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionProducts)
 	filter := bson.D{{"sku", product.Sku}}
 	update := bson.D{{"$set", product}}
 	opts := options.Update().SetUpsert(true)
-	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	_, err = collection.UpdateOne(ctx, filter, update, opts)
 	return err
 }
 
 func (m *MongoDB) SaveInvoice(id string, invoice interface{}) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionInvoice)
 	filter := bson.D{{"id", id}}
 	update := bson.D{{"$set", invoice}}
 	opts := options.Update().SetUpsert(true)
-	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	_, err = collection.UpdateOne(ctx, filter, update, opts)
 	return err
 }
 
 // GetInvoicesByDateRange returns locally stored invoices matching a date range and type.
 // String comparison on YYYY-MM-DD formatted dates works correctly for range filtering.
 func (m *MongoDB) GetInvoicesByDateRange(from, to, invType string) ([]*entity.LocalInvoice, error) {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionInvoice)
 	filter := bson.D{
@@ -337,16 +375,16 @@ func (m *MongoDB) GetInvoicesByDateRange(from, to, invType string) ([]*entity.Lo
 		{"date", bson.D{{"$lte", to}}},
 		{"type", invType},
 	}
-	cursor, err := collection.Find(m.ctx, filter)
+	cursor, err := collection.Find(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
 	defer func(cursor *mongo.Cursor, ctx context.Context) {
 		_ = cursor.Close(ctx)
-	}(cursor, m.ctx)
+	}(cursor, ctx)
 
 	var invoices []*entity.LocalInvoice
-	err = cursor.All(m.ctx, &invoices)
+	err = cursor.All(ctx, &invoices)
 	if err != nil {
 		return nil, err
 	}
@@ -355,53 +393,59 @@ func (m *MongoDB) GetInvoicesByDateRange(from, to, invType string) ([]*entity.Lo
 
 // DeleteInvoiceById removes a single invoice document by its wFirma ID.
 func (m *MongoDB) DeleteInvoiceById(id string) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionInvoice)
 	filter := bson.D{{"id", id}}
-	_, err = collection.DeleteOne(m.ctx, filter)
+	_, err = collection.DeleteOne(ctx, filter)
 	return err
 }
 
 // UpdateInvoiceNumber sets the invoice number for an existing invoice document.
 func (m *MongoDB) UpdateInvoiceNumber(id, number string) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionInvoice)
 	filter := bson.D{{"id", id}}
 	update := bson.D{{"$set", bson.D{{"number", number}}}}
-	_, err = collection.UpdateOne(m.ctx, filter, update)
+	_, err = collection.UpdateOne(ctx, filter, update)
 	return err
 }
 
 // GetAllTelegramUsers returns all users with telegram_id > 0 (includes pending/disabled).
 func (m *MongoDB) GetAllTelegramUsers() ([]*entity.User, error) {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionUsers)
 	filter := bson.D{{"telegram_id", bson.D{{"$gt", 0}}}}
-	cursor, err := collection.Find(m.ctx, filter)
+	cursor, err := collection.Find(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
 	defer func(cursor *mongo.Cursor, ctx context.Context) {
 		_ = cursor.Close(ctx)
-	}(cursor, m.ctx)
+	}(cursor, ctx)
 
 	var users []*entity.User
-	err = cursor.All(m.ctx, &users)
+	err = cursor.All(ctx, &users)
 	if err != nil {
 		return nil, err
 	}
@@ -410,16 +454,18 @@ func (m *MongoDB) GetAllTelegramUsers() ([]*entity.User, error) {
 
 // GetTelegramUserById returns a single user by telegram ID.
 func (m *MongoDB) GetTelegramUserById(telegramId int64) (*entity.User, error) {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionUsers)
 	filter := bson.D{{"telegram_id", telegramId}}
 	var user entity.User
-	err = collection.FindOne(m.ctx, filter).Decode(&user)
+	err = collection.FindOne(ctx, filter).Decode(&user)
 	if err != nil {
 		return nil, m.findError(err)
 	}
@@ -428,11 +474,13 @@ func (m *MongoDB) GetTelegramUserById(telegramId int64) (*entity.User, error) {
 
 // RegisterTelegramUser upserts a new user with role=pending.
 func (m *MongoDB) RegisterTelegramUser(telegramId int64, username string) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionUsers)
 	filter := bson.D{{"telegram_id", telegramId}}
@@ -451,17 +499,19 @@ func (m *MongoDB) RegisterTelegramUser(telegramId int64, username string) error 
 		}},
 	}
 	opts := options.Update().SetUpsert(true)
-	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	_, err = collection.UpdateOne(ctx, filter, update, opts)
 	return err
 }
 
 // SetTelegramRole sets the telegram role for a user.
 func (m *MongoDB) SetTelegramRole(telegramId int64, role entity.TelegramRole) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionUsers)
 	filter := bson.D{{"telegram_id", telegramId}}
@@ -469,30 +519,32 @@ func (m *MongoDB) SetTelegramRole(telegramId int64, role entity.TelegramRole) er
 		{"telegram_role", role},
 		{"telegram_enabled", role == entity.RoleUser || role == entity.RoleAdmin},
 	}}}
-	_, err = collection.UpdateOne(m.ctx, filter, update)
+	_, err = collection.UpdateOne(ctx, filter, update)
 	return err
 }
 
 // GetPendingTelegramUsers returns users with role=pending.
 func (m *MongoDB) GetPendingTelegramUsers() ([]*entity.User, error) {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionUsers)
 	filter := bson.D{{"telegram_role", entity.RolePending}}
-	cursor, err := collection.Find(m.ctx, filter)
+	cursor, err := collection.Find(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
 	defer func(cursor *mongo.Cursor, ctx context.Context) {
 		_ = cursor.Close(ctx)
-	}(cursor, m.ctx)
+	}(cursor, ctx)
 
 	var users []*entity.User
-	err = cursor.All(m.ctx, &users)
+	err = cursor.All(ctx, &users)
 	if err != nil {
 		return nil, err
 	}
@@ -501,26 +553,30 @@ func (m *MongoDB) GetPendingTelegramUsers() ([]*entity.User, error) {
 
 // SetTelegramTopics sets the topic subscriptions for a user.
 func (m *MongoDB) SetTelegramTopics(telegramId int64, topics []string) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionUsers)
 	filter := bson.D{{"telegram_id", telegramId}}
 	update := bson.D{{"$set", bson.D{{"telegram_topics", topics}}}}
-	_, err = collection.UpdateOne(m.ctx, filter, update)
+	_, err = collection.UpdateOne(ctx, filter, update)
 	return err
 }
 
 // SetSubscriptionTier sets the subscription tier and digest schedule for a user.
 func (m *MongoDB) SetSubscriptionTier(telegramId int64, tier entity.SubscriptionTier, schedule string) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionUsers)
 	filter := bson.D{{"telegram_id", telegramId}}
@@ -528,30 +584,34 @@ func (m *MongoDB) SetSubscriptionTier(telegramId int64, tier entity.Subscription
 		{"subscription_tier", tier},
 		{"digest_schedule", schedule},
 	}}}
-	_, err = collection.UpdateOne(m.ctx, filter, update)
+	_, err = collection.UpdateOne(ctx, filter, update)
 	return err
 }
 
 // CreateInviteCode stores a new invite code.
 func (m *MongoDB) CreateInviteCode(code *entity.InviteCode) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionInviteCodes)
-	_, err = collection.InsertOne(m.ctx, code)
+	_, err = collection.InsertOne(ctx, code)
 	return err
 }
 
 // UseInviteCode atomically finds and uses an invite code.
 func (m *MongoDB) UseInviteCode(code string, telegramId int64) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionInviteCodes)
 	filter := bson.D{
@@ -565,7 +625,7 @@ func (m *MongoDB) UseInviteCode(code string, telegramId int64) error {
 		}},
 		{"$inc", bson.D{{"use_count", 1}}},
 	}
-	result, err := collection.UpdateOne(m.ctx, filter, update)
+	result, err := collection.UpdateOne(ctx, filter, update)
 	if err != nil {
 		return err
 	}
@@ -577,39 +637,43 @@ func (m *MongoDB) UseInviteCode(code string, telegramId int64) error {
 
 // SaveVATRate upserts a VAT rate document by country_code.
 func (m *MongoDB) SaveVATRate(rate *entity.VATRate) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionVATRates)
 	filter := bson.D{{"country_code", rate.CountryCode}}
 	update := bson.D{{"$set", rate}}
 	opts := options.Update().SetUpsert(true)
-	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	_, err = collection.UpdateOne(ctx, filter, update, opts)
 	return err
 }
 
 // GetAllVATRates returns all VAT rate documents from the collection.
 func (m *MongoDB) GetAllVATRates() ([]*entity.VATRate, error) {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionVATRates)
-	cursor, err := collection.Find(m.ctx, bson.D{})
+	cursor, err := collection.Find(ctx, bson.D{})
 	if err != nil {
 		return nil, err
 	}
 	defer func(cursor *mongo.Cursor, ctx context.Context) {
 		_ = cursor.Close(ctx)
-	}(cursor, m.ctx)
+	}(cursor, ctx)
 
 	var rates []*entity.VATRate
-	err = cursor.All(m.ctx, &rates)
+	err = cursor.All(ctx, &rates)
 	if err != nil {
 		return nil, err
 	}
@@ -618,32 +682,36 @@ func (m *MongoDB) GetAllVATRates() ([]*entity.VATRate, error) {
 
 // SaveVIESValidation upserts a VIES validation result by country_code + vat_number.
 func (m *MongoDB) SaveVIESValidation(v *entity.VIESValidation) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionVIESValidations)
 	filter := bson.D{{"country_code", v.CountryCode}, {"vat_number", v.VATNumber}}
 	update := bson.D{{"$set", v}}
 	opts := options.Update().SetUpsert(true)
-	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	_, err = collection.UpdateOne(ctx, filter, update, opts)
 	return err
 }
 
 // GetVIESValidation returns a cached VIES validation result by country_code + vat_number.
 func (m *MongoDB) GetVIESValidation(countryCode, vatNumber string) (*entity.VIESValidation, error) {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionVIESValidations)
 	filter := bson.D{{"country_code", countryCode}, {"vat_number", vatNumber}}
 	var v entity.VIESValidation
-	err = collection.FindOne(m.ctx, filter).Decode(&v)
+	err = collection.FindOne(ctx, filter).Decode(&v)
 	if err != nil {
 		return nil, m.findError(err)
 	}
@@ -652,27 +720,31 @@ func (m *MongoDB) GetVIESValidation(countryCode, vatNumber string) (*entity.VIES
 
 // SaveRetryJob upserts a retry job by _id (which equals EventId).
 func (m *MongoDB) SaveRetryJob(job *entity.RetryJob) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionRetryJobs)
 	filter := bson.D{{"_id", job.ID}}
 	update := bson.D{{"$set", job}}
 	opts := options.Update().SetUpsert(true)
-	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	_, err = collection.UpdateOne(ctx, filter, update, opts)
 	return err
 }
 
 // GetPendingRetryJobs returns retry jobs that are pending and due for processing.
 func (m *MongoDB) GetPendingRetryJobs() ([]*entity.RetryJob, error) {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionRetryJobs)
 	filter := bson.D{
@@ -680,16 +752,16 @@ func (m *MongoDB) GetPendingRetryJobs() ([]*entity.RetryJob, error) {
 		{"next_retry_at", bson.D{{"$lte", time.Now()}}},
 	}
 	opts := options.Find().SetSort(bson.D{{"next_retry_at", 1}})
-	cursor, err := collection.Find(m.ctx, filter, opts)
+	cursor, err := collection.Find(ctx, filter, opts)
 	if err != nil {
 		return nil, err
 	}
 	defer func(cursor *mongo.Cursor, ctx context.Context) {
 		_ = cursor.Close(ctx)
-	}(cursor, m.ctx)
+	}(cursor, ctx)
 
 	var jobs []*entity.RetryJob
-	err = cursor.All(m.ctx, &jobs)
+	err = cursor.All(ctx, &jobs)
 	if err != nil {
 		return nil, err
 	}
@@ -698,30 +770,34 @@ func (m *MongoDB) GetPendingRetryJobs() ([]*entity.RetryJob, error) {
 
 // UpdateRetryJob replaces a retry job document by _id.
 func (m *MongoDB) UpdateRetryJob(job *entity.RetryJob) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionRetryJobs)
 	filter := bson.D{{"_id", job.ID}}
-	_, err = collection.ReplaceOne(m.ctx, filter, job)
+	_, err = collection.ReplaceOne(ctx, filter, job)
 	return err
 }
 
 // GetRetryJobByEventId returns a retry job by its event_id.
 func (m *MongoDB) GetRetryJobByEventId(eventId string) (*entity.RetryJob, error) {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionRetryJobs)
 	filter := bson.D{{"event_id", eventId}}
 	var job entity.RetryJob
-	err = collection.FindOne(m.ctx, filter).Decode(&job)
+	err = collection.FindOne(ctx, filter).Decode(&job)
 	if err != nil {
 		return nil, m.findError(err)
 	}
@@ -732,11 +808,13 @@ func (m *MongoDB) GetRetryJobByEventId(eventId string) (*entity.RetryJob, error)
 // from wFirma overwrite existing values, but is_allowed is preserved on update
 // (and defaults to false on first insert) so operator toggles survive re-sync.
 func (m *MongoDB) SaveBankAccount(account *entity.BankAccount) error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionBankAccounts)
 	filter := bson.D{{"id", account.ID}}
@@ -757,7 +835,7 @@ func (m *MongoDB) SaveBankAccount(account *entity.BankAccount) error {
 		}},
 	}
 	opts := options.Update().SetUpsert(true)
-	_, err = collection.UpdateOne(m.ctx, filter, update, opts)
+	_, err = collection.UpdateOne(ctx, filter, update, opts)
 	return err
 }
 
@@ -766,16 +844,18 @@ func (m *MongoDB) SaveBankAccount(account *entity.BankAccount) error {
 // If multiple are flagged for the same currency, the first match is returned —
 // operators are expected to keep at most one allowed per currency.
 func (m *MongoDB) GetAllowedBankAccount(currency string) (*entity.BankAccount, error) {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionBankAccounts)
 	filter := bson.D{{"currency", currency}, {"is_allowed", true}}
 	var account entity.BankAccount
-	err = collection.FindOne(m.ctx, filter).Decode(&account)
+	err = collection.FindOne(ctx, filter).Decode(&account)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, nil
@@ -787,11 +867,13 @@ func (m *MongoDB) GetAllowedBankAccount(currency string) (*entity.BankAccount, e
 
 // MigrateExistingTelegramUsers sets existing enabled users to RoleAdmin + TierRealtime (idempotent).
 func (m *MongoDB) MigrateExistingTelegramUsers() error {
-	connection, err := m.connect()
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
 	if err != nil {
 		return err
 	}
-	defer m.disconnect(connection)
+	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionUsers)
 	filter := bson.D{
@@ -806,6 +888,6 @@ func (m *MongoDB) MigrateExistingTelegramUsers() error {
 		{"telegram_role", entity.RoleAdmin},
 		{"subscription_tier", entity.TierRealtime},
 	}}}
-	_, err = collection.UpdateMany(m.ctx, filter, update)
+	_, err = collection.UpdateMany(ctx, filter, update)
 	return err
 }

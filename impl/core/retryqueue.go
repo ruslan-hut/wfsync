@@ -6,7 +6,6 @@ package core
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"time"
 	"wfsync/entity"
 	"wfsync/lib/sl"
@@ -25,16 +24,15 @@ type RetryDatabase interface {
 // RetryQueue polls for pending retry jobs and attempts to re-register invoices
 // with exponential backoff. Follows the same Start/Stop pattern as vatrates.Service.
 type RetryQueue struct {
-	db           RetryDatabase
-	inv          InvoiceService
-	oc           *occlient.Opencart
-	log          *slog.Logger
-	interval     time.Duration
-	maxRetries   int
-	baseDelay    time.Duration
-	done         chan struct{}
-	stopped      chan struct{}
-	mu           sync.Mutex
+	db         RetryDatabase
+	inv        InvoiceService
+	oc         *occlient.Opencart
+	log        *slog.Logger
+	interval   time.Duration
+	maxRetries int
+	baseDelay  time.Duration
+	done       chan struct{}
+	stopped    chan struct{}
 }
 
 // NewRetryQueue creates a retry queue. Call Start() to begin background processing.
@@ -56,16 +54,15 @@ func NewRetryQueue(log *slog.Logger, intervalMin, maxRetries, baseDelaySec int) 
 	}
 }
 
-func (rq *RetryQueue) SetDatabase(db RetryDatabase)       { rq.db = db }
+func (rq *RetryQueue) SetDatabase(db RetryDatabase)         { rq.db = db }
 func (rq *RetryQueue) SetInvoiceService(inv InvoiceService) { rq.inv = inv }
 func (rq *RetryQueue) SetOpencart(oc *occlient.Opencart)    { rq.oc = oc }
 
 // Enqueue creates a pending retry job for a failed invoice registration.
 // Idempotent by EventId — if a job for this event already exists, it's a no-op.
 func (rq *RetryQueue) Enqueue(params *entity.CheckoutParams, errMsg string) {
-	rq.mu.Lock()
-	defer rq.mu.Unlock()
-
+	// No mutex needed: SaveRetryJob is an upsert by _id (= EventId), so
+	// concurrent enqueues for the same event collapse to a single document.
 	if rq.db == nil {
 		rq.log.Warn("no database configured, cannot enqueue retry job",
 			slog.String("event_id", params.EventId))

@@ -25,6 +25,9 @@ func Event(logger *slog.Logger, handler Core) http.HandlerFunc {
 			slog.String("path", r.URL.Path),
 		)
 
+		// Stripe webhook payloads are small; cap at 256KB to prevent unbounded
+		// memory use before signature verification.
+		r.Body = http.MaxBytesReader(w, r.Body, 256*1024)
 		payload, err := io.ReadAll(r.Body)
 		if err != nil {
 			log.With(
@@ -55,7 +58,11 @@ func Event(logger *slog.Logger, handler Core) http.HandlerFunc {
 			slog.Any("type", evt.Type),
 		)
 
-		handler.StripeEvent(r.Context(), &evt)
+		// Process asynchronously so we ACK within Stripe's 30s webhook timeout
+		// regardless of how long downstream wFirma/OpenCart calls take. We use
+		// a fresh background context since r.Context() is cancelled once we
+		// return; failures inside StripeEvent are persisted via the retry queue.
+		go handler.StripeEvent(context.Background(), &evt)
 
 		w.WriteHeader(http.StatusOK)
 	}

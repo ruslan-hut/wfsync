@@ -183,7 +183,9 @@ func (c *Client) getContractor(ctx context.Context, email string) (string, error
 				} `json:"0"`
 			} `json:"contractors"`
 		}
-		_ = json.Unmarshal(res, &findResp)
+		if err := json.Unmarshal(res, &findResp); err != nil {
+			log.Warn("parse contractor find response", sl.Err(err))
+		}
 		if findResp.Contractors.Element0.Contractor.ID != "" {
 			contractorID := findResp.Contractors.Element0.Contractor.ID
 			log.Debug("found existing contractor",

@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"wfsync/entity"
 	"wfsync/internal/config"
@@ -31,7 +30,6 @@ type StripeClient struct {
 	successUrl    string
 	db            Database
 	log           *slog.Logger
-	mutex         sync.Mutex
 	testMode      bool
 }
 

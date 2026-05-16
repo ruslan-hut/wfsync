@@ -25,7 +25,7 @@ func normalizeRate(s string) string {
 
 // fetchVatCodes retrieves all available VAT codes from the wFirma API (vat_codes/find)
 // and caches them as a name→ID map (Polish codes) and countryID→ID map (foreign/OSS codes).
-// Called lazily on first invoice creation.
+// Called lazily on first invoice creation. Caller must hold c.cacheMu.
 func (c *Client) fetchVatCodes(ctx context.Context) error {
 	polishCodes := make(map[string]string)
 	// ossCodesByCountry maps declaration_country_id → normalized rate → vat_code_id.
@@ -104,7 +104,7 @@ func (c *Client) fetchVatCodes(ctx context.Context) error {
 }
 
 // lookupDeclarationCountryID finds the wFirma declaration_country ID for a given
-// ISO 3166-1 alpha-2 country code using a filtered search.
+// ISO 3166-1 alpha-2 country code using a filtered search. Caller must hold c.cacheMu.
 func (c *Client) lookupDeclarationCountryID(ctx context.Context, countryCode string) (string, error) {
 	// Check cache first.
 	if c.declCountries != nil {
@@ -170,6 +170,8 @@ func (c *Client) lookupDeclarationCountryID(ctx context.Context, countryCode str
 // (e.g. "23", "WDT", "EXP"). Fetches and caches vat codes on first call.
 // Returns empty string if the code is not found or fetching fails.
 func (c *Client) resolveVatCodeID(ctx context.Context, code string) string {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
 	if c.vatCodes == nil {
 		if err := c.fetchVatCodes(ctx); err != nil {
 			c.log.Warn("fetch vat codes, falling back to vat field", slog.String("error", err.Error()))
@@ -194,6 +196,8 @@ func (c *Client) resolveVatCodeID(ctx context.Context, code string) string {
 // Chains: ISO country code → declaration_country_id → vat_code_id.
 // The expectedRate is logged for debugging but the mapping is by country, not rate.
 func (c *Client) resolveOSSVatCodeIDWithRate(ctx context.Context, countryCode string, expectedRate string) string {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
 	// Look up the declaration country ID for this ISO code.
 	dcID, err := c.lookupDeclarationCountryID(ctx, countryCode)
 	if err != nil {

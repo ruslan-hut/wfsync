@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -73,11 +74,13 @@ const (
 // Flow: validate params → find/create contractor → build invoice with contents → POST to API → persist result.
 // Orders with more than maxInvoiceItems line items are automatically split into
 // multiple invoices, each annotated with a part number in the description.
-func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entity.CheckoutParams) (*entity.Payment, error) {
+func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entity.CheckoutParams) (payment *entity.Payment, err error) {
 	log := c.log.With(slog.String("session_id", params.SessionId), slog.String("order_id", params.OrderId))
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error("panic recovered in RegisterInvoice", slog.Any("panic", r))
+			payment = nil
+			err = fmt.Errorf("panic in invoice creation: %v", r)
 		}
 	}()
 	if c.db != nil {
@@ -87,8 +90,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		}
 	}
 
-	err := params.Validate()
-	if err != nil {
+	if err = params.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid checkout params: %w", err)
 	}
 
@@ -596,14 +598,14 @@ func (c *Client) addPayment(ctx context.Context, invoice Invoice) error {
 		return err
 	}
 	if payResp.Status.Code == "ERROR" {
-		return fmt.Errorf(payResp.Status.Message)
+		return errors.New(payResp.Status.Message)
 	}
 	return nil
 }
 
 // DownloadInvoice fetches the PDF file for a given wFirma invoice ID.
 // Uses the invoices/download/{id} endpoint. Returns the saved filename and file metadata.
-func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string, *entity.FileMeta, error) {
+func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (fileName string, meta *entity.FileMeta, err error) {
 	if !c.enabled {
 		return "", nil, fmt.Errorf("wFirma is disabled")
 	}
@@ -611,6 +613,9 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string,
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error("panic recovered in DownloadInvoice", slog.Any("panic", r))
+			fileName = ""
+			meta = nil
+			err = fmt.Errorf("panic in DownloadInvoice: %v", r)
 		}
 	}()
 
@@ -661,7 +666,7 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string,
 		log.Error("wfirma api", slog.String("status", resp.Status))
 		return "", nil, fmt.Errorf("wfirma status: %s", resp.Status)
 	}
-	meta := &entity.FileMeta{
+	meta = &entity.FileMeta{
 		ContentType:   resp.Header.Get("Content-Type"),
 		ContentLength: resp.ContentLength,
 	}
@@ -670,7 +675,7 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (string,
 	if !strings.Contains(meta.ContentType, "pdf") {
 		return "", nil, fmt.Errorf("unsupported content type: %s", meta.ContentType)
 	}
-	fileName := uuid.New().String() + ext
+	fileName = uuid.New().String() + ext
 	filePath := filepath.Join(c.filePath, fileName)
 
 	f, err := os.Create(filePath)

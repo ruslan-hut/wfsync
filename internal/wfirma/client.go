@@ -26,6 +26,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 	"wfsync/entity"
 	"wfsync/internal/config"
@@ -74,6 +75,7 @@ type Client struct {
 	appID         string
 	filePath      string
 	log           *slog.Logger
+	cacheMu       sync.Mutex                   // guards vatCodes, ossVatCodes, declCountries
 	vatCodes      map[string]string            // cached Polish vat code name → wFirma ID (e.g. "23" → "222")
 	ossVatCodes   map[string]map[string]string // cached declaration_country_id → normalized rate ("27") → wFirma vat_code ID
 	declCountries map[string]string            // cached ISO country code → declaration_country_id (e.g. "SE" → "205")
@@ -151,7 +153,10 @@ func (c *Client) request(ctx context.Context, module, action string, payload int
 	defer func(Body io.ReadCloser) {
 		_ = Body.Close()
 	}(resp.Body)
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response body: %w", err)
+	}
 
 	if resp.StatusCode >= 300 {
 		log.Error("wFirma API returned error",
