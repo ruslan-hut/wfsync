@@ -310,7 +310,12 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			slog.String("wfirma_number", inv.Number),
 			slog.String("order_id", params.OrderId),
 			slog.String("total", fmt.Sprintf("%.2f", chunkTotal)),
-			slog.String("tax", goodsVat),
+			slog.String("tax", func() string {
+				if isOSS {
+					return goodsVat + " OSS"
+				}
+				return goodsVat
+			}()),
 			slog.Bool("oss", isOSS),
 			slog.String("email", params.ClientDetails.Email),
 			slog.String("name", params.ClientDetails.Name),
