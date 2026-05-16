@@ -5,16 +5,33 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 )
+
+// normalizeRate parses a VAT rate string ("27", "27.00", "5.0") and returns
+// a canonical form ("27", "5") for use as a map key. Returns "" on parse error.
+func normalizeRate(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return ""
+	}
+	return strconv.FormatFloat(f, 'f', -1, 64)
+}
 
 // fetchVatCodes retrieves all available VAT codes from the wFirma API (vat_codes/find)
 // and caches them as a name→ID map (Polish codes) and countryID→ID map (foreign/OSS codes).
 // Called lazily on first invoice creation.
 func (c *Client) fetchVatCodes(ctx context.Context) error {
 	polishCodes := make(map[string]string)
-	// ossCodesByCountry maps declaration_country_id → vat_code_id for the standard rate.
-	ossCodesByCountry := make(map[string]string)
+	// ossCodesByCountry maps declaration_country_id → normalized rate → vat_code_id.
+	// Countries can have multiple rates (standard + reduced), so we must key by rate
+	// rather than assuming the first returned code is the standard rate.
+	ossCodesByCountry := make(map[string]map[string]string)
 
 	const pageLimit = 100
 	// wFirma uses 1-based pages.
@@ -57,10 +74,17 @@ func (c *Client) fetchVatCodes(ctx context.Context) error {
 				// Polish codes have a non-empty short code (e.g. "23", "WDT").
 				polishCodes[vc.Code] = vc.ID
 			} else if dcID != "" && dcID != "0" {
-				// Foreign (OSS) code — store the first encountered per country
-				// (wFirma returns the standard rate first).
-				if _, ok := ossCodesByCountry[dcID]; !ok {
-					ossCodesByCountry[dcID] = vc.ID
+				// Foreign (OSS) code — index by normalized rate so the caller can
+				// pick the matching rate (e.g. HU has both 5% and 27%).
+				rateKey := normalizeRate(vc.Rate)
+				if rateKey == "" {
+					continue
+				}
+				if ossCodesByCountry[dcID] == nil {
+					ossCodesByCountry[dcID] = make(map[string]string)
+				}
+				if _, ok := ossCodesByCountry[dcID][rateKey]; !ok {
+					ossCodesByCountry[dcID][rateKey] = vc.ID
 				}
 			}
 		}
@@ -187,19 +211,38 @@ func (c *Client) resolveOSSVatCodeIDWithRate(ctx context.Context, countryCode st
 		}
 	}
 
-	vcID, ok := c.ossVatCodes[dcID]
-	if !ok {
+	rates, ok := c.ossVatCodes[dcID]
+	if !ok || len(rates) == 0 {
 		c.log.Warn("OSS vat code not found for declaration country",
 			slog.String("country", countryCode),
 			slog.String("declaration_country_id", dcID))
 		return ""
 	}
 
-	c.log.Debug("resolved OSS vat code",
+	rateKey := normalizeRate(expectedRate)
+	if vcID, ok := rates[rateKey]; ok {
+		c.log.Debug("resolved OSS vat code",
+			slog.String("country", countryCode),
+			slog.String("declaration_country_id", dcID),
+			slog.String("vat_code_id", vcID),
+			slog.String("rate", rateKey))
+		return vcID
+	}
+
+	// No exact rate match — fall back to the highest available rate for this
+	// country (assumed to be the standard rate) and warn so the mismatch is visible.
+	var fallbackRate, fallbackID string
+	var fallbackVal float64
+	for r, id := range rates {
+		if v, err := strconv.ParseFloat(r, 64); err == nil && v > fallbackVal {
+			fallbackVal, fallbackRate, fallbackID = v, r, id
+		}
+	}
+	c.log.Warn("OSS vat code: requested rate not found, using highest available",
 		slog.String("country", countryCode),
 		slog.String("declaration_country_id", dcID),
-		slog.String("vat_code_id", vcID),
-		slog.String("expected_rate", expectedRate))
-	return vcID
+		slog.String("requested_rate", rateKey),
+		slog.String("fallback_rate", fallbackRate),
+		slog.Any("available_rates", rates))
+	return fallbackID
 }
-
