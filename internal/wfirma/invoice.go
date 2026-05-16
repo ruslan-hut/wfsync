@@ -147,7 +147,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	// Internal rate (from vatlookup.eu) always takes priority over OpenCart data.
 	if vp != nil && !isB2B && countryCode != "" && countryCode != "PL" {
 		if internalRate := vp.GetStandardRate(countryCode); internalRate > 0 && internalRate != float64(opencartRate) {
-			log.Warn("VAT rate mismatch: opencart rate differs from internal rate, using internal",
+			log.Warn("VAT rate mismatch: using internal",
 				slog.String("country", countryCode),
 				slog.Int("opencart_rate", opencartRate),
 				slog.Float64("internal_rate", internalRate),
@@ -316,7 +316,6 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 				}
 				return goodsVat
 			}()),
-			slog.Bool("oss", isOSS),
 			slog.String("email", params.ClientDetails.Email),
 			slog.String("name", params.ClientDetails.Name),
 			slog.String("country", params.ClientDetails.Country),
