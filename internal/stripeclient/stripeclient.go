@@ -373,6 +373,9 @@ func (s *StripeClient) CaptureAmount(sessionId string, amount int64) (*entity.Pa
 		slog.String("currency", params.Currency),
 		slog.String("order_id", params.OrderId),
 	)
+	if params.ClientDetails != nil {
+		log = log.With(slog.String("client_name", params.ClientDetails.Name))
+	}
 
 	captureParams := &stripe.PaymentIntentCaptureParams{
 		AmountToCapture: stripe.Int64(amount),
@@ -381,6 +384,7 @@ func (s *StripeClient) CaptureAmount(sessionId string, amount int64) (*entity.Pa
 	result, err := s.sc.PaymentIntents.Capture(params.PaymentId, captureParams)
 	if err != nil {
 		err = s.parseErr(err)
+		log.Error("capture amount", sl.Err(err))
 		return nil, fmt.Errorf("stripe response: %w", err)
 	}
 
@@ -418,6 +422,9 @@ func (s *StripeClient) CancelPayment(sessionId, reason string) (*entity.Payment,
 		slog.String("currency", params.Currency),
 		slog.String("order_id", params.OrderId),
 	)
+	if params.ClientDetails != nil {
+		log = log.With(slog.String("client_name", params.ClientDetails.Name))
+	}
 
 	// Stripe supports one of the following reasons: duplicate, fraudulent, requested_by_customer, abandoned
 	if reason == "" {
@@ -435,6 +442,7 @@ func (s *StripeClient) CancelPayment(sessionId, reason string) (*entity.Payment,
 	result, err := s.sc.PaymentIntents.Cancel(params.PaymentId, cancelParams)
 	if err != nil {
 		err = s.parseErr(err)
+		log.Error("cancel payment", sl.Err(err))
 		return nil, fmt.Errorf("stripe response: %w", err)
 	}
 

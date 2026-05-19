@@ -52,7 +52,11 @@ func Hold(log *slog.Logger, handler Core) http.HandlerFunc {
 		logger = logger.With(
 			slog.Int("items_count", len(checkoutParams.LineItems)),
 			slog.Int64("total", checkoutParams.Total),
+			slog.String("order_id", checkoutParams.OrderId),
 		)
+		if checkoutParams.ClientDetails != nil {
+			logger = logger.With(slog.String("client_name", checkoutParams.ClientDetails.Name))
+		}
 		checkoutParams.Source = entity.SourceApi
 
 		pm, err := handler.StripeHoldAmount(&checkoutParams)
@@ -106,7 +110,11 @@ func Capture(log *slog.Logger, handler Core) http.HandlerFunc {
 		}
 		logger = logger.With(
 			slog.Int64("amount", checkoutParams.Total),
+			slog.String("order_id", checkoutParams.OrderId),
 		)
+		if checkoutParams.ClientDetails != nil {
+			logger = logger.With(slog.String("client_name", checkoutParams.ClientDetails.Name))
+		}
 
 		pm, err := handler.StripeCaptureAmount(id, checkoutParams.Total)
 		if err != nil {
