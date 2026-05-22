@@ -44,10 +44,10 @@ func Hold(log *slog.Logger, handler Core) http.HandlerFunc {
 			return
 		}
 		if err := checkoutParams.ValidateTotal(); err != nil {
-			logger.Error("validate total", sl.Err(err))
-			render.Status(r, 400)
-			render.JSON(w, r, response.Error(fmt.Sprintf("Invalid total: %v", err)))
-			return
+			// Tolerate discount/rounding gaps: redistribute line items to match
+			// the authoritative total instead of rejecting the request.
+			logger.Warn("total mismatch, recalculating", sl.Err(err))
+			checkoutParams.RecalcWithDiscount()
 		}
 		logger = logger.With(
 			slog.Int("items_count", len(checkoutParams.LineItems)),
