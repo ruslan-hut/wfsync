@@ -100,6 +100,19 @@ func (c *Client) fetchVatCodes(ctx context.Context) error {
 	c.log.Debug("vat codes cached",
 		slog.Int("polish", len(polishCodes)),
 		slog.Int("oss", len(ossCodesByCountry)))
+
+	// Diagnostic dump: per-declaration-country OSS rate sets, so missing
+	// foreign rates (e.g. PT 23%) are visible without debug-level logging.
+	dcCodeByID := make(map[string]string, len(c.declCountries))
+	for code, id := range c.declCountries {
+		dcCodeByID[id] = code
+	}
+	for dcID, rates := range ossCodesByCountry {
+		c.log.Info("oss vat codes for declaration country",
+			slog.String("declaration_country_id", dcID),
+			slog.String("country", dcCodeByID[dcID]),
+			slog.Any("rates", rates))
+	}
 	return nil
 }
 
@@ -233,16 +246,39 @@ func (c *Client) resolveOSSVatCodeIDWithRate(ctx context.Context, countryCode st
 		return vcID
 	}
 
-	// No exact rate match — fall back to the highest available rate for this
-	// country (assumed to be the standard rate) and warn so the mismatch is visible.
+	// No exact rate match — fall back to the lowest available rate that is still
+	// >= the requested rate. Never return a lower rate: that would silently
+	// under-charge VAT. If nothing qualifies, return "" so the caller falls back
+	// to the plain "vat" field (wFirma resets it to the Polish rate).
+	requestedVal, err := strconv.ParseFloat(rateKey, 64)
+	if err != nil {
+		c.log.Warn("OSS vat code: requested rate unparseable, no fallback",
+			slog.String("country", countryCode),
+			slog.String("declaration_country_id", dcID),
+			slog.String("requested_rate", expectedRate),
+			slog.Any("available_rates", rates))
+		return ""
+	}
 	var fallbackRate, fallbackID string
 	var fallbackVal float64
 	for r, id := range rates {
-		if v, err := strconv.ParseFloat(r, 64); err == nil && v > fallbackVal {
+		v, err := strconv.ParseFloat(r, 64)
+		if err != nil || v < requestedVal {
+			continue
+		}
+		if fallbackID == "" || v < fallbackVal {
 			fallbackVal, fallbackRate, fallbackID = v, r, id
 		}
 	}
-	c.log.Warn("OSS vat code: requested rate not found, using highest available",
+	if fallbackID == "" {
+		c.log.Warn("OSS vat code: no rate >= requested available, no fallback",
+			slog.String("country", countryCode),
+			slog.String("declaration_country_id", dcID),
+			slog.String("requested_rate", rateKey),
+			slog.Any("available_rates", rates))
+		return ""
+	}
+	c.log.Warn("OSS vat code: requested rate not found, using lowest rate >= requested",
 		slog.String("country", countryCode),
 		slog.String("declaration_country_id", dcID),
 		slog.String("requested_rate", rateKey),
