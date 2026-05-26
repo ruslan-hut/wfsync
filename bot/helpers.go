@@ -173,19 +173,25 @@ func (t *TgBot) sanitizeUserTopics() {
 	}
 	t.mu.RUnlock()
 
+	changed := false
 	for _, user := range users {
-		t.sanitizeUserTopicsSingle(user)
+		if t.sanitizeUserTopicsSingle(user) {
+			changed = true
+		}
 	}
 
-	// Reload after cleanup
-	t.loadUsers()
+	// Reload only when sanitization actually modified DB state.
+	if changed {
+		t.loadUsers()
+	}
 }
 
 // sanitizeUserTopicsSingle checks a single user's topics against their allowed list
 // and removes any that are no longer valid for their role.
-func (t *TgBot) sanitizeUserTopicsSingle(user *entity.User) {
+// Returns true if the DB was updated.
+func (t *TgBot) sanitizeUserTopicsSingle(user *entity.User) bool {
 	if t.db == nil || len(user.TelegramTopics) == 0 {
-		return
+		return false
 	}
 
 	allowed := entity.TopicsForRole(user.TelegramRole)
@@ -205,7 +211,7 @@ func (t *TgBot) sanitizeUserTopicsSingle(user *entity.User) {
 	}
 
 	if !changed {
-		return
+		return false
 	}
 	if len(filtered) == 0 {
 		filtered = []string{"none"}
@@ -216,13 +222,14 @@ func (t *TgBot) sanitizeUserTopicsSingle(user *entity.User) {
 			slog.Int64("user_id", user.TelegramId),
 			sl.Err(err),
 		)
-	} else {
-		t.log.Info("sanitized topics",
-			slog.Int64("user_id", user.TelegramId),
-			slog.Any("removed_from", user.TelegramTopics),
-			slog.Any("kept", filtered),
-		)
+		return false
 	}
+	t.log.Info("sanitized topics",
+		slog.Int64("user_id", user.TelegramId),
+		slog.Any("removed_from", user.TelegramTopics),
+		slog.Any("kept", filtered),
+	)
+	return true
 }
 
 // reportError logs the error, notifies admins with details, and sends a neutral message to the user.
