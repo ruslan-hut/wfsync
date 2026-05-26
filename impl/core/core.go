@@ -208,10 +208,13 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 	// register new invoice
 	payment, err := c.inv.RegisterInvoice(ctx, params)
 	if err != nil {
+		// wfirma layer already reports the user-facing error to Telegram;
+		// keep this local log for event_id correlation but suppress duplicate notification.
 		c.log.With(
 			sl.Err(err),
 			slog.String("event_id", evt.ID),
 			slog.String("order_id", params.OrderId),
+			slog.Bool("tg_skip", true),
 		).Error("register invoice")
 		if c.retryQueue != nil {
 			c.retryQueue.Enqueue(params, err.Error())

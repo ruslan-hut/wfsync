@@ -96,11 +96,13 @@ func (rq *RetryQueue) Enqueue(params *entity.CheckoutParams, errMsg string) {
 		return
 	}
 
+	// The underlying error has already been reported to Telegram by the wfirma layer;
+	// keep this as a local-only log so it doesn't render as a fresh retry-queue error.
 	rq.log.Info("retry job enqueued",
 		slog.String("event_id", params.EventId),
 		slog.String("order_id", params.OrderId),
 		slog.String("error", errMsg),
-		slog.String("tg_topic", entity.TopicError))
+		slog.Bool("tg_skip", true))
 }
 
 // Start launches the background polling goroutine.

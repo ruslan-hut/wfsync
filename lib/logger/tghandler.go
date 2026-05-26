@@ -52,13 +52,17 @@ func (h *TelegramHandler) Handle(ctx context.Context, record slog.Record) error 
 		var msg string
 		var header string
 
-		// Extract tg_topic and build message from all attribute sources
+		// Extract tg_topic and build message from all attribute sources.
+		// tg_skip=true suppresses the Telegram dispatch (the local handler still logs).
 		topic := ""
+		skip := false
 
 		// Add attributes from .With() calls
 		for _, attr := range h.attrs {
 			if attr.Key == "tg_topic" {
 				topic = attr.Value.String()
+			} else if attr.Key == "tg_skip" {
+				skip = skip || attr.Value.Bool()
 			} else if attr.Key == "error" {
 				msg += fmt.Sprintf("\n```error %v ```", attr.Value)
 			} else {
@@ -70,6 +74,8 @@ func (h *TelegramHandler) Handle(ctx context.Context, record slog.Record) error 
 		record.Attrs(func(attr slog.Attr) bool {
 			if attr.Key == "tg_topic" {
 				topic = attr.Value.String()
+			} else if attr.Key == "tg_skip" {
+				skip = skip || attr.Value.Bool()
 			} else if attr.Key == "error" {
 				msg += fmt.Sprintf("```error %v ```", attr.Value)
 			} else {
@@ -77,6 +83,10 @@ func (h *TelegramHandler) Handle(ctx context.Context, record slog.Record) error 
 			}
 			return true
 		})
+
+		if skip {
+			return nil
+		}
 
 		// Add group prefix if present
 		if h.group != "" {
