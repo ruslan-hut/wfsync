@@ -67,12 +67,6 @@
     padding: 10px 12px;
     font-size: 13px;
   }
-  .legend code {
-    background: #eef1f7;
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-size: 12px;
-  }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -85,48 +79,36 @@
     vertical-align: top;
   }
   th { background: #eef1f7; }
-  td code, th code {
-    background: #f0f3f9;
-    padding: 1px 5px;
-    border-radius: 3px;
-    font-size: 12px;
-  }
   footer {
     max-width: 1200px;
     margin: 32px auto 0;
     color: var(--muted);
     font-size: 12px;
   }
-  footer code {
-    background: #eef1f7;
-    padding: 1px 6px;
-    border-radius: 4px;
-  }
 </style>
 </head>
 <body>
 <header>
   <h1>WFSync — VAT Rate Decision Schema</h1>
-  <p>Authoritative reference for how an incoming order's line-item VAT code is resolved
-  before being sent to wFirma. Reflects the logic in
-  <code>internal/wfirma/invoice.go</code> and <code>internal/wfirma/vat.go</code>.</p>
+  <p>How the VAT rate on every wFirma invoice is decided, step by step. Written for
+  the accounting and operations team — no code references.</p>
 </header>
 
 <main>
 
   <section class="card">
-    <h2>1. Contractor lookup &amp; B2B promotion</h2>
+    <h2>1. Identifying the buyer</h2>
     <div class="mermaid">
 flowchart TD
-    A([Order received]) --> B[Lookup contractor by email]
-    B --> C{Existing<br/>contractor?}
-    C -- No --> D[Create new contractor]
-    C -- Yes --> E{Order has<br/>TaxId?}
-    E -- Yes --> F[Update wFirma<br/>contractor NIP]
-    E -- No --> G{wFirma has<br/>stored NIP?}
-    G -- Yes --> H[Promote to B2B<br/>TaxId = stored NIP<br/>CustomerGroup = -1]
-    G -- No --> I[Keep as-is]
-    D --> Z([Continue to VAT resolution])
+    A(["New order arrives"]) --> B["Look up the buyer in wFirma by email"]
+    B --> C{"Buyer already<br/>in wFirma?"}
+    C -- No --> D["Create a new buyer record"]
+    C -- Yes --> E{"Order contains<br/>a VAT number?"}
+    E -- Yes --> F["Update the buyer's<br/>VAT number in wFirma"]
+    E -- No --> G{"Buyer already has<br/>a saved VAT number<br/>in wFirma?"}
+    G -- Yes --> H["Treat the order as business (B2B)<br/>and reuse the saved VAT number"]
+    G -- No --> I["Treat the order<br/>as it came"]
+    D --> Z(["Continue to VAT decision"])
     F --> Z
     H --> Z
     I --> Z
@@ -141,22 +123,22 @@ flowchart TD
   </section>
 
   <section class="card">
-    <h2>2. VAT code selection (<code>resolveGoodsVatCode</code>)</h2>
+    <h2>2. Choosing the VAT rate</h2>
     <div class="mermaid">
 flowchart TD
-    S([countryCode, hasTaxId, isB2B,<br/>opencartRate are now stable]) --> CT{countryCode}
-    CT -- PL or empty --> PL["Numeric rate from order<br/>(fallback: '23')"]
-    CT -- Non-EU --> EXP["<b>EXP</b> · 0%<br/>export of goods"]
-    CT -- EU non-PL --> B2B{isB2B?}
+    S(["Buyer's country, customer type and<br/>VAT number are now known"]) --> CT{"Buyer's country"}
+    CT -- "Poland or unknown" --> PL["Use the VAT rate from the order<br/>(default 23% if missing)"]
+    CT -- "Outside the EU" --> EXP["EXP — export of goods, 0%"]
+    CT -- "EU country, not Poland" --> B2B{"Business buyer (B2B)?"}
 
-    B2B -- Yes --> HT{hasTaxId?}
-    HT -- Yes --> WDT["<b>WDT</b> · 0%<br/>intra-community delivery"]
-    HT -- No --> P23["'23' (Polish rate)<br/>EU B2B without VAT number"]
+    B2B -- Yes --> HT{"Has a valid<br/>EU VAT number?"}
+    HT -- Yes --> WDT["WDT — intra-EU delivery, 0%"]
+    HT -- No --> P23["Polish standard rate, 23%<br/>(EU business without a VAT number)"]
 
-    B2B -- No --> RATE{opencartRate?}
-    RATE -- known --> CROSS["Cross-check vs<br/>internal VAT DB"]
-    RATE -- 0 --> LOOK["Lookup VATProvider /<br/>defaultEURates"]
-    CROSS --> DEST["Destination-country rate<br/>(internal wins on mismatch)"]
+    B2B -- No --> RATE{"VAT rate provided<br/>in the order?"}
+    RATE -- Yes --> CROSS["Cross-check against our<br/>internal EU rate database"]
+    RATE -- No --> LOOK["Look up the standard rate<br/>for the buyer's country"]
+    CROSS --> DEST["Use the buyer's country VAT rate<br/>(internal database wins on conflict)"]
     LOOK --> DEST
 
     classDef decision fill:#e8f1fb,stroke:#2b6cb0,color:#1f2430;
@@ -172,17 +154,17 @@ flowchart TD
   </section>
 
   <section class="card">
-    <h2>3. OSS routing (post VAT-code)</h2>
+    <h2>3. OSS handling for EU consumer sales</h2>
     <div class="mermaid">
 flowchart TD
-    V([VAT code resolved]) --> OS{"isOSS?<br/>(!isB2B<br/>&amp; isEU<br/>&amp; country ≠ PL)"}
-    OS -- No --> P["Resolve Polish vat_code ID<br/>by name (e.g. '23' → 222)"]
-    OS -- Yes --> Q["Resolve foreign vat_code ID<br/>via declaration_countries → vat_codes<br/>(e.g. SE 25% → 687)"]
-    Q --> R{Resolved?}
-    R -- Yes --> S1["content.vat_code = ID<br/>+ vat_moss_details"]
-    R -- No --> S2["Fallback: content.vat = rate<br/>+ vat_moss_details<br/><i>⚠ wFirma may reset to PL 23%<br/>without type_of_sale</i>"]
-    P --> T["content.vat_code = ID<br/>(or content.vat fallback)"]
-    S1 --> END([Send invoices/add])
+    V(["VAT rate has been chosen"]) --> OS{"EU consumer sale outside Poland?<br/>(OSS scheme applies)"}
+    OS -- No --> P["Use the matching<br/>Polish VAT code in wFirma"]
+    OS -- Yes --> Q["Use the foreign VAT code<br/>registered for the buyer's country<br/>in wFirma's OSS settings"]
+    Q --> R{"Foreign code<br/>available?"}
+    R -- Yes --> S1["Issue invoice with the foreign<br/>VAT code and OSS evidence<br/>(billing address + delivery country)"]
+    R -- No --> S2["Fall back to the plain rate<br/>with OSS evidence attached.<br/>Warning: wFirma may revert to 23% PL<br/>if its OSS settings are incomplete"]
+    P --> T["Invoice ready for wFirma"]
+    S1 --> END(["Invoice sent to wFirma"])
     S2 --> END
     T --> END
 
@@ -198,40 +180,38 @@ flowchart TD
   </section>
 
   <section class="card">
-    <h2>Outcome matrix</h2>
+    <h2>Outcome at a glance</h2>
     <table>
       <thead>
         <tr>
-          <th>Destination</th>
-          <th>Customer</th>
-          <th>TaxId</th>
-          <th>VAT code</th>
-          <th>OSS evidence</th>
+          <th>Where the buyer is</th>
+          <th>Buyer type</th>
+          <th>EU VAT number</th>
+          <th>VAT rate applied</th>
+          <th>OSS evidence on invoice</th>
         </tr>
       </thead>
       <tbody>
-        <tr><td>PL / unknown</td><td>any</td><td>any</td><td>numeric (or 23)</td><td>—</td></tr>
-        <tr><td>EU non-PL</td><td>B2B</td><td>present</td><td><code>WDT</code> (0%)</td><td>—</td></tr>
-        <tr><td>EU non-PL</td><td>B2B</td><td>empty</td><td><code>"23"</code> (Polish)</td><td>—</td></tr>
-        <tr><td>EU non-PL</td><td>B2C</td><td>any</td><td>destination rate</td><td><code>vat_moss_details</code> + foreign <code>vat_code</code></td></tr>
-        <tr><td>Non-EU</td><td>any</td><td>any</td><td><code>EXP</code> (0%)</td><td>—</td></tr>
+        <tr><td>Poland or unknown</td><td>any</td><td>any</td><td>Rate from the order (default 23%)</td><td>No</td></tr>
+        <tr><td>EU country (not Poland)</td><td>Business (B2B)</td><td>Provided</td><td>WDT — 0% intra-EU</td><td>No</td></tr>
+        <tr><td>EU country (not Poland)</td><td>Business (B2B)</td><td>Missing</td><td>Polish 23%</td><td>No</td></tr>
+        <tr><td>EU country (not Poland)</td><td>Consumer (B2C)</td><td>any</td><td>Buyer's country standard rate</td><td>Yes — OSS</td></tr>
+        <tr><td>Outside the EU</td><td>any</td><td>any</td><td>EXP — 0% export</td><td>No</td></tr>
       </tbody>
     </table>
     <div class="legend">
-      <div><strong>B2B</strong>: <code>customer_group ∈ {-1, 6, 7, 16, 18, 19}</code>. <code>-1</code> is the synthetic flag for direct API callers and for clients promoted from a wFirma-stored NIP.</div>
-      <div><strong>OSS rate source</strong>: order's <code>tax_value</code> derives the rate; if missing, the internal VATProvider (or hardcoded <code>defaultEURates</code>) is used.</div>
-      <div><strong>Internal &gt; OpenCart</strong>: on a B2C EU non-PL mismatch the internal rate replaces the OpenCart-derived rate and a warning is logged.</div>
-      <div><strong>VIES</strong>: when a TaxId is present, the VIES check is non-blocking; failure is logged at <code>WARN</code> with the error topic.</div>
+      <div><strong>Business vs consumer.</strong> An order is treated as <em>business</em> when the buyer is in a known B2B category in the shop, or when they provided an EU VAT number, or when wFirma already has a VAT number saved for them.</div>
+      <div><strong>Rate source.</strong> The shop sends the destination-country rate it calculated. We re-check it against our own EU rate database — the internal value wins if they disagree, and a warning is logged.</div>
+      <div><strong>OSS evidence.</strong> EU consumer sales outside Poland are issued under the OSS scheme and carry two pieces of evidence about the buyer's country (billing address + delivery country).</div>
+      <div><strong>VAT-number check.</strong> If a VAT number is present, it is verified against the EU VIES service. The check is non-blocking — a failure is logged for review but the invoice is still issued.</div>
     </div>
   </section>
 
 </main>
 
 <footer>
-  Source of truth: <code>internal/wfirma/invoice.go</code> (flow),
-  <code>internal/wfirma/vat.go</code> (<code>resolveGoodsVatCode</code>),
-  <code>internal/wfirma/vat-codes.go</code> (OSS ID resolution),
-  <code>internal/wfirma/contractor.go</code> (lookup &amp; B2B promotion).
+  Reference document for the accounting and operations team — describes the rules
+  the WFSync service applies before sending an invoice to wFirma.
 </footer>
 
 <script type="module">
