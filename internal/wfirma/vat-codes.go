@@ -100,19 +100,6 @@ func (c *Client) fetchVatCodes(ctx context.Context) error {
 	c.log.Debug("vat codes cached",
 		slog.Int("polish", len(polishCodes)),
 		slog.Int("oss", len(ossCodesByCountry)))
-
-	// Diagnostic dump: per-declaration-country OSS rate sets, so missing
-	// foreign rates (e.g. PT 23%) are visible without debug-level logging.
-	dcCodeByID := make(map[string]string, len(c.declCountries))
-	for code, id := range c.declCountries {
-		dcCodeByID[id] = code
-	}
-	for dcID, rates := range ossCodesByCountry {
-		c.log.Info("oss vat codes for declaration country",
-			slog.String("declaration_country_id", dcID),
-			slog.String("country", dcCodeByID[dcID]),
-			slog.Any("rates", rates))
-	}
 	return nil
 }
 
