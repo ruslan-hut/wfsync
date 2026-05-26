@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WFSync — VAT Rate Decision Schema</title>
+<style>
+  :root {
+    --bg: #f7f8fb;
+    --fg: #1f2430;
+    --muted: #5a6478;
+    --card: #ffffff;
+    --border: #dde2ec;
+    --accent: #2b6cb0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 24px 64px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.55;
+  }
+  header { max-width: 1200px; margin: 0 auto 28px; }
+  h1 {
+    margin: 0 0 8px;
+    font-size: 26px;
+    letter-spacing: -0.01em;
+  }
+  header p {
+    margin: 0;
+    color: var(--muted);
+    max-width: 900px;
+  }
+  main {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: grid;
+    gap: 24px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+  .card h2 {
+    margin: 0 0 12px;
+    font-size: 18px;
+    color: var(--accent);
+  }
+  .mermaid {
+    background: #fff;
+    font-size: 14px;
+    overflow-x: auto;
+  }
+  .legend {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 8px;
+  }
+  .legend div {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+  .legend code {
+    background: #eef1f7;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #eef1f7; }
+  td code, th code {
+    background: #f0f3f9;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+  footer {
+    max-width: 1200px;
+    margin: 32px auto 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  footer code {
+    background: #eef1f7;
+    padding: 1px 6px;
+    border-radius: 4px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>WFSync — VAT Rate Decision Schema</h1>
+  <p>Authoritative reference for how an incoming order's line-item VAT code is resolved
+  before being sent to wFirma. Reflects the logic in
+  <code>internal/wfirma/invoice.go</code> and <code>internal/wfirma/vat.go</code>.</p>
+</header>
+
+<main>
+
+  <section class="card">
+    <h2>1. Contractor lookup &amp; B2B promotion</h2>
+    <div class="mermaid">
+flowchart TD
+    A([Order received]) --> B[Lookup contractor by email]
+    B --> C{Existing<br/>contractor?}
+    C -- No --> D[Create new contractor]
+    C -- Yes --> E{Order has<br/>TaxId?}
+    E -- Yes --> F[Update wFirma<br/>contractor NIP]
+    E -- No --> G{wFirma has<br/>stored NIP?}
+    G -- Yes --> H[Promote to B2B<br/>TaxId = stored NIP<br/>CustomerGroup = -1]
+    G -- No --> I[Keep as-is]
+    D --> Z([Continue to VAT resolution])
+    F --> Z
+    H --> Z
+    I --> Z
+
+    classDef decision fill:#e8f1fb,stroke:#2b6cb0,color:#1f2430;
+    classDef action fill:#eaf6ec,stroke:#2f855a,color:#1f2430;
+    classDef terminal fill:#f0eafa,stroke:#6b46c1,color:#1f2430;
+    class C,E,G decision;
+    class B,D,F,H,I action;
+    class A,Z terminal;
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>2. VAT code selection (<code>resolveGoodsVatCode</code>)</h2>
+    <div class="mermaid">
+flowchart TD
+    S([countryCode, hasTaxId, isB2B,<br/>opencartRate are now stable]) --> CT{countryCode}
+    CT -- PL or empty --> PL["Numeric rate from order<br/>(fallback: '23')"]
+    CT -- Non-EU --> EXP["<b>EXP</b> · 0%<br/>export of goods"]
+    CT -- EU non-PL --> B2B{isB2B?}
+
+    B2B -- Yes --> HT{hasTaxId?}
+    HT -- Yes --> WDT["<b>WDT</b> · 0%<br/>intra-community delivery"]
+    HT -- No --> P23["'23' (Polish rate)<br/>EU B2B without VAT number"]
+
+    B2B -- No --> RATE{opencartRate?}
+    RATE -- known --> CROSS["Cross-check vs<br/>internal VAT DB"]
+    RATE -- 0 --> LOOK["Lookup VATProvider /<br/>defaultEURates"]
+    CROSS --> DEST["Destination-country rate<br/>(internal wins on mismatch)"]
+    LOOK --> DEST
+
+    classDef decision fill:#e8f1fb,stroke:#2b6cb0,color:#1f2430;
+    classDef action fill:#eaf6ec,stroke:#2f855a,color:#1f2430;
+    classDef terminal fill:#fff4d6,stroke:#b7791f,color:#1f2430;
+    classDef zero fill:#fde2e2,stroke:#c53030,color:#1f2430;
+    class CT,B2B,HT,RATE decision;
+    class CROSS,LOOK action;
+    class PL,DEST terminal;
+    class EXP,WDT,P23 zero;
+    class S terminal;
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>3. OSS routing (post VAT-code)</h2>
+    <div class="mermaid">
+flowchart TD
+    V([VAT code resolved]) --> OS{"isOSS?<br/>(!isB2B<br/>&amp; isEU<br/>&amp; country ≠ PL)"}
+    OS -- No --> P["Resolve Polish vat_code ID<br/>by name (e.g. '23' → 222)"]
+    OS -- Yes --> Q["Resolve foreign vat_code ID<br/>via declaration_countries → vat_codes<br/>(e.g. SE 25% → 687)"]
+    Q --> R{Resolved?}
+    R -- Yes --> S1["content.vat_code = ID<br/>+ vat_moss_details"]
+    R -- No --> S2["Fallback: content.vat = rate<br/>+ vat_moss_details<br/><i>⚠ wFirma may reset to PL 23%<br/>without type_of_sale</i>"]
+    P --> T["content.vat_code = ID<br/>(or content.vat fallback)"]
+    S1 --> END([Send invoices/add])
+    S2 --> END
+    T --> END
+
+    classDef decision fill:#e8f1fb,stroke:#2b6cb0,color:#1f2430;
+    classDef action fill:#eaf6ec,stroke:#2f855a,color:#1f2430;
+    classDef warn fill:#fde2e2,stroke:#c53030,color:#1f2430;
+    classDef terminal fill:#f0eafa,stroke:#6b46c1,color:#1f2430;
+    class OS,R decision;
+    class P,Q,S1,T action;
+    class S2 warn;
+    class V,END terminal;
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Outcome matrix</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Destination</th>
+          <th>Customer</th>
+          <th>TaxId</th>
+          <th>VAT code</th>
+          <th>OSS evidence</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>PL / unknown</td><td>any</td><td>any</td><td>numeric (or 23)</td><td>—</td></tr>
+        <tr><td>EU non-PL</td><td>B2B</td><td>present</td><td><code>WDT</code> (0%)</td><td>—</td></tr>
+        <tr><td>EU non-PL</td><td>B2B</td><td>empty</td><td><code>"23"</code> (Polish)</td><td>—</td></tr>
+        <tr><td>EU non-PL</td><td>B2C</td><td>any</td><td>destination rate</td><td><code>vat_moss_details</code> + foreign <code>vat_code</code></td></tr>
+        <tr><td>Non-EU</td><td>any</td><td>any</td><td><code>EXP</code> (0%)</td><td>—</td></tr>
+      </tbody>
+    </table>
+    <div class="legend">
+      <div><strong>B2B</strong>: <code>customer_group ∈ {-1, 6, 7, 16, 18, 19}</code>. <code>-1</code> is the synthetic flag for direct API callers and for clients promoted from a wFirma-stored NIP.</div>
+      <div><strong>OSS rate source</strong>: order's <code>tax_value</code> derives the rate; if missing, the internal VATProvider (or hardcoded <code>defaultEURates</code>) is used.</div>
+      <div><strong>Internal &gt; OpenCart</strong>: on a B2C EU non-PL mismatch the internal rate replaces the OpenCart-derived rate and a warning is logged.</div>
+      <div><strong>VIES</strong>: when a TaxId is present, the VIES check is non-blocking; failure is logged at <code>WARN</code> with the error topic.</div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  Source of truth: <code>internal/wfirma/invoice.go</code> (flow),
+  <code>internal/wfirma/vat.go</code> (<code>resolveGoodsVatCode</code>),
+  <code>internal/wfirma/vat-codes.go</code> (OSS ID resolution),
+  <code>internal/wfirma/contractor.go</code> (lookup &amp; B2B promotion).
+</footer>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif",
+      fontSize: "14px",
+      primaryColor: "#eef3fa",
+      primaryBorderColor: "#2b6cb0",
+      primaryTextColor: "#1f2430",
+      lineColor: "#5a6478"
+    },
+    flowchart: { curve: "basis", htmlLabels: true }
+  });
+</script>
+</body>
+</html>
