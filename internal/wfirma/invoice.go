@@ -94,7 +94,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		return nil, fmt.Errorf("invalid checkout params: %w", err)
 	}
 
-	contractorID, err := c.getContractor(ctx, params.ClientDetails.Email)
+	contractorID, existingNip, err := c.getContractor(ctx, params.ClientDetails.Email)
 	if err != nil {
 		return nil, fmt.Errorf("contractor: %w", err)
 	}
@@ -107,6 +107,18 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		if err != nil {
 			return nil, fmt.Errorf("create contractor: %w", err)
 		}
+	} else if params.ClientDetails.TaxId == "" && existingNip != "" {
+		// Returning customer already registered as B2B on wFirma side but the current
+		// order omits a tax ID. Promote to B2B so EU VAT rules (WDT / Polish 23% / EXP)
+		// apply consistently — without this the order would fall under OSS as B2C.
+		params.ClientDetails.TaxId = existingNip
+		if !b2bCustomerGroups[params.CustomerGroup] {
+			params.CustomerGroup = -1
+		}
+		log.Info("promoted to B2B from wFirma stored tax id",
+			slog.String("tax_id", existingNip),
+			slog.String("contractor_id", contractorID),
+			slog.String("email", params.ClientDetails.Email))
 	} else if params.ClientDetails.TaxId != "" {
 		// Existing contractor — ensure wFirma has the current tax ID.
 		// Without this, WDT invoices fail when the contractor was previously created without a NIP.
@@ -132,6 +144,14 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			log.Debug("VIES validation passed",
 				slog.String("tax_id", params.ClientDetails.TaxId),
 				slog.String("country", countryCode))
+		} else {
+			log.With(
+				slog.String("tax_id", params.ClientDetails.TaxId),
+				slog.String("country", countryCode),
+				slog.String("email", params.ClientDetails.Email),
+				slog.String("name", params.ClientDetails.Name),
+				slog.String("tg_topic", entity.TopicError),
+			).Warn("VIES validation failed")
 		}
 	}
 

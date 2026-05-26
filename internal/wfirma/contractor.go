@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"wfsync/entity"
 	"wfsync/lib/sl"
 )
@@ -146,10 +147,13 @@ func (c *Client) updateContractor(ctx context.Context, contractorID string, cust
 	return nil
 }
 
-// getContractor searches for an existing contractor by email. Returns empty string if not found.
-func (c *Client) getContractor(ctx context.Context, email string) (string, error) {
+// getContractor searches for an existing contractor by email.
+// Returns the wFirma contractor ID and the stored tax ID (NIP), or empty strings
+// when no match is found. The NIP is used by the invoice flow to promote returning
+// customers to B2B when the current order omits a tax ID.
+func (c *Client) getContractor(ctx context.Context, email string) (string, string, error) {
 	if email == "" {
-		return "", nil
+		return "", "", nil
 	}
 	log := c.log.With(slog.String("email", email))
 
@@ -178,7 +182,8 @@ func (c *Client) getContractor(ctx context.Context, email string) (string, error
 			Contractors struct {
 				Element0 struct {
 					Contractor struct {
-						ID string `json:"id"`
+						ID  string `json:"id"`
+						Nip string `json:"nip"`
 					} `json:"contractor"`
 				} `json:"0"`
 			} `json:"contractors"`
@@ -188,13 +193,15 @@ func (c *Client) getContractor(ctx context.Context, email string) (string, error
 		}
 		if findResp.Contractors.Element0.Contractor.ID != "" {
 			contractorID := findResp.Contractors.Element0.Contractor.ID
+			nip := strings.TrimSpace(findResp.Contractors.Element0.Contractor.Nip)
 			log.Debug("found existing contractor",
-				slog.String("contractor_id", contractorID))
-			return contractorID, nil
+				slog.String("contractor_id", contractorID),
+				slog.String("nip", nip))
+			return contractorID, nip, nil
 		}
 	} else {
 		log.Warn("searching for contractor", sl.Err(err))
 	}
 
-	return "", nil
+	return "", "", nil
 }
