@@ -23,13 +23,27 @@ A persistent MongoDB-backed retry queue with exponential backoff. Failed invoice
 
 ```yaml
 retry_queue:
-  enabled: true         # enable/disable the retry queue
-  interval_min: 5       # how often to poll for due jobs (minutes)
-  max_retries: 10       # max attempts before giving up
-  base_delay_sec: 60    # base delay for exponential backoff (seconds)
+  enabled: true            # enable/disable the retry queue
+  interval_min: 5          # how often to poll for due jobs (minutes)
+  max_retries: 10          # max attempts before giving up
+  base_delay_sec: 60       # base delay for exponential backoff (seconds)
+  max_order_age_days: 60   # abandon jobs whose order is older than this (0 disables)
 ```
 
 Requires `mongo.enabled: true` — retry jobs are stored in the `retry_jobs` MongoDB collection.
+
+## Giving Up
+
+A job stops retrying and is marked `failed` when either:
+
+- it exhausts `max_retries` attempts, or
+- its **order** is older than `max_order_age_days`.
+
+The age guard exists because a job can be young while its order is old — e.g. a manual
+re-run or the payment reconciler re-enqueues an ancient order that will never succeed
+(such as a months-old order with an invalid contractor email). Age is measured from the
+order/payment date in the stored checkout params, falling back to the job creation time
+when that is unset. Abandonment is reported to Telegram (`error` topic).
 
 ## Exponential Backoff
 

@@ -126,7 +126,7 @@ func main() {
 
 	var retryQueue *core.RetryQueue
 	if conf.RetryQueue.Enabled && mongo != nil {
-		retryQueue = core.NewRetryQueue(log, conf.RetryQueue.IntervalMin, conf.RetryQueue.MaxRetries, conf.RetryQueue.BaseDelaySec)
+		retryQueue = core.NewRetryQueue(log, conf.RetryQueue.IntervalMin, conf.RetryQueue.MaxRetries, conf.RetryQueue.BaseDelaySec, conf.RetryQueue.MaxOrderAgeDays)
 		retryQueue.SetDatabase(mongo)
 		retryQueue.SetInvoiceService(wfirmaClient)
 		retryQueue.SetOpencart(oc)

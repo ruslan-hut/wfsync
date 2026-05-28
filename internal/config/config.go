@@ -78,10 +78,11 @@ type VIES struct {
 }
 
 type RetryQueue struct {
-	Enabled      bool `yaml:"enabled" env-default:"false"`
-	IntervalMin  int  `yaml:"interval_min" env-default:"5"`
-	MaxRetries   int  `yaml:"max_retries" env-default:"10"`
-	BaseDelaySec int  `yaml:"base_delay_sec" env-default:"60"`
+	Enabled         bool `yaml:"enabled" env-default:"false"`
+	IntervalMin     int  `yaml:"interval_min" env-default:"5"`
+	MaxRetries      int  `yaml:"max_retries" env-default:"10"`
+	BaseDelaySec    int  `yaml:"base_delay_sec" env-default:"60"`
+	MaxOrderAgeDays int  `yaml:"max_order_age_days" env-default:"60"`
 }
 
 // PaymentReconciler configures the periodic job that reconciles held Stripe payments

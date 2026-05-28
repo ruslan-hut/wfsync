@@ -5,6 +5,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 	"wfsync/entity"
@@ -24,19 +25,22 @@ type RetryDatabase interface {
 // RetryQueue polls for pending retry jobs and attempts to re-register invoices
 // with exponential backoff. Follows the same Start/Stop pattern as vatrates.Service.
 type RetryQueue struct {
-	db         RetryDatabase
-	inv        InvoiceService
-	oc         *occlient.Opencart
-	log        *slog.Logger
-	interval   time.Duration
-	maxRetries int
-	baseDelay  time.Duration
-	done       chan struct{}
-	stopped    chan struct{}
+	db          RetryDatabase
+	inv         InvoiceService
+	oc          *occlient.Opencart
+	log         *slog.Logger
+	interval    time.Duration
+	maxRetries  int
+	baseDelay   time.Duration
+	maxOrderAge time.Duration
+	done        chan struct{}
+	stopped     chan struct{}
 }
 
 // NewRetryQueue creates a retry queue. Call Start() to begin background processing.
-func NewRetryQueue(log *slog.Logger, intervalMin, maxRetries, baseDelaySec int) *RetryQueue {
+// maxOrderAgeDays gives up on jobs whose underlying order is older than that many days
+// (0 disables the age guard), so chronically failing ancient orders stop retrying.
+func NewRetryQueue(log *slog.Logger, intervalMin, maxRetries, baseDelaySec, maxOrderAgeDays int) *RetryQueue {
 	if intervalMin <= 0 {
 		intervalMin = 5
 	}
@@ -47,10 +51,11 @@ func NewRetryQueue(log *slog.Logger, intervalMin, maxRetries, baseDelaySec int) 
 		baseDelaySec = 60
 	}
 	return &RetryQueue{
-		log:        log.With(sl.Module("retry-queue")),
-		interval:   time.Duration(intervalMin) * time.Minute,
-		maxRetries: maxRetries,
-		baseDelay:  time.Duration(baseDelaySec) * time.Second,
+		log:         log.With(sl.Module("retry-queue")),
+		interval:    time.Duration(intervalMin) * time.Minute,
+		maxRetries:  maxRetries,
+		baseDelay:   time.Duration(baseDelaySec) * time.Second,
+		maxOrderAge: time.Duration(maxOrderAgeDays) * 24 * time.Hour,
 	}
 }
 
@@ -180,6 +185,27 @@ func (rq *RetryQueue) processOneJob(job *entity.RetryJob) {
 		log.Error("checkout params not found for retry event")
 		rq.failJob(job, "checkout params not found")
 		return
+	}
+
+	// Abandon jobs whose order is older than the configured max age. The job itself may
+	// be young (e.g. re-enqueued by a manual re-run or the reconciler), so age is measured
+	// from the order/payment date in the stored params, falling back to the job creation
+	// time when that is unset.
+	if rq.maxOrderAge > 0 {
+		orderDate := params.Created
+		if orderDate.IsZero() {
+			orderDate = job.CreatedAt
+		}
+		if age := time.Since(orderDate); age > rq.maxOrderAge {
+			log.With(
+				slog.String("order_date", orderDate.Format(time.RFC3339)),
+				slog.Duration("age", age),
+				slog.String("last_error", job.LastError),
+				slog.String("tg_topic", entity.TopicError),
+			).Warn("retry job abandoned: order older than max age")
+			rq.failJob(job, fmt.Sprintf("order older than %s, abandoned after %d attempts", rq.maxOrderAge, job.Attempts))
+			return
+		}
 	}
 
 	// Attempt to register the invoice
