@@ -37,7 +37,7 @@ const reconcileBatchLimit = 200
 // ReconcileDatabase defines the persistence methods the reconciler needs.
 type ReconcileDatabase interface {
 	GetUnresolvedHeldParams(limit int) ([]*entity.CheckoutParams, error)
-	CloseCheckoutParams(sessionId, invoiceId string) error
+	CloseCheckoutParams(paymentId, invoiceId string) error
 }
 
 // reconcileOutcome classifies what happened to a single held payment in one pass,
@@ -276,9 +276,10 @@ func (r *Reconciler) handleCanceled(log *slog.Logger, params *entity.CheckoutPar
 }
 
 // closeRecord marks the checkout params as resolved so subsequent ticks skip it. Keyed
-// on session_id so it targets the original document even when order_id was repaired.
+// on payment_id, which is always present on reconciled records and is never rewritten by
+// the order_id repair — unlike session_id, which can be empty for foreign/legacy records.
 func (r *Reconciler) closeRecord(log *slog.Logger, params *entity.CheckoutParams, invoiceId string) {
-	if err := r.db.CloseCheckoutParams(params.SessionId, invoiceId); err != nil {
+	if err := r.db.CloseCheckoutParams(params.PaymentId, invoiceId); err != nil {
 		log.Error("close reconciled record", sl.Err(err))
 	}
 }

@@ -227,12 +227,15 @@ func (m *MongoDB) UpdateCheckoutParams(params *entity.CheckoutParams) error {
 }
 
 // CloseCheckoutParams marks a checkout params document resolved by stamping closed
-// (and invoice_id when provided), keyed on session_id so it always targets the original
-// document even if the in-memory order_id was repaired. Never upserts: a missing match
-// is a no-op rather than a phantom insert.
-func (m *MongoDB) CloseCheckoutParams(sessionId, invoiceId string) error {
-	if sessionId == "" {
-		return fmt.Errorf("empty session id")
+// (and invoice_id when provided), keyed on payment_id so it always targets the original
+// document even if the in-memory order_id was repaired. payment_id is used rather than
+// session_id because the reconciler only ever processes records that already carry a
+// PaymentIntent, while session_id can be empty (e.g. foreign or legacy records) — keying
+// on an empty field would silently fail to close the record and re-surface it every tick.
+// Never upserts: a missing match is a no-op rather than a phantom insert.
+func (m *MongoDB) CloseCheckoutParams(paymentId, invoiceId string) error {
+	if paymentId == "" {
+		return fmt.Errorf("empty payment id")
 	}
 	ctx, cancel := m.opCtx()
 	defer cancel()
@@ -247,7 +250,7 @@ func (m *MongoDB) CloseCheckoutParams(sessionId, invoiceId string) error {
 	if invoiceId != "" {
 		set = append(set, bson.E{Key: "invoice_id", Value: invoiceId})
 	}
-	_, err = collection.UpdateOne(ctx, bson.D{{"session_id", sessionId}}, bson.D{{"$set", set}})
+	_, err = collection.UpdateMany(ctx, bson.D{{"payment_id", paymentId}}, bson.D{{"$set", set}})
 	return err
 }
 
