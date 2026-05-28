@@ -403,6 +403,15 @@ func (c *Client) submitInvoice(ctx context.Context, log *slog.Logger, inv *Invoi
 		return nil, fmt.Errorf("unmarshal invoice response: %w", err)
 	}
 
+	// On retry-queue attempts, keep failures local: the original error was already
+	// reported to Telegram when the job was enqueued, so per-attempt alerts and
+	// full-response dumps are just noise. tgAttr toggles the dispatch accordingly.
+	isRetry := entity.IsRetry(ctx)
+	tgAttr := slog.String("tg_topic", entity.TopicError)
+	if isRetry {
+		tgAttr = slog.Bool("tg_skip", true)
+	}
+
 	if addResp.Status.Code == "ERROR" {
 		errMsg := extractInvoiceErrors(&addResp)
 
@@ -410,7 +419,7 @@ func (c *Client) submitInvoice(ctx context.Context, log *slog.Logger, inv *Invoi
 		if len(stockErrIdxs) > 0 {
 			log.With(
 				slog.String("error", errMsg),
-				slog.String("tg_topic", entity.TopicError),
+				tgAttr,
 			).Warn("stock error, retrying without good references")
 
 			for _, idx := range stockErrIdxs {
@@ -441,19 +450,19 @@ func (c *Client) submitInvoice(ctx context.Context, log *slog.Logger, inv *Invoi
 
 			if addResp.Status.Code == "ERROR" {
 				retryErrMsg := extractInvoiceErrors(&addResp)
-				log.With(
-					slog.String("error", retryErrMsg),
-					slog.String("response", truncateBody(string(addRes))),
-					slog.String("tg_topic", entity.TopicError),
-				).Warn("retry invoice creation error")
+				rl := log.With(slog.String("error", retryErrMsg), tgAttr)
+				if !isRetry {
+					rl = rl.With(slog.String("response", truncateBody(string(addRes))))
+				}
+				rl.Warn("retry invoice creation error")
 				return nil, fmt.Errorf("wFirma error (retry): %s", retryErrMsg)
 			}
 		} else {
-			log.With(
-				slog.String("error", errMsg),
-				slog.String("response", truncateBody(string(addRes))),
-				slog.String("tg_topic", entity.TopicError),
-			).Warn("invoice creation error")
+			el := log.With(slog.String("error", errMsg), tgAttr)
+			if !isRetry {
+				el = el.With(slog.String("response", truncateBody(string(addRes))))
+			}
+			el.Warn("invoice creation error")
 			return nil, fmt.Errorf("wFirma error: %s", errMsg)
 		}
 	}

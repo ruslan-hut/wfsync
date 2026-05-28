@@ -208,8 +208,10 @@ func (rq *RetryQueue) processOneJob(job *entity.RetryJob) {
 		}
 	}
 
-	// Attempt to register the invoice
-	ctx := context.Background()
+	// Attempt to register the invoice. Flag the context as a retry so the wFirma
+	// layer keeps per-attempt failures local — the original error was already
+	// reported to Telegram when the job was enqueued.
+	ctx := entity.WithRetry(context.Background())
 	payment, err := rq.inv.RegisterInvoice(ctx, params)
 	job.Attempts++
 	job.UpdatedAt = time.Now()
