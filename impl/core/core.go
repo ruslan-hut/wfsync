@@ -37,6 +37,7 @@ type InvoiceService interface {
 	SyncFromRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
 	SyncToRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
 	FindInvoices(ctx context.Context, from, to string) ([]*entity.LocalInvoice, error)
+	InvoiceExists(ctx context.Context, invoiceID string) (bool, error)
 }
 
 // PaymentDatabase provides access to payment-related data in MongoDB.
@@ -282,6 +283,24 @@ func (c *Core) WFirmaOrderToInvoice(ctx context.Context, orderId int64, useCurre
 		slog.Int64("total", params.Total),
 		slog.String("date", params.Created.Format("2006-01-02")),
 	)
+
+	// Idempotency guard: if the order already records an invoice, verify it still
+	// exists on the wFirma side before deciding. The check is authoritative because
+	// an invoice can be deleted in wFirma while the local reference lingers.
+	if params.InvoiceId != "" {
+		exists, err := c.inv.InvoiceExists(ctx, params.InvoiceId)
+		if err != nil {
+			// State unknown — refuse to create rather than risk a duplicate.
+			return nil, fmt.Errorf("verify existing invoice %s: %w", params.InvoiceId, err)
+		}
+		if exists {
+			log.With(slog.String("invoice_id", params.InvoiceId)).Info("invoice already exists, skipping creation")
+			return params, nil
+		}
+		// Confirmed deleted in wFirma — clear the stale reference and re-create.
+		log.With(slog.String("invoice_id", params.InvoiceId)).Warn("recorded invoice missing in wfirma, re-creating")
+		params.InvoiceId = ""
+	}
 
 	linesTotal := params.ItemsTotal()
 	if linesTotal != params.Total {

@@ -625,6 +625,62 @@ func (c *Client) addPayment(ctx context.Context, invoice Invoice) error {
 
 // DownloadInvoice fetches the PDF file for a given wFirma invoice ID.
 // Uses the invoices/download/{id} endpoint. Returns the saved filename and file metadata.
+// InvoiceExists reports whether an invoice with the given wFirma ID still exists.
+//
+// It distinguishes three outcomes so callers can safely decide whether to re-create:
+//   - (true, nil)   the invoice is present
+//   - (false, nil)  the invoice is confirmed absent (deleted / never existed)
+//   - (false, err)  the state could not be determined (network, auth, unexpected error)
+//
+// Callers must treat the error case as "unknown" and abort rather than risk creating
+// a duplicate, while (false, nil) is the green light to re-create.
+func (c *Client) InvoiceExists(ctx context.Context, invoiceID string) (bool, error) {
+	if !c.enabled {
+		return false, fmt.Errorf("wFirma is disabled")
+	}
+	if invoiceID == "" {
+		return false, nil
+	}
+
+	// wFirma addresses a single object as invoices/get/{id}.
+	res, err := c.request(ctx, "invoices", "get/"+invoiceID, map[string]interface{}{})
+	if err != nil {
+		return false, err
+	}
+
+	var resp InvoiceResponse
+	if err := json.Unmarshal(res, &resp); err != nil {
+		return false, fmt.Errorf("parse get response: %w", err)
+	}
+
+	if resp.Status.Code == "OK" {
+		for _, w := range resp.Invoices {
+			if w.Invoice.Id != "" {
+				return true, nil
+			}
+		}
+		// OK with no invoice payload means the object is gone.
+		return false, nil
+	}
+
+	// A deleted invoice returns status code "NOT FOUND" (verified against the live API);
+	// anything else is indeterminate, so surface it and let the caller abort.
+	if isNotFoundStatus(resp.Status.Code) {
+		return false, nil
+	}
+	msg := resp.Status.Message
+	if msg == "" {
+		msg = resp.Status.Code
+	}
+	return false, fmt.Errorf("wfirma get invoice %s: %s", invoiceID, msg)
+}
+
+// isNotFoundStatus matches wFirma's not-found status code (e.g. "NOT FOUND",
+// "OBJECT NOT FOUND") case-insensitively.
+func isNotFoundStatus(code string) bool {
+	return strings.Contains(strings.ToUpper(code), "NOT FOUND")
+}
+
 func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (fileName string, meta *entity.FileMeta, err error) {
 	if !c.enabled {
 		return "", nil, fmt.Errorf("wFirma is disabled")

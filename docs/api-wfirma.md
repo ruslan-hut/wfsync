@@ -70,6 +70,17 @@ GET /v1/wf/order/{id}
 
 Requires `WFirmaAllowInvoice` permission.
 
+#### Idempotency
+
+If the order already records an invoice ID, the service verifies that the invoice
+**still exists in wFirma** before acting:
+
+- Invoice exists → no new invoice is created; the existing reference is returned.
+- Invoice was deleted in wFirma → the stale reference is cleared and a new invoice
+  is created.
+- Existence could not be determined (wFirma error) → the request fails with a 400
+  rather than risk creating a duplicate. Retry once wFirma is reachable.
+
 #### Response
 
 Returns `CheckoutParams` object with the created invoice ID:
