@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -411,11 +412,22 @@ func (s *StripeClient) CaptureAmount(sessionId string, amount int64) (*entity.Pa
 	return payment, params, nil
 }
 
+// ErrPaymentIntentNotFound signals that Stripe has no such PaymentIntent (HTTP 404 /
+// resource_missing). It is terminal — the intent will never appear — so callers should
+// stop polling rather than treating it as a transient failure.
+var ErrPaymentIntentNotFound = errors.New("payment intent not found")
+
 // PaymentIntentStatus fetches a PaymentIntent and returns its live status string and
 // the amount captured so far. Used by the reconciler to decide per-hold actions.
+// Returns ErrPaymentIntentNotFound when Stripe reports the intent does not exist.
 func (s *StripeClient) PaymentIntentStatus(piID string) (status string, amountReceived int64, err error) {
 	pi, err := s.sc.PaymentIntents.Get(piID, nil)
 	if err != nil {
+		var stripeErr *stripe.Error
+		if errors.As(err, &stripeErr) &&
+			(stripeErr.HTTPStatusCode == 404 || stripeErr.Code == stripe.ErrorCodeResourceMissing) {
+			return "", 0, ErrPaymentIntentNotFound
+		}
 		return "", 0, s.parseErr(err)
 	}
 	return string(pi.Status), pi.AmountReceived, nil

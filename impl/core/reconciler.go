@@ -18,11 +18,13 @@ package core
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strconv"
 	"strings"
 	"time"
 	"wfsync/entity"
+	"wfsync/internal/stripeclient"
 	"wfsync/lib/sl"
 
 	"github.com/stripe/stripe-go/v76"
@@ -162,6 +164,13 @@ func (r *Reconciler) reconcileOne(params *entity.CheckoutParams) reconcileOutcom
 
 	status, _, err := r.core.sc.PaymentIntentStatus(params.PaymentId)
 	if err != nil {
+		if errors.Is(err, stripeclient.ErrPaymentIntentNotFound) {
+			// The PaymentIntent does not exist (e.g. stale or test-mode records queried
+			// with a live key) — nothing to reconcile, close it so we stop re-checking.
+			log.Warn("payment intent not found in stripe, closing record")
+			r.closeRecord(log, params, "")
+			return outcomeSkipped
+		}
 		// Transient: leave the record open and retry next tick.
 		log.Warn("get payment intent status", sl.Err(err))
 		return outcomePending
