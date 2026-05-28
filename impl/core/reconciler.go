@@ -133,7 +133,7 @@ func (r *Reconciler) reconcile() {
 		return
 	}
 
-	r.log.Info("reconciling held payments", slog.Int("count", len(params)))
+	r.log.Debug("reconciling held payments", slog.Int("count", len(params)))
 	var counts [outcomeSkipped + 1]int
 	for _, p := range params {
 		counts[r.reconcileOne(p)]++
