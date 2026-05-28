@@ -148,7 +148,7 @@ func (c *Client) SyncFromRemote(ctx context.Context, from, to string) (*entity.S
 			Date:   inv.Date,
 		}
 		if err = c.db.SaveInvoice(inv.Id, localInv); err != nil {
-			log.Warn("upsert invoice", slog.String("id", inv.Id), sl.Err(err))
+			log.Warn("upsert invoice", slog.String("invoice_id", inv.Id), sl.Err(err))
 			continue
 		}
 		result.Upserted++
@@ -165,7 +165,7 @@ func (c *Client) SyncFromRemote(ctx context.Context, from, to string) (*entity.S
 	for _, local := range localInvoices {
 		if !remoteIDs[local.Id] {
 			if err = c.db.DeleteInvoiceById(local.Id); err != nil {
-				log.Warn("delete orphaned invoice", slog.String("id", local.Id), sl.Err(err))
+				log.Warn("delete orphaned invoice", slog.String("invoice_id", local.Id), sl.Err(err))
 				continue
 			}
 			result.Deleted++
@@ -223,30 +223,31 @@ func (c *Client) SyncToRemote(ctx context.Context, from, to string) (*entity.Syn
 			continue
 		}
 
+		oldId := local.Id
 		newId, newNumber, err := c.recreateInvoice(ctx, local)
 		if err != nil {
 			log.Warn("recreate invoice",
-				slog.String("old_id", local.Id),
+				slog.String("old_invoice_id", oldId),
 				sl.Err(err))
 			continue
 		}
 
 		// Delete old local record
-		if err = c.db.DeleteInvoiceById(local.Id); err != nil {
-			log.Warn("delete old local invoice", slog.String("id", local.Id), sl.Err(err))
+		if err = c.db.DeleteInvoiceById(oldId); err != nil {
+			log.Warn("delete old local invoice", slog.String("invoice_id", oldId), sl.Err(err))
 		}
 
 		// Save new record with updated ID and number
 		local.Id = newId
 		local.Number = newNumber
 		if err = c.db.SaveInvoice(newId, local); err != nil {
-			log.Warn("save recreated invoice", slog.String("id", newId), sl.Err(err))
+			log.Warn("save recreated invoice", slog.String("invoice_id", newId), sl.Err(err))
 		}
 
 		result.Recreated++
 		log.Info("invoice recreated",
-			slog.String("old_id", local.Id),
-			slog.String("new_id", newId),
+			slog.String("old_invoice_id", oldId),
+			slog.String("new_invoice_id", newId),
 			slog.String("new_number", newNumber))
 	}
 

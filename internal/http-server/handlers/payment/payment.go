@@ -16,8 +16,8 @@ import (
 
 type Core interface {
 	StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment, error)
-	StripeCaptureAmount(sessionId string, amount int64) (*entity.Payment, error)
-	StripeCancelPayment(sessionId, reason string) (*entity.Payment, error)
+	StripeCaptureAmount(sessionId string, amount int64) (*entity.Payment, *entity.CheckoutParams, error)
+	StripeCancelPayment(sessionId, reason string) (*entity.Payment, *entity.CheckoutParams, error)
 	StripePayAmount(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 	StripePaymentStatus(orderId string) (*entity.PaymentStatus, error)
 }
@@ -67,7 +67,8 @@ func Hold(log *slog.Logger, handler Core) http.HandlerFunc {
 			render.JSON(w, r, response.Error(fmt.Sprintf("Get link: %v", err)))
 			return
 		}
-		logger.Debug("payment link created")
+		// session_id links this order to its Stripe session for later capture/cancel tracking.
+		logger.With(slog.String("session_id", pm.Id)).Debug("payment link created")
 
 		render.JSON(w, r, response.Ok(pm))
 	}
@@ -109,15 +110,19 @@ func Capture(log *slog.Logger, handler Core) http.HandlerFunc {
 			render.JSON(w, r, response.Error(fmt.Sprintf("Invalid request: %v", err)))
 			return
 		}
-		logger = logger.With(
-			slog.Int64("amount", checkoutParams.Total),
-			slog.String("order_id", checkoutParams.OrderId),
-		)
+		logger = logger.With(slog.Int64("amount", checkoutParams.Total))
 		if checkoutParams.ClientDetails != nil {
 			logger = logger.With(slog.String("client_name", checkoutParams.ClientDetails.Name))
 		}
 
-		pm, err := handler.StripeCaptureAmount(id, checkoutParams.Total)
+		pm, params, err := handler.StripeCaptureAmount(id, checkoutParams.Total)
+		// Prefer the order id resolved from the held session over the request body, which
+		// may carry an unrelated external reference (e.g. a Zoho id).
+		if params != nil && params.OrderId != "" {
+			logger = logger.With(slog.String("order_id", params.OrderId))
+		} else {
+			logger = logger.With(slog.String("order_id", checkoutParams.OrderId))
+		}
 		if err != nil {
 			logger.Error("capture amount", sl.Err(err))
 			render.Status(r, 400)
@@ -145,7 +150,7 @@ func Cancel(log *slog.Logger, handler Core) http.HandlerFunc {
 		logger := log.With(
 			mod,
 			slog.String("request_id", middleware.GetReqID(r.Context())),
-			slog.String("payment_id", id),
+			slog.String("session_id", id),
 			slog.String("reason", reason),
 		)
 
@@ -155,7 +160,12 @@ func Cancel(log *slog.Logger, handler Core) http.HandlerFunc {
 			return
 		}
 
-		pm, err := handler.StripeCancelPayment(id, reason)
+		pm, params, err := handler.StripeCancelPayment(id, reason)
+		// Log the OpenCart order id resolved from the held session so the cancel event can
+		// be tracked alongside the matching hold/capture events.
+		if params != nil && params.OrderId != "" {
+			logger = logger.With(slog.String("order_id", params.OrderId))
+		}
 		if err != nil {
 			logger.Error("cancel payment", sl.Err(err))
 			render.Status(r, 400)
@@ -199,6 +209,7 @@ func Pay(log *slog.Logger, handler Core) http.HandlerFunc {
 		logger = logger.With(
 			slog.Int("items_count", len(checkoutParams.LineItems)),
 			slog.Int64("total", checkoutParams.Total),
+			slog.String("order_id", checkoutParams.OrderId),
 		)
 		checkoutParams.Source = entity.SourceApi
 
@@ -209,7 +220,7 @@ func Pay(log *slog.Logger, handler Core) http.HandlerFunc {
 			render.JSON(w, r, response.Error(fmt.Sprintf("Get link: %v", err)))
 			return
 		}
-		logger.Debug("payment link created")
+		logger.With(slog.String("session_id", pm.Id)).Debug("payment link created")
 
 		render.JSON(w, r, response.Ok(pm))
 	}

@@ -131,7 +131,7 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 	log := s.log.With(
 		slog.Any("event_type", evt.Type),
 		slog.String("event_id", evt.ID),
-		//slog.String("session_id", invID),
+		slog.String("session_id", invID),
 	)
 
 	params, _ := s.db.GetCheckoutParamsForEvent(evt.ID)
@@ -167,6 +167,10 @@ func (s *StripeClient) handleCheckoutCompleted(evt *stripe.Event) *entity.Checko
 	params = entity.NewFromCheckoutSession(sess)
 	params.EventId = evt.ID
 
+	log = log.With(
+		slog.String("order_id", params.OrderId),
+		slog.String("payment_id", params.PaymentId),
+	)
 	if params.ClientDetails != nil {
 		log = log.With(
 			slog.String("client_name", params.ClientDetails.Name),
@@ -203,7 +207,7 @@ func (s *StripeClient) handleAmountCapturable(evt *stripe.Event) *entity.Checkou
 	log := s.log.With(
 		slog.Any("event_type", evt.Type),
 		slog.String("event_id", evt.ID),
-		slog.String("payment_intent_id", piID),
+		slog.String("payment_id", piID),
 	)
 
 	pi, err := s.sc.PaymentIntents.Get(piID, nil)
@@ -331,7 +335,6 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 		err = s.parseErr(err)
 		return nil, fmt.Errorf("stripe response: %w", err)
 	}
-	//log = log.With(slog.String("session_id", cs.ID))
 
 	params.Payload = cs
 	params.SessionId = cs.ID
@@ -344,7 +347,9 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 		Link:    cs.URL,
 	}
 
-	log.Info("hold link created")
+	// session_id maps this order to its Stripe session, the key linking later
+	// hold-confirmed / capture / cancel events back to this order in the logs.
+	log.With(slog.String("session_id", cs.ID)).Info("hold link created")
 	return payment, nil
 }
 
@@ -378,6 +383,7 @@ func (s *StripeClient) CaptureAmount(sessionId string, amount int64) (*entity.Pa
 	log = log.With(
 		slog.String("currency", params.Currency),
 		slog.String("order_id", params.OrderId),
+		slog.String("payment_id", params.PaymentId),
 	)
 	if params.ClientDetails != nil {
 		log = log.With(slog.String("client_name", params.ClientDetails.Name))
@@ -390,7 +396,9 @@ func (s *StripeClient) CaptureAmount(sessionId string, amount int64) (*entity.Pa
 	result, err := s.sc.PaymentIntents.Capture(params.PaymentId, captureParams)
 	if err != nil {
 		err = s.parseErr(err)
-		return nil, nil, fmt.Errorf("stripe response: %w", err)
+		// Return params so callers can log the order being captured (resolved from the
+		// session) rather than whatever order_id the request body carried.
+		return nil, params, fmt.Errorf("stripe response: %w", err)
 	}
 
 	params.PaymentId = result.ID
@@ -491,7 +499,10 @@ func (s *StripeClient) PaymentStatus(orderId string) (*entity.PaymentStatus, err
 	return st, nil
 }
 
-func (s *StripeClient) CancelPayment(sessionId, reason string) (*entity.Payment, error) {
+// CancelPayment cancels a held PaymentIntent. It also returns the checkout params
+// resolved from the session so callers can log the order being canceled (resolved from
+// the session) rather than whatever order_id the request carried.
+func (s *StripeClient) CancelPayment(sessionId, reason string) (*entity.Payment, *entity.CheckoutParams, error) {
 	log := s.log.With(
 		slog.String("session_id", sessionId),
 	)
@@ -501,19 +512,20 @@ func (s *StripeClient) CancelPayment(sessionId, reason string) (*entity.Payment,
 		log.With(
 			sl.Err(err),
 		).Warn("failed to get checkout params from database")
-		return nil, fmt.Errorf("session not found")
+		return nil, nil, fmt.Errorf("session not found")
 	}
 	if params == nil {
-		return nil, fmt.Errorf("session not found")
+		return nil, nil, fmt.Errorf("session not found")
 	}
 	if params.PaymentId == "" {
-		return nil, fmt.Errorf("payment id not found")
+		return nil, params, fmt.Errorf("payment id not found")
 	}
 
 	log = log.With(
 		slog.Int64("amount", params.Total),
 		slog.String("currency", params.Currency),
 		slog.String("order_id", params.OrderId),
+		slog.String("payment_id", params.PaymentId),
 	)
 	if params.ClientDetails != nil {
 		log = log.With(slog.String("client_name", params.ClientDetails.Name))
@@ -524,7 +536,7 @@ func (s *StripeClient) CancelPayment(sessionId, reason string) (*entity.Payment,
 		reason = "requested_by_customer"
 	} else {
 		if reason != "duplicate" && reason != "fraudulent" && reason != "requested_by_customer" && reason != "abandoned" {
-			return nil, fmt.Errorf("invalid cancellation reason; must be one of duplicate, fraudulent, requested_by_customer, abandoned")
+			return nil, params, fmt.Errorf("invalid cancellation reason; must be one of duplicate, fraudulent, requested_by_customer, abandoned")
 		}
 	}
 
@@ -535,7 +547,7 @@ func (s *StripeClient) CancelPayment(sessionId, reason string) (*entity.Payment,
 	result, err := s.sc.PaymentIntents.Cancel(params.PaymentId, cancelParams)
 	if err != nil {
 		err = s.parseErr(err)
-		return nil, fmt.Errorf("stripe response: %w", err)
+		return nil, params, fmt.Errorf("stripe response: %w", err)
 	}
 
 	payment := &entity.Payment{
@@ -545,7 +557,7 @@ func (s *StripeClient) CancelPayment(sessionId, reason string) (*entity.Payment,
 	}
 
 	log.Info("payment cancelled")
-	return payment, nil
+	return payment, params, nil
 }
 
 func (s *StripeClient) PayAmount(params *entity.CheckoutParams) (*entity.Payment, error) {

@@ -351,7 +351,7 @@ func (c *Core) WFirmaRegisterProforma(ctx context.Context, params *entity.Checko
 				c.log.With(
 					slog.String("order_id", params.OrderId),
 					slog.String("path", c.filePath),
-					slog.String("file_id", params.ProformaId),
+					slog.String("proforma_id", params.ProformaId),
 					slog.String("file_name", params.ProformaFile),
 					sl.Err(err),
 				).Warn("remove file")
@@ -471,10 +471,13 @@ func (c *Core) StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment,
 	return c.sc.HoldAmount(params)
 }
 
-func (c *Core) StripeCaptureAmount(sessionId string, amount int64) (*entity.Payment, error) {
+// StripeCaptureAmount captures a held payment. It returns the checkout params (resolved
+// from the session) alongside the payment so handlers can log the OpenCart order id even
+// when the capture fails.
+func (c *Core) StripeCaptureAmount(sessionId string, amount int64) (*entity.Payment, *entity.CheckoutParams, error) {
 	pm, params, err := c.sc.CaptureAmount(sessionId, amount)
 	if err != nil {
-		return nil, err
+		return nil, params, err
 	}
 	if c.oc != nil && pm.OrderId != "" {
 		if saveErr := c.oc.SavePaymentData(pm.OrderId, pm.Id, sessionId, "paid", pm.Amount); saveErr != nil {
@@ -488,7 +491,7 @@ func (c *Core) StripeCaptureAmount(sessionId string, amount int64) (*entity.Paym
 	if params != nil {
 		go c.processInvoice(context.Background(), params)
 	}
-	return pm, nil
+	return pm, params, nil
 }
 
 func (c *Core) StripePaymentStatus(orderId string) (*entity.PaymentStatus, error) {
@@ -498,17 +501,20 @@ func (c *Core) StripePaymentStatus(orderId string) (*entity.PaymentStatus, error
 	return c.sc.PaymentStatus(orderId)
 }
 
-func (c *Core) StripeCancelPayment(sessionId, reason string) (*entity.Payment, error) {
-	pm, err := c.sc.CancelPayment(sessionId, reason)
+// StripeCancelPayment cancels a held payment. It returns the checkout params (resolved
+// from the session) alongside the payment so handlers can log the OpenCart order id even
+// when the cancellation fails.
+func (c *Core) StripeCancelPayment(sessionId, reason string) (*entity.Payment, *entity.CheckoutParams, error) {
+	pm, params, err := c.sc.CancelPayment(sessionId, reason)
 	if err != nil {
-		return nil, err
+		return nil, params, err
 	}
 	if c.oc != nil && pm.OrderId != "" {
 		if saveErr := c.oc.SavePaymentData(pm.OrderId, pm.Id, sessionId, "canceled", pm.Amount); saveErr != nil {
 			c.log.With(sl.Err(saveErr), slog.String("order_id", pm.OrderId)).Error("update payment status after cancel")
 		}
 	}
-	return pm, nil
+	return pm, params, nil
 }
 
 func (c *Core) StripePayAmount(_ context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
