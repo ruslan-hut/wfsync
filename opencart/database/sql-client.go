@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -317,6 +318,41 @@ func (s *MySql) OrderSearchId(orderId int64) (*entity.CheckoutParams, error) {
 	}
 
 	return s.addOrderData(orderId, &order)
+}
+
+// OrderIdByPaymentRef recovers the numeric OpenCart order id from the Stripe payment
+// references stored on the order. It tries the PaymentIntent id first, then the Checkout
+// Session id. Returns 0 (no error) when neither matches. Empty inputs are skipped so an
+// order with the default empty wf_payment_id is never matched accidentally.
+func (s *MySql) OrderIdByPaymentRef(paymentId, sessionId string) (int64, error) {
+	lookup := func(stmt *sql.Stmt, value string) (int64, error) {
+		if value == "" {
+			return 0, nil
+		}
+		var id int64
+		err := stmt.QueryRow(value).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
+		if err != nil {
+			return 0, fmt.Errorf("query: %w", err)
+		}
+		return id, nil
+	}
+
+	stmtPay, err := s.stmtSelectOrderIdByPaymentId()
+	if err != nil {
+		return 0, err
+	}
+	if id, err := lookup(stmtPay, paymentId); err != nil || id != 0 {
+		return id, err
+	}
+
+	stmtSess, err := s.stmtSelectOrderIdBySession()
+	if err != nil {
+		return 0, err
+	}
+	return lookup(stmtSess, sessionId)
 }
 
 // OrderSearchByDateRange returns lightweight order summaries for orders within a date range.

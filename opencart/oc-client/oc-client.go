@@ -288,6 +288,15 @@ func (oc *Opencart) GetOrder(orderId int64) (*entity.CheckoutParams, error) {
 	return oc.db.OrderSearchId(orderId)
 }
 
+// OrderIdByPaymentRef recovers an OpenCart order id from the Stripe PaymentIntent or
+// Checkout Session id stored on the order. Returns 0 when no order matches.
+func (oc *Opencart) OrderIdByPaymentRef(paymentId, sessionId string) (int64, error) {
+	if oc.db == nil {
+		return 0, fmt.Errorf("database not connected")
+	}
+	return oc.db.OrderIdByPaymentRef(paymentId, sessionId)
+}
+
 func (oc *Opencart) SaveInvoiceId(orderId string, invoiceId, invoiceFile string) error {
 	if oc.db == nil || orderId == "" {
 		return nil

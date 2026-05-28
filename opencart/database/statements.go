@@ -89,6 +89,27 @@ func (s *MySql) stmtUpdateOrderPayment() (*sql.Stmt, error) {
 	return s.prepareStmt("updateOrderPayment", query)
 }
 
+// stmtSelectOrderIdByPaymentId resolves an order from the Stripe PaymentIntent id
+// stored on it by UpdatePayment. Used to recover the order when a Stripe session
+// carries no order_id metadata.
+func (s *MySql) stmtSelectOrderIdByPaymentId() (*sql.Stmt, error) {
+	query := fmt.Sprintf(
+		`SELECT order_id FROM %sorder WHERE wf_payment_id = ? LIMIT 1`,
+		s.prefix,
+	)
+	return s.prepareStmt("stmtSelectOrderIdByPaymentId", query)
+}
+
+// stmtSelectOrderIdBySession resolves an order from the Stripe Checkout Session id
+// stored on it by UpdatePayment.
+func (s *MySql) stmtSelectOrderIdBySession() (*sql.Stmt, error) {
+	query := fmt.Sprintf(
+		`SELECT order_id FROM %sorder WHERE wf_payment_session = ? LIMIT 1`,
+		s.prefix,
+	)
+	return s.prepareStmt("stmtSelectOrderIdBySession", query)
+}
+
 func (s *MySql) stmtSelectOrderProducts() (*sql.Stmt, error) {
 	query := fmt.Sprintf(
 		`SELECT

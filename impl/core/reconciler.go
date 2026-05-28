@@ -37,7 +37,7 @@ const reconcileBatchLimit = 200
 // ReconcileDatabase defines the persistence methods the reconciler needs.
 type ReconcileDatabase interface {
 	GetUnresolvedHeldParams(limit int) ([]*entity.CheckoutParams, error)
-	UpdateCheckoutParams(params *entity.CheckoutParams) error
+	CloseCheckoutParams(sessionId, invoiceId string) error
 }
 
 // reconcileOutcome classifies what happened to a single held payment in one pass,
@@ -203,15 +203,35 @@ func (r *Reconciler) handleSucceeded(log *slog.Logger, params *entity.CheckoutPa
 		return outcomeSkipped
 	}
 
+	orderId, err := parseOrderId(params.OrderId)
+	if err != nil {
+		// order_id is not numeric — it holds the Stripe session id because the session
+		// carried no order_id metadata. Try to recover the real order by reverse-looking
+		// up the Stripe payment/session references OpenCart stored on the order.
+		orderId, err = oc.OrderIdByPaymentRef(params.PaymentId, params.SessionId)
+		if err != nil {
+			log.Error("recover order by payment ref", sl.Err(err))
+			return outcomePending // transient DB issue, retry next tick
+		}
+		if orderId == 0 {
+			// Genuinely not ours (e.g. a foreign Stripe session) — nothing to invoice.
+			// Close the record and surface it once for manual review.
+			log.With(slog.String("tg_topic", entity.TopicError)).
+				Warn("captured payment has no resolvable opencart order, closing for manual review")
+			r.closeRecord(log, params, "")
+			return outcomeSkipped
+		}
+		// Repair the record's order_id so the invoice and OpenCart writes target the
+		// recovered order rather than the session id.
+		params.OrderId = strconv.FormatInt(orderId, 10)
+		log = log.With(slog.String("recovered_order_id", params.OrderId))
+		log.Info("recovered opencart order from payment reference")
+	}
+
 	if err := oc.SavePaymentData(params.OrderId, params.PaymentId, params.SessionId, "paid", params.Total); err != nil {
 		log.Error("update payment status during reconcile", sl.Err(err))
 	}
 
-	orderId, err := parseOrderId(params.OrderId)
-	if err != nil {
-		log.With(slog.String("tg_topic", entity.TopicError)).Warn("invalid order id, skipping reconcile invoice")
-		return outcomeSkipped
-	}
 	order, err := oc.GetOrder(orderId)
 	if err != nil {
 		log.Error("get order during reconcile", sl.Err(err))
@@ -255,12 +275,10 @@ func (r *Reconciler) handleCanceled(log *slog.Logger, params *entity.CheckoutPar
 	return outcomeCanceled
 }
 
-// closeRecord marks the checkout params as resolved so subsequent ticks skip it.
+// closeRecord marks the checkout params as resolved so subsequent ticks skip it. Keyed
+// on session_id so it targets the original document even when order_id was repaired.
 func (r *Reconciler) closeRecord(log *slog.Logger, params *entity.CheckoutParams, invoiceId string) {
-	if invoiceId != "" {
-		params.InvoiceId = invoiceId
-	}
-	if err := r.db.UpdateCheckoutParams(params); err != nil {
+	if err := r.db.CloseCheckoutParams(params.SessionId, invoiceId); err != nil {
 		log.Error("close reconciled record", sl.Err(err))
 	}
 }

@@ -226,6 +226,31 @@ func (m *MongoDB) UpdateCheckoutParams(params *entity.CheckoutParams) error {
 	return err
 }
 
+// CloseCheckoutParams marks a checkout params document resolved by stamping closed
+// (and invoice_id when provided), keyed on session_id so it always targets the original
+// document even if the in-memory order_id was repaired. Never upserts: a missing match
+// is a no-op rather than a phantom insert.
+func (m *MongoDB) CloseCheckoutParams(sessionId, invoiceId string) error {
+	if sessionId == "" {
+		return fmt.Errorf("empty session id")
+	}
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
+	set := bson.D{{"closed", time.Now()}}
+	if invoiceId != "" {
+		set = append(set, bson.E{Key: "invoice_id", Value: invoiceId})
+	}
+	_, err = collection.UpdateOne(ctx, bson.D{{"session_id", sessionId}}, bson.D{{"$set", set}})
+	return err
+}
+
 func (m *MongoDB) GetCheckoutParamsForEvent(eventId string) (*entity.CheckoutParams, error) {
 	ctx, cancel := m.opCtx()
 	defer cancel()
