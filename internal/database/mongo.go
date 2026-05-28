@@ -264,6 +264,28 @@ func (m *MongoDB) GetCheckoutParamsSession(sessionId string) (*entity.CheckoutPa
 
 // GetStripeOrderIds returns a set of order IDs that have a non-empty session_id
 // in the checkout_params collection. Used to determine which orders were paid via Stripe.
+// GetCheckoutParamsByOrder returns the most recently modified checkout params for an
+// order. An order may have several documents (e.g. a re-issued hold), so we sort by
+// modified descending and return the latest.
+func (m *MongoDB) GetCheckoutParamsByOrder(orderId string) (*entity.CheckoutParams, error) {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
+	filter := bson.D{{"order_id", orderId}}
+	opts := options.FindOne().SetSort(bson.D{{"modified", -1}})
+	var params entity.CheckoutParams
+	err = collection.FindOne(ctx, filter, opts).Decode(&params)
+	if err != nil {
+		return nil, m.findError(err)
+	}
+	return &params, nil
+}
+
 func (m *MongoDB) GetStripeOrderIds(orderIds []string) (map[string]bool, error) {
 	if len(orderIds) == 0 {
 		return nil, nil

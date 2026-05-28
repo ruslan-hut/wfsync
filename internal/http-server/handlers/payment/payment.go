@@ -19,6 +19,7 @@ type Core interface {
 	StripeCaptureAmount(sessionId string, amount int64) (*entity.Payment, error)
 	StripeCancelPayment(sessionId, reason string) (*entity.Payment, error)
 	StripePayAmount(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
+	StripePaymentStatus(orderId string) (*entity.PaymentStatus, error)
 }
 
 func Hold(log *slog.Logger, handler Core) http.HandlerFunc {
@@ -211,6 +212,37 @@ func Pay(log *slog.Logger, handler Core) http.HandlerFunc {
 		logger.Debug("payment link created")
 
 		render.JSON(w, r, response.Ok(pm))
+	}
+}
+
+// Status reports the live Stripe payment state for an OpenCart order id.
+func Status(log *slog.Logger, handler Core) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		mod := sl.Module("http.handlers.payment")
+		id := chi.URLParam(r, "id")
+
+		logger := log.With(
+			mod,
+			slog.String("request_id", middleware.GetReqID(r.Context())),
+			slog.String("order_id", id),
+		)
+
+		if handler == nil {
+			logger.Error("stripe service not available")
+			render.JSON(w, r, response.Error("Stripe service not available"))
+			return
+		}
+
+		st, err := handler.StripePaymentStatus(id)
+		if err != nil {
+			logger.Error("payment status", sl.Err(err))
+			render.Status(r, 400)
+			render.JSON(w, r, response.Error(fmt.Sprintf("Payment status: %v", err)))
+			return
+		}
+		logger.Debug("payment status", slog.String("status", st.Status))
+
+		render.JSON(w, r, response.Ok(st))
 	}
 }
 

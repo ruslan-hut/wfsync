@@ -22,6 +22,7 @@ type Database interface {
 	SaveCheckoutParams(params *entity.CheckoutParams) error
 	GetCheckoutParamsForEvent(eventId string) (*entity.CheckoutParams, error)
 	GetCheckoutParamsSession(sessionId string) (*entity.CheckoutParams, error)
+	GetCheckoutParamsByOrder(orderId string) (*entity.CheckoutParams, error)
 }
 
 type StripeClient struct {
@@ -346,7 +347,11 @@ func (s *StripeClient) HoldAmount(params *entity.CheckoutParams) (*entity.Paymen
 	return payment, nil
 }
 
-func (s *StripeClient) CaptureAmount(sessionId string, amount int64) (*entity.Payment, error) {
+// CaptureAmount captures a previously held PaymentIntent. On success it marks the
+// stored checkout params as paid and persists them (assigning a synthetic event id
+// when none exists yet) so the returned params can drive asynchronous invoice
+// registration and survive a retry-queue reload by event id.
+func (s *StripeClient) CaptureAmount(sessionId string, amount int64) (*entity.Payment, *entity.CheckoutParams, error) {
 	log := s.log.With(
 		slog.Int64("amount", amount),
 		slog.String("session_id", sessionId),
@@ -357,13 +362,13 @@ func (s *StripeClient) CaptureAmount(sessionId string, amount int64) (*entity.Pa
 		log.With(
 			sl.Err(err),
 		).Warn("failed to get checkout params from database")
-		return nil, fmt.Errorf("session not found")
+		return nil, nil, fmt.Errorf("session not found")
 	}
 	if params == nil {
-		return nil, fmt.Errorf("session not found")
+		return nil, nil, fmt.Errorf("session not found")
 	}
 	if params.PaymentId == "" {
-		return nil, fmt.Errorf("payment id not found")
+		return nil, nil, fmt.Errorf("payment id not found")
 	}
 	if amount == 0 {
 		amount = params.Total
@@ -384,8 +389,17 @@ func (s *StripeClient) CaptureAmount(sessionId string, amount int64) (*entity.Pa
 	result, err := s.sc.PaymentIntents.Capture(params.PaymentId, captureParams)
 	if err != nil {
 		err = s.parseErr(err)
-		return nil, fmt.Errorf("stripe response: %w", err)
+		return nil, nil, fmt.Errorf("stripe response: %w", err)
 	}
+
+	params.PaymentId = result.ID
+	params.Total = result.Amount
+	params.Status = string(result.Status)
+	params.Paid = true
+	if params.EventId == "" {
+		params.EventId = "capture_" + result.ID
+	}
+	s.saveCheckoutParams(params)
 
 	payment := &entity.Payment{
 		Id:      result.ID,
@@ -394,7 +408,65 @@ func (s *StripeClient) CaptureAmount(sessionId string, amount int64) (*entity.Pa
 	}
 
 	log.Info("capture amount successful")
-	return payment, nil
+	return payment, params, nil
+}
+
+// PaymentStatus returns the live Stripe state for an order, looked up by the stored
+// checkout params. It prefers the PaymentIntent, falls back to the CheckoutSession,
+// and finally to the locally stored status when Stripe cannot be queried.
+func (s *StripeClient) PaymentStatus(orderId string) (*entity.PaymentStatus, error) {
+	params, err := s.db.GetCheckoutParamsByOrder(orderId)
+	if err != nil {
+		return nil, fmt.Errorf("order not found")
+	}
+	if params == nil {
+		return nil, fmt.Errorf("order not found")
+	}
+
+	st := &entity.PaymentStatus{
+		OrderId:   params.OrderId,
+		PaymentId: params.PaymentId,
+		SessionId: params.SessionId,
+		Status:    params.Status,
+		Amount:    params.Total,
+		Currency:  params.Currency,
+		Paid:      params.Paid,
+		InvoiceId: params.InvoiceId,
+		Source:    "stored",
+	}
+
+	if params.PaymentId != "" {
+		pi, err := s.sc.PaymentIntents.Get(params.PaymentId, nil)
+		if err != nil {
+			return nil, fmt.Errorf("stripe response: %w", s.parseErr(err))
+		}
+		st.Status = string(pi.Status)
+		st.Amount = pi.Amount
+		st.AmountReceived = pi.AmountReceived
+		st.Currency = strings.ToUpper(string(pi.Currency))
+		st.Paid = pi.Status == stripe.PaymentIntentStatusSucceeded
+		st.Captured = pi.AmountReceived > 0
+		st.Source = "payment_intent"
+		return st, nil
+	}
+
+	if params.SessionId != "" {
+		sess, err := s.sc.CheckoutSessions.Get(params.SessionId, nil)
+		if err != nil {
+			return nil, fmt.Errorf("stripe response: %w", s.parseErr(err))
+		}
+		st.Status = string(sess.Status)
+		st.Amount = sess.AmountTotal
+		st.Currency = strings.ToUpper(string(sess.Currency))
+		st.Paid = sess.PaymentStatus == stripe.CheckoutSessionPaymentStatusPaid
+		st.Source = "checkout_session"
+		if sess.PaymentIntent != nil {
+			st.PaymentId = sess.PaymentIntent.ID
+		}
+		return st, nil
+	}
+
+	return st, nil
 }
 
 func (s *StripeClient) CancelPayment(sessionId, reason string) (*entity.Payment, error) {

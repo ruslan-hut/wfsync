@@ -150,6 +150,15 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 		return
 	}
 
+	c.processInvoice(ctx, params)
+}
+
+// processInvoice enriches the order with authoritative OpenCart data, registers a
+// wFirma invoice, persists the resulting invoice id back to OpenCart, and falls back
+// to the retry queue on failure. It is shared by the Stripe webhook (paid event) and
+// the manual capture flow. params.EventId is used for log correlation and as the
+// retry-queue key.
+func (c *Core) processInvoice(ctx context.Context, params *entity.CheckoutParams) {
 	// try to read invoice items from the site database
 	if c.oc != nil && params.OrderId != "" {
 		orderId, err := strconv.ParseInt(params.OrderId, 10, 64)
@@ -157,7 +166,7 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 			c.log.With(
 				slog.String("order_id", params.OrderId),
 				slog.String("session_id", params.SessionId),
-				slog.String("event_id", evt.ID),
+				slog.String("event_id", params.EventId),
 				slog.String("email", params.ClientDetails.Email),
 				slog.Int64("total", params.Total),
 				slog.String("currency", params.Currency),
@@ -176,7 +185,7 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 			c.log.With(
 				slog.Int64("order_id", orderId),
 				slog.String("session_id", params.SessionId),
-				slog.String("event_id", evt.ID),
+				slog.String("event_id", params.EventId),
 				slog.String("email", params.ClientDetails.Email),
 				slog.Int64("total", params.Total),
 				slog.String("currency", params.Currency),
@@ -200,7 +209,7 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 		c.log.With(
 			slog.String("invoice_id", params.InvoiceId),
 			slog.String("order_id", params.OrderId),
-			slog.String("event_id", evt.ID),
+			slog.String("event_id", params.EventId),
 		).Warn("invoice already registered")
 		return
 	}
@@ -212,7 +221,7 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 		// keep this local log for event_id correlation but suppress duplicate notification.
 		c.log.With(
 			sl.Err(err),
-			slog.String("event_id", evt.ID),
+			slog.String("event_id", params.EventId),
 			slog.String("order_id", params.OrderId),
 			slog.Bool("tg_skip", true),
 		).Error("register invoice")
@@ -441,7 +450,7 @@ func (c *Core) StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment,
 }
 
 func (c *Core) StripeCaptureAmount(sessionId string, amount int64) (*entity.Payment, error) {
-	pm, err := c.sc.CaptureAmount(sessionId, amount)
+	pm, params, err := c.sc.CaptureAmount(sessionId, amount)
 	if err != nil {
 		return nil, err
 	}
@@ -450,7 +459,21 @@ func (c *Core) StripeCaptureAmount(sessionId string, amount int64) (*entity.Paym
 			c.log.With(sl.Err(saveErr), slog.String("order_id", pm.OrderId)).Error("update payment status after capture")
 		}
 	}
+	// Register the wFirma invoice asynchronously so the capture HTTP response is not
+	// blocked by wFirma latency; failures fall through to the retry queue. A manual
+	// capture emits no Stripe webhook we handle, so this is the only invoice trigger
+	// for held-then-captured payments.
+	if params != nil {
+		go c.processInvoice(context.Background(), params)
+	}
 	return pm, nil
+}
+
+func (c *Core) StripePaymentStatus(orderId string) (*entity.PaymentStatus, error) {
+	if c.sc == nil {
+		return nil, fmt.Errorf("stripe service not connected")
+	}
+	return c.sc.PaymentStatus(orderId)
 }
 
 func (c *Core) StripeCancelPayment(sessionId, reason string) (*entity.Payment, error) {

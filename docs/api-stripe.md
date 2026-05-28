@@ -244,6 +244,14 @@ curl -X POST "https://api.example.com/v1/st/capture/cs_live_abc123" \
 | `id` | string | Stripe PaymentIntent ID (pi_...) |
 | `order_id` | string | Your order ID |
 
+#### Invoice Registration
+
+A successful capture **asynchronously enqueues a wFirma invoice** for the order. The
+capture response returns immediately and does not wait for wFirma, so a slow wFirma
+call can never time out the capture. If invoice registration fails it is retried by
+the invoice retry queue. A manual capture emits no Stripe webhook the service handles,
+so this is the only invoice trigger for held-then-captured payments.
+
 #### Errors
 
 | Code | Description |
@@ -325,6 +333,76 @@ curl -X POST "https://api.example.com/v1/st/cancel/cs_live_abc123" \
 | 400 | Invalid reason, session not found, or payment_id missing |
 | 401 | Unauthorized |
 | 500 | Stripe service error |
+
+---
+
+### Get Payment Status
+
+Returns the live Stripe payment state for an OpenCart order. The status is read
+directly from Stripe (PaymentIntent, falling back to the Checkout Session), so it
+reflects the current state rather than the value last stored locally.
+
+```
+GET /v1/st/status/{id}
+```
+
+#### Path Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | Yes | OpenCart order ID |
+
+#### Example Request
+
+```bash
+curl "https://api.example.com/v1/st/status/16463" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+#### Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "order_id": "16463",
+    "payment_id": "pi_abc123...",
+    "session_id": "cs_live_abc123...",
+    "status": "requires_capture",
+    "amount": 25999,
+    "amount_received": 0,
+    "currency": "PLN",
+    "paid": false,
+    "captured": false,
+    "source": "payment_intent"
+  },
+  "status_message": "Success",
+  "timestamp": "2026-05-28T08:53:08Z"
+}
+```
+
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `order_id` | string | OpenCart order ID |
+| `payment_id` | string | Stripe PaymentIntent ID (pi_...), if known |
+| `session_id` | string | Stripe Checkout Session ID (cs_...), if known |
+| `status` | string | Live Stripe status (e.g. `requires_capture`, `succeeded`, `canceled`) |
+| `amount` | integer | Order/intent amount in minor units |
+| `amount_received` | integer | Amount captured so far, in minor units |
+| `currency` | string | Currency code |
+| `paid` | boolean | True when the PaymentIntent has succeeded |
+| `captured` | boolean | True when any funds have been captured |
+| `invoice_id` | string | wFirma invoice ID, if already registered |
+| `source` | string | Where the status was read: `payment_intent`, `checkout_session`, or `stored` |
+
+#### Errors
+
+| Code | Description |
+|------|-------------|
+| 400 | Order not found or Stripe service error |
+| 401 | Unauthorized |
 
 ---
 
