@@ -526,15 +526,23 @@ func extractInvoiceErrors(resp *InvoiceResponse) string {
 	return strings.Join(msgs, "; ")
 }
 
+// stockErrorPhrases are the wFirma error message fragments that indicate a
+// warehouse stock problem for a line item. Matching items are retried without
+// their Good reference, which turns the line into a plain free-text product
+// (name only, no code) and bypasses stock/batch tracking.
+//   - "Stan magazynowy" — stock level cannot be negative
+//   - "dostępnych partiach" — not enough quantity in available batches
+var stockErrorPhrases = []string{"Stan magazynowy", "dostępnych partiach"}
+
 // extractStockErrorIndices returns the integer indices of invoice content items
-// that have a stock-related error ("Stan magazynowy nie może być ujemny").
+// that have a stock-related error (see stockErrorPhrases).
 // These items should be retried without their Good reference to bypass stock tracking.
 func extractStockErrorIndices(resp *InvoiceResponse) []int {
 	var indices []int
 	for _, wrapper := range resp.Invoices {
 		for idxStr, cw := range wrapper.Invoice.InvoiceContents {
 			for _, ew := range cw.InvoiceContent.Errors {
-				if strings.Contains(ew.Error.Message, "Stan magazynowy") {
+				if isStockError(ew.Error.Message) {
 					idx, err := strconv.Atoi(idxStr)
 					if err == nil {
 						indices = append(indices, idx)
@@ -544,6 +552,17 @@ func extractStockErrorIndices(resp *InvoiceResponse) []int {
 		}
 	}
 	return indices
+}
+
+// isStockError reports whether a wFirma error message indicates a warehouse
+// stock problem that can be worked around by dropping the Good reference.
+func isStockError(msg string) bool {
+	for _, p := range stockErrorPhrases {
+		if strings.Contains(msg, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // buildVatMossDetails constructs the OSS evidence wrapper for an invoice.
