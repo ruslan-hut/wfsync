@@ -156,10 +156,12 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 
 // processInvoice enriches the order with authoritative OpenCart data, registers a
 // wFirma invoice, persists the resulting invoice id back to OpenCart, and falls back
-// to the retry queue on failure. It is shared by the Stripe webhook (paid event) and
-// the manual capture flow. params.EventId is used for log correlation and as the
-// retry-queue key.
-func (c *Core) processInvoice(ctx context.Context, params *entity.CheckoutParams) {
+// to the retry queue on failure. It is shared by the Stripe webhook (paid event), the
+// manual capture flow, and the payment reconciler. params.EventId is used for log
+// correlation and as the retry-queue key. Returns the created payment, or nil when the
+// invoice was skipped (no order / already registered) or registration failed and was
+// handed off to the retry queue.
+func (c *Core) processInvoice(ctx context.Context, params *entity.CheckoutParams) *entity.Payment {
 	// try to read invoice items from the site database
 	if c.oc != nil && params.OrderId != "" {
 		orderId, err := strconv.ParseInt(params.OrderId, 10, 64)
@@ -173,7 +175,7 @@ func (c *Core) processInvoice(ctx context.Context, params *entity.CheckoutParams
 				slog.String("currency", params.Currency),
 				slog.String("tg_topic", entity.TopicError),
 			).Warn("no opencart order id in stripe session, skipping invoice creation")
-			return
+			return nil
 		}
 		order, err := c.oc.GetOrder(orderId)
 		if err != nil {
@@ -192,7 +194,7 @@ func (c *Core) processInvoice(ctx context.Context, params *entity.CheckoutParams
 				slog.String("currency", params.Currency),
 				slog.String("tg_topic", entity.TopicError),
 			).Warn("opencart order not found or has no items, skipping invoice creation")
-			return
+			return nil
 		}
 		// Replace Stripe totals with OpenCart values so that TaxRate() uses consistent data.
 		// The site already applies the correct VAT rate per destination country (OSS scheme),
@@ -212,7 +214,7 @@ func (c *Core) processInvoice(ctx context.Context, params *entity.CheckoutParams
 			slog.String("order_id", params.OrderId),
 			slog.String("event_id", params.EventId),
 		).Warn("invoice already registered")
-		return
+		return nil
 	}
 
 	// register new invoice
@@ -229,7 +231,7 @@ func (c *Core) processInvoice(ctx context.Context, params *entity.CheckoutParams
 		if c.retryQueue != nil {
 			c.retryQueue.Enqueue(params, err.Error())
 		}
-		return
+		return nil
 	}
 	// save invoice id to a site database
 	if payment != nil && c.oc != nil {
@@ -240,6 +242,7 @@ func (c *Core) processInvoice(ctx context.Context, params *entity.CheckoutParams
 			).Error("save invoice id")
 		}
 	}
+	return payment
 }
 
 func (c *Core) WFirmaInvoiceDownload(ctx context.Context, invoiceID string) (io.ReadCloser, *entity.FileMeta, error) {

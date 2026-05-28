@@ -411,6 +411,16 @@ func (s *StripeClient) CaptureAmount(sessionId string, amount int64) (*entity.Pa
 	return payment, params, nil
 }
 
+// PaymentIntentStatus fetches a PaymentIntent and returns its live status string and
+// the amount captured so far. Used by the reconciler to decide per-hold actions.
+func (s *StripeClient) PaymentIntentStatus(piID string) (status string, amountReceived int64, err error) {
+	pi, err := s.sc.PaymentIntents.Get(piID, nil)
+	if err != nil {
+		return "", 0, s.parseErr(err)
+	}
+	return string(pi.Status), pi.AmountReceived, nil
+}
+
 // PaymentStatus returns the live Stripe state for an order, looked up by the stored
 // checkout params. It prefers the PaymentIntent, falls back to the CheckoutSession,
 // and finally to the locally stored status when Stripe cannot be queried.

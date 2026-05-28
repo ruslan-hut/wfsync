@@ -23,6 +23,9 @@ retry_queue:
   interval_min: 5
   max_retries: 10
   base_delay_sec: 600
+payment_reconciler:
+  enabled: true
+  interval_min: 15
 vatrates:
   enabled: true
   refresh_hours: 24

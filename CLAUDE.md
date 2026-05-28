@@ -58,7 +58,7 @@ Configuration via YAML files:
 - `wfsync-dev.yml` - Development environment
 - `wfsync.yml` - Production environment
 
-Key config sections: `listen`, `stripe`, `wfirma`, `mongo`, `opencart`, `telegram`, `retry_queue`
+Key config sections: `listen`, `stripe`, `wfirma`, `mongo`, `opencart`, `telegram`, `retry_queue`, `payment_reconciler`
 
 ## API Endpoints
 
@@ -150,6 +150,7 @@ GitHub Actions CI/CD:
 - `internal/http-server/api/api.go` - Route definitions
 - `entity/checkout-params.go` - Payment/order data structure
 - `impl/core/retryqueue.go` - Invoice retry queue with exponential backoff
+- `impl/core/reconciler.go` - Periodic job reconciling held Stripe payments with live status (invoices captured holds, reflects cancellations)
 
 ## API Documentation
 
@@ -158,3 +159,4 @@ GitHub Actions CI/CD:
 - `docs/api-stripe.md` - Stripe endpoints documentation
 - `docs/stripe-hold-capture.md` - Hold-capture flow guide
 - `docs/retry-queue.md` - Invoice retry queue documentation
+- `docs/payment-reconciler.md` - Periodic Stripe hold reconciliation job documentation

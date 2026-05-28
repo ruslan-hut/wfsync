@@ -84,20 +84,28 @@ type RetryQueue struct {
 	BaseDelaySec int  `yaml:"base_delay_sec" env-default:"60"`
 }
 
+// PaymentReconciler configures the periodic job that reconciles held Stripe payments
+// against their live status (invoicing captured holds, reflecting cancellations).
+type PaymentReconciler struct {
+	Enabled     bool `yaml:"enabled" env-default:"false"`
+	IntervalMin int  `yaml:"interval_min" env-default:"15"`
+}
+
 type Config struct {
-	Stripe   StripeConfig `yaml:"stripe"`
-	WFirma   WfirmaConfig `yaml:"wfirma"`
-	Listen   Listen       `yaml:"listen"`
-	Mongo    Mongo        `yaml:"mongo"`
-	OpenCart OpenCart     `yaml:"opencart"`
-	Telegram Telegram     `yaml:"telegram"`
-	VATRates VATRates     `yaml:"vatrates"`
-	VIES       VIES       `yaml:"vies"`
-	RetryQueue RetryQueue `yaml:"retry_queue"`
-	Env      string       `yaml:"env" env-default:"local"`
-	Log      string       `yaml:"log"`
-	Location string       `yaml:"location" env-default:"UTC"`
-	FilePath string       `yaml:"file_path" env-default:""`
+	Stripe            StripeConfig      `yaml:"stripe"`
+	WFirma            WfirmaConfig      `yaml:"wfirma"`
+	Listen            Listen            `yaml:"listen"`
+	Mongo             Mongo             `yaml:"mongo"`
+	OpenCart          OpenCart          `yaml:"opencart"`
+	Telegram          Telegram          `yaml:"telegram"`
+	VATRates          VATRates          `yaml:"vatrates"`
+	VIES              VIES              `yaml:"vies"`
+	RetryQueue        RetryQueue        `yaml:"retry_queue"`
+	PaymentReconciler PaymentReconciler `yaml:"payment_reconciler"`
+	Env               string            `yaml:"env" env-default:"local"`
+	Log               string            `yaml:"log"`
+	Location          string            `yaml:"location" env-default:"UTC"`
+	FilePath          string            `yaml:"file_path" env-default:""`
 }
 
 var instance *Config

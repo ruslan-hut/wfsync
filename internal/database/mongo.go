@@ -264,6 +264,55 @@ func (m *MongoDB) GetCheckoutParamsSession(sessionId string) (*entity.CheckoutPa
 
 // GetStripeOrderIds returns a set of order IDs that have a non-empty session_id
 // in the checkout_params collection. Used to determine which orders were paid via Stripe.
+// reconcileClosedSentinel is an early date used to tell an unset Created/Closed
+// timestamp (Go zero value 0001-01-01) apart from a real one. Records closed after a
+// real action have Closed = time.Now(), which is always after this sentinel.
+var reconcileClosedSentinel = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// GetUnresolvedHeldParams returns checkout params that have a PaymentIntent but no
+// invoice yet and have not been closed by a prior reconciliation. These are the holds
+// the reconciler must inspect against live Stripe state. Sessions that never produced
+// a PaymentIntent (abandoned before authorization) are excluded — they never held
+// funds and need no action.
+func (m *MongoDB) GetUnresolvedHeldParams(limit int) ([]*entity.CheckoutParams, error) {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
+	filter := bson.D{
+		{"payment_id", bson.D{{"$nin", bson.A{"", nil}}}},
+		{"$or", bson.A{
+			bson.D{{"invoice_id", ""}},
+			bson.D{{"invoice_id", bson.D{{"$exists", false}}}},
+		}},
+		{"$or", bson.A{
+			bson.D{{"closed", bson.D{{"$exists", false}}}},
+			bson.D{{"closed", bson.D{{"$lt", reconcileClosedSentinel}}}},
+		}},
+	}
+	opts := options.Find().SetSort(bson.D{{"created", 1}})
+	if limit > 0 {
+		opts.SetLimit(int64(limit))
+	}
+
+	cursor, err := collection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	var result []*entity.CheckoutParams
+	if err = cursor.All(ctx, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 // GetCheckoutParamsByOrder returns the most recently modified checkout params for an
 // order. An order may have several documents (e.g. a re-issued hold), so we sort by
 // modified descending and return the latest.

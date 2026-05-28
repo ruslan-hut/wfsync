@@ -137,6 +137,15 @@ func main() {
 			slog.Int("max_retries", conf.RetryQueue.MaxRetries))
 	}
 
+	var reconciler *core.Reconciler
+	if conf.PaymentReconciler.Enabled && mongo != nil {
+		reconciler = core.NewReconciler(&handler, log, conf.PaymentReconciler.IntervalMin)
+		reconciler.SetDatabase(mongo)
+		reconciler.Start()
+		log.Info("payment reconciler started",
+			slog.Int("interval_min", conf.PaymentReconciler.IntervalMin))
+	}
+
 	authenticate := auth.New(mongo)
 	handler.SetAuthService(authenticate)
 
@@ -164,6 +173,10 @@ func main() {
 	// Stop background services
 	if oc != nil {
 		oc.Stop()
+	}
+
+	if reconciler != nil {
+		reconciler.Stop()
 	}
 
 	if retryQueue != nil {
