@@ -425,10 +425,14 @@ POST /webhook/event
 #### Supported Events
 
 - `checkout.session.completed` - Processes completed checkout sessions
+- `invoice.finalized` - Processes finalized Stripe invoices
+- `payment_intent.amount_capturable.updated` - Marks a hold as confirmed (capturable)
+- `payment_intent.succeeded` - Marks a PaymentIntent as captured/paid and registers the invoice in real time. Critically, this fires for captures done **outside the API** (e.g. in the Stripe Dashboard), which otherwise leave no capture trace until the reconciler notices. Logged as `payment captured`. Invoice creation is idempotent across triggers (capture API, this webhook, reconciler), so no duplicate is created.
 
 #### Notes
 
 - The webhook must be configured and reachable for capture/cancel operations to work
+- To capture Dashboard captures in real time, enable `payment_intent.succeeded` in your Stripe webhook event selection
 - After a successful checkout, the webhook stores the PaymentIntent ID needed for capture
 - Configure your Stripe webhook URL to point to this endpoint
 - When wFirma invoice creation fails during webhook processing (e.g., API downtime), the job is automatically enqueued for retry with exponential backoff if the retry queue is enabled (see [Configuration](#retry-queue-configuration))

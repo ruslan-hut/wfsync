@@ -238,6 +238,11 @@ func (r *Reconciler) handleSucceeded(log *slog.Logger, params *entity.CheckoutPa
 	}
 	if order != nil && order.InvoiceId != "" {
 		// Already invoiced elsewhere (webhook/capture/manual) — just close the record.
+		// Still log it: a capture made outside our API (e.g. in the Stripe Dashboard)
+		// produces no "capture amount successful" line, so this is the only timestamped
+		// trace that the hold was captured and detected.
+		log.With(slog.String("invoice_id", order.InvoiceId)).
+			Info("reconciler observed captured hold, already invoiced")
 		r.closeRecord(log, params, order.InvoiceId)
 		return outcomeAlreadyInvoiced
 	}

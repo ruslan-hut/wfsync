@@ -140,11 +140,12 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	// VIES validation: check the TaxId against the EU VIES service.
 	// Non-blocking — the result is logged but does not change hasTaxId or prevent invoice creation.
 	if hasTaxId && c.vies != nil {
-		if c.vies.ValidateTaxId(params.ClientDetails.TaxId) {
+		switch c.vies.ValidateTaxId(params.ClientDetails.TaxId) {
+		case entity.VIESValid:
 			log.Debug("VIES validation passed",
 				slog.String("tax_id", params.ClientDetails.TaxId),
 				slog.String("country", countryCode))
-		} else {
+		case entity.VIESInvalid:
 			log.With(
 				slog.String("tax_id", params.ClientDetails.TaxId),
 				slog.String("country", countryCode),
@@ -152,6 +153,11 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 				slog.String("name", params.ClientDetails.Name),
 				slog.String("tg_topic", entity.TopicError),
 			).Warn("VIES validation failed")
+		case entity.VIESInconclusive:
+			// VIES was unavailable or rate-limited — not a verdict on the number.
+			log.Debug("VIES validation inconclusive (service unavailable)",
+				slog.String("tax_id", params.ClientDetails.TaxId),
+				slog.String("country", countryCode))
 		}
 	}
 

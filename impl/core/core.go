@@ -197,6 +197,17 @@ func (c *Core) processInvoice(ctx context.Context, params *entity.CheckoutParams
 			).Warn("opencart order not found or has no items, skipping invoice creation")
 			return nil
 		}
+		// Order-level idempotency: a capture can now be observed by several independent
+		// triggers (capture API, payment_intent.succeeded webhook, reconciler). If the
+		// order already carries an invoice, stop here so they don't each register one.
+		if order.InvoiceId != "" {
+			c.log.With(
+				slog.Int64("order_id", orderId),
+				slog.String("invoice_id", order.InvoiceId),
+				slog.String("event_id", params.EventId),
+			).Debug("order already invoiced, skipping invoice creation")
+			return nil
+		}
 		// Replace Stripe totals with OpenCart values so that TaxRate() uses consistent data.
 		// The site already applies the correct VAT rate per destination country (OSS scheme),
 		// and wfirma accepts those rates as-is (e.g. 21% for NL, 19% for DE).
