@@ -34,6 +34,7 @@ type InvoiceService interface {
 	DownloadInvoice(ctx context.Context, invoiceID string) (string, *entity.FileMeta, error)
 	RegisterInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 	RegisterProforma(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
+	DeleteProforma(ctx context.Context, invoiceID string) error
 	SyncFromRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
 	SyncToRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
 	FindInvoices(ctx context.Context, from, to string) ([]*entity.LocalInvoice, error)
@@ -352,26 +353,12 @@ func (c *Core) WFirmaRegisterProforma(ctx context.Context, params *entity.Checko
 	var payment *entity.Payment
 	var err error
 
-	// when the invoice was already registered, we will get ProformaId and ProformaFile in CheckoutParams
-	// in this case we need to delete the old file before downloading a new one
-
-	if params.ProformaFile != "" {
-		fileName := filepath.Join(c.filePath, params.ProformaFile)
-		if _, err = os.Stat(fileName); err == nil {
-			err = os.Remove(fileName)
-			if err != nil {
-				c.log.With(
-					slog.String("order_id", params.OrderId),
-					slog.String("path", c.filePath),
-					slog.String("proforma_id", params.ProformaId),
-					slog.String("file_name", params.ProformaFile),
-					sl.Err(err),
-				).Warn("remove file")
-			}
-		}
-		params.ProformaFile = ""
-		params.ProformaId = ""
-	}
+	// When the order already carries a proforma (ProformaId/ProformaFile set), a new
+	// proforma request means the order was changed and the old document is stale. Unlike
+	// invoices, proformas can be deleted, so we fully discard the previous one — remove it
+	// from wFirma, clear its reference in OpenCart, and delete the local PDF — before
+	// creating a fresh proforma below. This logic is intentionally proforma-only.
+	c.discardExistingProforma(ctx, params)
 
 	payment, err = c.inv.RegisterProforma(ctx, params)
 	if err != nil {
@@ -392,6 +379,56 @@ func (c *Core) WFirmaRegisterProforma(ctx context.Context, params *entity.Checko
 	}
 
 	return payment, nil
+}
+
+// discardExistingProforma removes a previously created proforma for an order before a new
+// one is generated. It is a no-op when no proforma is recorded on params. Each step is
+// best-effort and logged on failure rather than aborting: a leftover wFirma document, a
+// stale OpenCart reference, or an orphaned file must not block re-issuing the proforma.
+// On return params.ProformaId/ProformaFile are cleared so the caller creates and downloads
+// a fresh document. Applies to proformas only — invoices are never deleted.
+func (c *Core) discardExistingProforma(ctx context.Context, params *entity.CheckoutParams) {
+	if params.ProformaId == "" && params.ProformaFile == "" {
+		return
+	}
+
+	log := c.log.With(
+		slog.String("order_id", params.OrderId),
+		slog.String("proforma_id", params.ProformaId),
+		slog.String("file_name", params.ProformaFile),
+	)
+
+	// 1. Delete the proforma document in wFirma (the client refuses non-proforma types).
+	if params.ProformaId != "" {
+		if err := c.inv.DeleteProforma(ctx, params.ProformaId); err != nil {
+			log.Warn("delete proforma in wfirma", sl.Err(err))
+		}
+	}
+
+	// 2. Clear the stored proforma reference in the OpenCart order so it never points at a
+	// deleted document, even if creating the replacement below fails.
+	if c.oc != nil && params.OrderId != "" {
+		if orderId, err := strconv.ParseInt(params.OrderId, 10, 64); err == nil {
+			if err := c.oc.UpdateOrderWithProforma(orderId, "", ""); err != nil {
+				log.Warn("clear proforma in opencart", sl.Err(err))
+			}
+		} else {
+			log.Warn("parse order id to clear proforma", sl.Err(err))
+		}
+	}
+
+	// 3. Remove the local PDF file.
+	if params.ProformaFile != "" {
+		fileName := filepath.Join(c.filePath, params.ProformaFile)
+		if _, err := os.Stat(fileName); err == nil {
+			if err := os.Remove(fileName); err != nil {
+				log.With(slog.String("path", c.filePath)).Warn("remove proforma file", sl.Err(err))
+			}
+		}
+	}
+
+	params.ProformaId = ""
+	params.ProformaFile = ""
 }
 
 func (c *Core) WFirmaRegisterInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {

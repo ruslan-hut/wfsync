@@ -157,9 +157,12 @@ GET /v1/wf/file/proforma/{id}
 #### How It Works
 
 1. Fetches order data from OpenCart
-2. Creates or updates proforma in Wfirma
-3. Downloads proforma PDF file
-4. Returns file link and metadata
+2. If the order already has a proforma (it was changed and is being re-issued), the old one is fully discarded first: the document is deleted in Wfirma, the proforma reference is cleared on the OpenCart order, and the local PDF is removed. Each step is best-effort and never blocks re-issuing.
+3. Creates a fresh proforma in Wfirma
+4. Downloads proforma PDF file
+5. Returns file link and metadata
+
+> **Note:** Automatic deletion applies to **proformas only**. Invoices are final and are never deleted on re-request. The Wfirma delete call is guarded to refuse any document whose type is not `proforma`.
 
 #### Response
 
