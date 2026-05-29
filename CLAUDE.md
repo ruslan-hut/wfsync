@@ -70,6 +70,7 @@ All `/v1/*` endpoints require `Authorization: Bearer TOKEN`
 - `POST /v1/st/capture/{id}` - Capture held payment (enqueues wFirma invoice async)
 - `POST /v1/st/cancel/{id}` - Cancel payment (with reason)
 - `GET /v1/st/status/{id}` - Get live Stripe payment status by OpenCart order id
+- `GET /v1/st/queue` - List held payments awaiting reconciliation (unresolved holds)
 
 ### Invoice (Wfirma)
 - `GET /v1/wf/invoice/{id}` - Download invoice PDF by Wfirma ID

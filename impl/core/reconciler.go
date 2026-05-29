@@ -184,7 +184,6 @@ func (r *Reconciler) reconcileOne(params *entity.CheckoutParams) reconcileOutcom
 		return r.handleCanceled(log, params)
 	case stripe.PaymentIntentStatusRequiresCapture:
 		// Active hold awaiting a capture decision — watch only, never auto-cancel.
-		log.Debug("active hold pending capture")
 		return outcomePending
 	default:
 		// requires_payment_method / requires_confirmation / requires_action / processing

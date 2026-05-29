@@ -20,6 +20,7 @@ type Core interface {
 	StripeCancelPayment(sessionId, reason string) (*entity.Payment, *entity.CheckoutParams, error)
 	StripePayAmount(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 	StripePaymentStatus(orderId string) (*entity.PaymentStatus, error)
+	ReconcileQueue() ([]*entity.HeldPaymentSummary, error)
 }
 
 func Hold(log *slog.Logger, handler Core) http.HandlerFunc {
@@ -254,6 +255,36 @@ func Status(log *slog.Logger, handler Core) http.HandlerFunc {
 		logger.Debug("payment status", slog.String("status", st.Status))
 
 		render.JSON(w, r, response.Ok(st))
+	}
+}
+
+// Queue lists the held payments currently awaiting reconciliation (have a PaymentIntent
+// but no invoice yet). Useful for inspecting the reconciler backlog without scraping logs.
+func Queue(log *slog.Logger, handler Core) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		mod := sl.Module("http.handlers.payment")
+
+		logger := log.With(
+			mod,
+			slog.String("request_id", middleware.GetReqID(r.Context())),
+		)
+
+		if handler == nil {
+			logger.Error("stripe service not available")
+			render.JSON(w, r, response.Error("Stripe service not available"))
+			return
+		}
+
+		items, err := handler.ReconcileQueue()
+		if err != nil {
+			logger.Error("reconcile queue", sl.Err(err))
+			render.Status(r, 400)
+			render.JSON(w, r, response.Error(fmt.Sprintf("Queue: %v", err)))
+			return
+		}
+		logger.Debug("reconcile queue", slog.Int("count", len(items)))
+
+		render.JSON(w, r, response.Ok(items))
 	}
 }
 

@@ -43,6 +43,7 @@ type InvoiceService interface {
 // PaymentDatabase provides access to payment-related data in MongoDB.
 type PaymentDatabase interface {
 	GetStripeOrderIds(orderIds []string) (map[string]bool, error)
+	GetUnresolvedHeldParams(limit int) ([]*entity.CheckoutParams, error)
 }
 
 type Core struct {
@@ -492,6 +493,32 @@ func (c *Core) StripeCaptureAmount(sessionId string, amount int64) (*entity.Paym
 		go c.processInvoice(context.Background(), params)
 	}
 	return pm, params, nil
+}
+
+// ReconcileQueue returns the current set of unresolved held payments the reconciler is
+// watching — holds that have a PaymentIntent but no invoice yet and have not been closed.
+// It is a read-only snapshot for inspecting the queue, capped at the same batch limit the
+// reconciler uses per tick.
+func (c *Core) ReconcileQueue() ([]*entity.HeldPaymentSummary, error) {
+	if c.db == nil {
+		return nil, fmt.Errorf("payment database not connected")
+	}
+	params, err := c.db.GetUnresolvedHeldParams(reconcileBatchLimit)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]*entity.HeldPaymentSummary, 0, len(params))
+	for _, p := range params {
+		items = append(items, &entity.HeldPaymentSummary{
+			OrderId:   p.OrderId,
+			PaymentId: p.PaymentId,
+			SessionId: p.SessionId,
+			Total:     p.Total,
+			Currency:  p.Currency,
+			Created:   p.Created,
+		})
+	}
+	return items, nil
 }
 
 func (c *Core) StripePaymentStatus(orderId string) (*entity.PaymentStatus, error) {
