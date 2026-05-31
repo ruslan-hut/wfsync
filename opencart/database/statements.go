@@ -110,6 +110,17 @@ func (s *MySql) stmtSelectOrderIdBySession() (*sql.Stmt, error) {
 	return s.prepareStmt("stmtSelectOrderIdBySession", query)
 }
 
+// stmtSelectOrderIdByZohoId resolves an order from the CRM (Zoho) id stored on it.
+// CRM-originated payments carry the Zoho id (under an "ORD-" prefix) as the Stripe
+// session order id instead of the numeric OpenCart order id.
+func (s *MySql) stmtSelectOrderIdByZohoId() (*sql.Stmt, error) {
+	query := fmt.Sprintf(
+		`SELECT order_id FROM %sorder WHERE zoho_id = ? LIMIT 1`,
+		s.prefix,
+	)
+	return s.prepareStmt("stmtSelectOrderIdByZohoId", query)
+}
+
 func (s *MySql) stmtSelectOrderProducts() (*sql.Stmt, error) {
 	query := fmt.Sprintf(
 		`SELECT

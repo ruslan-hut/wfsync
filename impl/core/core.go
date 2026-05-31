@@ -164,8 +164,16 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 func (c *Core) processInvoice(ctx context.Context, params *entity.CheckoutParams) *entity.Payment {
 	// try to read invoice items from the site database
 	if c.oc != nil && params.OrderId != "" {
-		orderId, err := strconv.ParseInt(params.OrderId, 10, 64)
+		orderId, err := c.oc.ResolveOrderId(params.OrderId)
 		if err != nil {
+			c.log.With(
+				sl.Err(err),
+				slog.String("order_id", params.OrderId),
+				slog.String("session_id", params.SessionId),
+			).Error("resolve opencart order id")
+			return nil
+		}
+		if orderId == 0 {
 			c.log.With(
 				slog.String("order_id", params.OrderId),
 				slog.String("session_id", params.SessionId),
@@ -177,6 +185,9 @@ func (c *Core) processInvoice(ctx context.Context, params *entity.CheckoutParams
 			).Warn("no opencart order id in stripe session, skipping invoice creation")
 			return nil
 		}
+		// Normalize so the invoice and OpenCart writes target the numeric order id even
+		// when the session carried a CRM ("ORD-<zoho>") id.
+		params.OrderId = strconv.FormatInt(orderId, 10)
 		order, err := c.oc.GetOrder(orderId)
 		if err != nil {
 			c.log.With(

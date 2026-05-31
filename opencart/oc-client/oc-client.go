@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -313,10 +314,12 @@ func (oc *Opencart) ChangeOrderStatus(orderId string, statusId int, comment stri
 	if oc.db == nil || orderId == "" {
 		return nil
 	}
-	orderId = strings.TrimPrefix(orderId, "test_")
-	id, err := strconv.ParseInt(orderId, 10, 64)
+	id, err := oc.ResolveOrderId(orderId)
 	if err != nil {
-		return fmt.Errorf("invalid order id: %s", orderId)
+		return err
+	}
+	if id == 0 {
+		return fmt.Errorf("unresolved order id: %s", orderId)
 	}
 	return oc.db.ChangeOrderStatus(id, statusId, comment)
 }
@@ -325,12 +328,38 @@ func (oc *Opencart) SavePaymentData(orderId string, paymentId, sessionId, status
 	if oc.db == nil || orderId == "" {
 		return nil
 	}
-	orderId = strings.TrimPrefix(orderId, "test_")
-	id, err := strconv.ParseInt(orderId, 10, 64)
+	id, err := oc.ResolveOrderId(orderId)
 	if err != nil {
-		return fmt.Errorf("invalid order id: %s", orderId)
+		return err
+	}
+	if id == 0 {
+		return fmt.Errorf("unresolved order id: %s", orderId)
 	}
 	return oc.db.UpdatePayment(id, paymentId, sessionId, status, amount)
+}
+
+// orderIdDigits matches an id consisting of a non-numeric prefix followed entirely by
+// digits, e.g. "ORD-739178000056082505". CRM-originated payments arrive with the Zoho
+// id under such a prefix; OpenCart stores the bare digits in the zoho_id column.
+var orderIdDigits = regexp.MustCompile(`^\D+(\d+)$`)
+
+// ResolveOrderId maps a raw Stripe-session order id to the numeric OpenCart order id.
+// A plain numeric id (optionally "test_"-prefixed for Stripe test mode) is the OpenCart
+// order id itself. A non-numeric prefixed id (e.g. "ORD-<zoho>") is resolved through the
+// zoho_id column. Returns 0 (no error) when nothing resolves.
+func (oc *Opencart) ResolveOrderId(raw string) (int64, error) {
+	raw = strings.TrimPrefix(raw, "test_")
+	if id, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		return id, nil
+	}
+	if oc.db == nil {
+		return 0, nil
+	}
+	m := orderIdDigits.FindStringSubmatch(raw)
+	if m == nil {
+		return 0, nil
+	}
+	return oc.db.OrderIdByZohoId(m[1])
 }
 
 func (oc *Opencart) UpdateOrderWithProforma(orderId int64, proformaId, proformaFile string) error {

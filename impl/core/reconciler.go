@@ -205,13 +205,21 @@ func (r *Reconciler) handleSucceeded(log *slog.Logger, params *entity.CheckoutPa
 
 	orderId, err := parseOrderId(params.OrderId)
 	if err != nil {
-		// order_id is not numeric — it holds the Stripe session id because the session
-		// carried no order_id metadata. Try to recover the real order by reverse-looking
-		// up the Stripe payment/session references OpenCart stored on the order.
-		orderId, err = oc.OrderIdByPaymentRef(params.PaymentId, params.SessionId)
+		// order_id is not numeric — it is either a CRM ("ORD-<zoho>") id or the Stripe
+		// session id (when the session carried no order_id metadata). Try the zoho_id
+		// column first, then fall back to the Stripe payment/session references OpenCart
+		// stored on the order.
+		orderId, err = oc.ResolveOrderId(params.OrderId)
 		if err != nil {
-			log.Error("recover order by payment ref", sl.Err(err))
+			log.Error("resolve order by zoho id", sl.Err(err))
 			return outcomePending // transient DB issue, retry next tick
+		}
+		if orderId == 0 {
+			orderId, err = oc.OrderIdByPaymentRef(params.PaymentId, params.SessionId)
+			if err != nil {
+				log.Error("recover order by payment ref", sl.Err(err))
+				return outcomePending // transient DB issue, retry next tick
+			}
 		}
 		if orderId == 0 {
 			// Genuinely not ours (e.g. a foreign Stripe session) — nothing to invoice.

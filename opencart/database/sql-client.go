@@ -355,6 +355,28 @@ func (s *MySql) OrderIdByPaymentRef(paymentId, sessionId string) (int64, error) 
 	return lookup(stmtSess, sessionId)
 }
 
+// OrderIdByZohoId resolves the numeric OpenCart order id from the CRM (Zoho) id stored
+// in the zoho_id column. Returns 0 (no error) when no order matches. An empty input is
+// skipped so orders with the default empty zoho_id are never matched accidentally.
+func (s *MySql) OrderIdByZohoId(zohoId string) (int64, error) {
+	if zohoId == "" {
+		return 0, nil
+	}
+	stmt, err := s.stmtSelectOrderIdByZohoId()
+	if err != nil {
+		return 0, err
+	}
+	var id int64
+	err = stmt.QueryRow(zohoId).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("query: %w", err)
+	}
+	return id, nil
+}
+
 // OrderSearchByDateRange returns lightweight order summaries for orders within a date range.
 // Unlike OrderSearchStatus/OrderSearchId, this skips line items and tax details.
 func (s *MySql) OrderSearchByDateRange(from, to string) ([]*entity.OrderSummary, error) {
