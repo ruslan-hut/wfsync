@@ -42,10 +42,11 @@ type VATProvider interface {
 }
 
 // VIESProvider validates EU VAT numbers against the VIES service.
-// When set, the client logs a warning if a B2B customer's TaxId fails validation.
+// When set, the client logs a warning only when a B2B customer's TaxId is definitively
+// invalid; a service/transient failure (VIESInconclusive) is logged at debug level.
 // Validation is non-blocking: the result is logged but does not affect invoice creation.
 type VIESProvider interface {
-	ValidateTaxId(taxId string) bool
+	ValidateTaxId(taxId string) entity.VIESResult
 }
 
 // Database defines the persistence methods the wFirma client needs.

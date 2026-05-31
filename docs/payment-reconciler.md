@@ -30,6 +30,14 @@ against its **live** Stripe PaymentIntent status, taking action only where neede
 4. Records are "closed" by stamping `closed` so subsequent ticks skip them; pending holds
    stay open and are re-checked until they settle or cancel.
 
+## Inspecting the queue
+
+`GET /v1/st/queue` returns the unresolved holds the reconciler is currently watching
+(those with a PaymentIntent but no invoice yet, not closed by a prior run), capped at the
+same per-tick batch limit. Each entry carries `order_id`, `payment_id`, `session_id`,
+`total`, `currency`, and `created`. Use this instead of scraping logs to see the backlog —
+per-order ticks are no longer logged; only the per-run queue size is.
+
 ## Notifications
 
 Telegram messages are emitted **only when the job takes an action** — an invoice is

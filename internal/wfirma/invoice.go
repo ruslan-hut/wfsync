@@ -140,11 +140,12 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	// VIES validation: check the TaxId against the EU VIES service.
 	// Non-blocking — the result is logged but does not change hasTaxId or prevent invoice creation.
 	if hasTaxId && c.vies != nil {
-		if c.vies.ValidateTaxId(params.ClientDetails.TaxId) {
+		switch c.vies.ValidateTaxId(params.ClientDetails.TaxId) {
+		case entity.VIESValid:
 			log.Debug("VIES validation passed",
 				slog.String("tax_id", params.ClientDetails.TaxId),
 				slog.String("country", countryCode))
-		} else {
+		case entity.VIESInvalid:
 			log.With(
 				slog.String("tax_id", params.ClientDetails.TaxId),
 				slog.String("country", countryCode),
@@ -152,6 +153,11 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 				slog.String("name", params.ClientDetails.Name),
 				slog.String("tg_topic", entity.TopicError),
 			).Warn("VIES validation failed")
+		case entity.VIESInconclusive:
+			// VIES was unavailable or rate-limited — not a verdict on the number.
+			log.Debug("VIES validation inconclusive (service unavailable)",
+				slog.String("tax_id", params.ClientDetails.TaxId),
+				slog.String("country", countryCode))
 		}
 	}
 
@@ -348,15 +354,19 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			slog.String("tg_topic", entity.TopicInvoice),
 		).Info("invoice created")
 
-		partPayment := &entity.Payment{
+		parts = append(parts, &entity.Payment{
 			Amount:  int64(chunkTotal * 100),
 			Id:      inv.Id,
 			OrderId: params.OrderId,
-		}
-		parts = append(parts, partPayment)
-		if firstPayment == nil {
-			firstPayment = partPayment
-		}
+		})
+	}
+
+	// The returned head payment mirrors the first part. It is a DISTINCT struct from
+	// parts[0]: if the head were also an element of its own Parts slice, JSON encoding
+	// would recurse into itself and fail with "encountered a cycle via *entity.Payment".
+	if len(parts) > 0 {
+		head := *parts[0]
+		firstPayment = &head
 	}
 
 	// Expose all parts only when the order was actually split, so single-document
@@ -707,6 +717,78 @@ func (c *Client) InvoiceExists(ctx context.Context, invoiceID string) (bool, err
 // "OBJECT NOT FOUND") case-insensitively.
 func isNotFoundStatus(code string) bool {
 	return strings.Contains(strings.ToUpper(code), "NOT FOUND")
+}
+
+// DeleteProforma removes a proforma document from wFirma via invoices/delete/{id}.
+//
+// Deletion is irreversible, so it is guarded: the target is fetched first and the call
+// is refused unless its type is exactly "proforma". This guarantees a normal VAT invoice
+// can never be deleted through this path, even if a caller passes the wrong id. A document
+// that is already absent (or confirmed gone) is treated as a successful no-op so callers
+// can safely regenerate.
+func (c *Client) DeleteProforma(ctx context.Context, invoiceID string) error {
+	if !c.enabled {
+		return fmt.Errorf("wFirma is disabled")
+	}
+	if invoiceID == "" {
+		return nil
+	}
+
+	getRes, err := c.request(ctx, "invoices", "get/"+invoiceID, map[string]interface{}{})
+	if err != nil {
+		return fmt.Errorf("get invoice before delete: %w", err)
+	}
+
+	var getResp InvoiceResponse
+	if err := json.Unmarshal(getRes, &getResp); err != nil {
+		return fmt.Errorf("parse get response: %w", err)
+	}
+
+	if isNotFoundStatus(getResp.Status.Code) {
+		return nil // already gone, nothing to delete
+	}
+	if getResp.Status.Code != "OK" {
+		msg := getResp.Status.Message
+		if msg == "" {
+			msg = getResp.Status.Code
+		}
+		return fmt.Errorf("wfirma get invoice %s: %s", invoiceID, msg)
+	}
+
+	// The invoices map also carries a non-invoice "parameters" entry (Id == ""), skipped here.
+	var found *InvoiceData
+	for _, w := range getResp.Invoices {
+		if w.Invoice.Id != "" {
+			inv := w.Invoice
+			found = &inv
+			break
+		}
+	}
+	if found == nil {
+		return nil // OK with no payload means the object is gone
+	}
+	if found.Type != string(invoiceProforma) {
+		return fmt.Errorf("refusing to delete invoice %s: type %q is not proforma", invoiceID, found.Type)
+	}
+
+	delRes, err := c.request(ctx, "invoices", "delete/"+invoiceID, map[string]interface{}{})
+	if err != nil {
+		return fmt.Errorf("delete invoice: %w", err)
+	}
+
+	var delResp InvoiceResponse
+	if err := json.Unmarshal(delRes, &delResp); err != nil {
+		return fmt.Errorf("parse delete response: %w", err)
+	}
+	if delResp.Status.Code != "OK" && !isNotFoundStatus(delResp.Status.Code) {
+		msg := delResp.Status.Message
+		if msg == "" {
+			msg = delResp.Status.Code
+		}
+		return fmt.Errorf("wfirma delete invoice %s: %s", invoiceID, msg)
+	}
+
+	return nil
 }
 
 func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (fileName string, meta *entity.FileMeta, err error) {

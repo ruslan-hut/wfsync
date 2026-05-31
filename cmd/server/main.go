@@ -52,6 +52,11 @@ func main() {
 		if err := mongo.MigrateExistingTelegramUsers(); err != nil {
 			log.Error("telegram user migration", sl.Err(err))
 		}
+		// Collapse duplicate checkout_params records (one document per OpenCart order)
+		// and enforce the order_id unique index. Idempotent; runs before HTTP serving.
+		if err := mongo.DedupeCheckoutParams(); err != nil {
+			log.Error("checkout params dedupe migration", sl.Err(err))
+		}
 	}
 
 	// Initialize Telegram bot if enabled

@@ -121,6 +121,8 @@ func (s *StripeClient) HandleEvent(evt *stripe.Event) *entity.CheckoutParams {
 		return s.handleInvoiceFinalized(evt)
 	case stripe.EventTypePaymentIntentAmountCapturableUpdated:
 		return s.handleAmountCapturable(evt)
+	case stripe.EventTypePaymentIntentSucceeded:
+		return s.handlePaymentIntentSucceeded(evt)
 	default:
 		return nil
 	}
@@ -284,6 +286,91 @@ func (s *StripeClient) handleAmountCapturable(evt *stripe.Event) *entity.Checkou
 		slog.String("session_id", sessionID),
 		slog.Int64("amount", pi.Amount),
 	).Info("hold confirmed, payment intent capturable")
+
+	return params
+}
+
+// handlePaymentIntentSucceeded reacts to a PaymentIntent reaching the succeeded
+// (captured) state. Its main value is capturing captures done OUTSIDE our API — e.g.
+// directly in the Stripe Dashboard — which otherwise leave no "capture amount successful"
+// trace and are only noticed later by the reconciler. Returning paid params lets the
+// shared invoice path (StripeEvent) register the invoice in real time; the order-level
+// idempotency guard in processInvoice prevents a duplicate when our own capture API or
+// the checkout.session.completed flow already invoiced the order.
+func (s *StripeClient) handlePaymentIntentSucceeded(evt *stripe.Event) *entity.CheckoutParams {
+	piID := evt.GetObjectValue("id")
+	log := s.log.With(
+		slog.Any("event_type", evt.Type),
+		slog.String("event_id", evt.ID),
+		slog.String("payment_id", piID),
+	)
+
+	if s.db == nil {
+		log.Warn("database not configured")
+		return nil
+	}
+
+	// Deduplication: skip if this exact event was already processed.
+	existing, _ := s.db.GetCheckoutParamsForEvent(evt.ID)
+	if existing != nil && existing.OrderId != "" {
+		log.With(slog.String("order_id", existing.OrderId)).Debug("event already processed")
+		return nil
+	}
+
+	pi, err := s.sc.PaymentIntents.Get(piID, nil)
+	if err != nil {
+		log.With(sl.Err(err)).Error("get payment intent from stripe")
+		return nil
+	}
+
+	// Resolve the originating checkout session (same approach as handleAmountCapturable)
+	// so we can load the saved checkout params by session_id.
+	iter := s.sc.CheckoutSessions.List(&stripe.CheckoutSessionListParams{
+		PaymentIntent: stripe.String(piID),
+	})
+	var sessionID string
+	if iter.Next() {
+		sessionID = iter.CheckoutSession().ID
+	}
+	if err := iter.Err(); err != nil {
+		log.With(sl.Err(err)).Error("list checkout sessions for payment intent")
+	}
+	if sessionID == "" {
+		// No session means this PaymentIntent is not one of ours (e.g. a foreign
+		// integration sharing the account) — nothing to invoice.
+		log.Debug("no checkout session found for payment intent, ignoring")
+		return nil
+	}
+
+	params, err := s.db.GetCheckoutParamsSession(sessionID)
+	if err != nil {
+		log.With(sl.Err(err), slog.String("session_id", sessionID)).Error("get checkout params from database")
+		return nil
+	}
+	if params == nil || params.OrderId == "" {
+		log.With(slog.String("session_id", sessionID)).Warn("checkout params not found for succeeded payment intent")
+		return nil
+	}
+
+	params.PaymentId = pi.ID
+	params.EventId = evt.ID
+	params.Status = string(pi.Status)
+	params.Total = pi.Amount
+	params.Paid = true
+	params.Modified = time.Now()
+
+	if err = s.db.SaveCheckoutParams(params); err != nil {
+		log.With(sl.Err(err)).Error("update checkout params")
+	}
+
+	// Real-time, timestamped trace of the capture — fires for Dashboard captures too.
+	log.With(
+		slog.String("order_id", params.OrderId),
+		slog.String("session_id", sessionID),
+		slog.Int64("amount", pi.Amount),
+		slog.String("currency", string(pi.Currency)),
+		slog.String("tg_topic", entity.TopicPayment),
+	).Info("payment captured")
 
 	return params
 }

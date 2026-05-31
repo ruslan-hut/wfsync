@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 	"wfsync/entity"
 	"wfsync/internal/config"
@@ -24,6 +25,12 @@ type Database interface {
 }
 
 // viesResponse is the JSON body returned by the VIES REST API.
+//
+// userError carries the authoritative verdict: "VALID" / "INVALID" are definitive,
+// while any other value (MS_MAX_CONCURRENT_REQ, GLOBAL_MAX_CONCURRENT_REQ,
+// MS_UNAVAILABLE, SERVICE_UNAVAILABLE, TIMEOUT, ...) signals the check could not be
+// completed. In those cases isValid is false even though the number may be valid, so
+// isValid must not be trusted on its own.
 type viesResponse struct {
 	IsValid           bool   `json:"isValid"`
 	RequestDate       string `json:"requestDate"`
@@ -32,6 +39,35 @@ type viesResponse struct {
 	Address           string `json:"address"`
 	RequestIdentifier string `json:"requestIdentifier"`
 	VATNumber         string `json:"vatNumber"`
+}
+
+// result maps the VIES response to a definitive or inconclusive outcome.
+// The userError code is authoritative; isValid is only consulted when no code is present.
+func (r *viesResponse) result() entity.VIESResult {
+	switch strings.ToUpper(strings.TrimSpace(r.UserError)) {
+	case "VALID":
+		return entity.VIESValid
+	case "INVALID":
+		return entity.VIESInvalid
+	case "":
+		// Edge responses without a userError code: fall back to the boolean.
+		if r.IsValid {
+			return entity.VIESValid
+		}
+		return entity.VIESInvalid
+	default:
+		// MS_MAX_CONCURRENT_REQ, MS_UNAVAILABLE, TIMEOUT, etc. — not a verdict.
+		return entity.VIESInconclusive
+	}
+}
+
+// boolToResult maps a cached boolean verdict to a definitive result.
+// Only definitive verdicts are ever cached, so the cache never yields VIESInconclusive.
+func boolToResult(valid bool) entity.VIESResult {
+	if valid {
+		return entity.VIESValid
+	}
+	return entity.VIESInvalid
 }
 
 // Service validates EU VAT numbers via the VIES API with MongoDB caching.
@@ -61,18 +97,24 @@ func (s *Service) SetDatabase(db Database) {
 }
 
 // ValidateTaxId checks whether the given tax ID is valid according to the VIES service.
-// The taxId is expected to start with a 2-letter country code (e.g. "DE123456789").
-// Returns true if valid, false otherwise. Errors are logged but do not block the caller.
-func (s *Service) ValidateTaxId(taxId string) bool {
+// The taxId is expected to start with a 2-letter country code (e.g. "DE123456789");
+// the country code is sent separately from the number, as VIES requires.
+//
+// Returns VIESValid / VIESInvalid for definitive verdicts, or VIESInconclusive when the
+// VIES service is unavailable or rate-limited (transient userError codes). Inconclusive
+// results are never cached and must not be reported as invalid. Errors are logged but
+// never block the caller.
+func (s *Service) ValidateTaxId(taxId string) entity.VIESResult {
 	if len(taxId) < 3 {
 		s.log.Warn("tax ID too short for VIES validation", slog.String("tax_id", taxId))
-		return false
+		return entity.VIESInvalid
 	}
 
 	countryCode := taxId[:2]
 	vatNumber := taxId[2:]
 
-	// Check MongoDB cache first
+	// Check MongoDB cache first. Only definitive verdicts are ever stored, so a fresh
+	// cache hit is always conclusive.
 	if s.db != nil {
 		cached, err := s.db.GetVIESValidation(countryCode, vatNumber)
 		if err != nil {
@@ -85,9 +127,9 @@ func (s *Service) ValidateTaxId(taxId string) bool {
 					slog.String("vat_number", vatNumber),
 					slog.Bool("valid", cached.Valid),
 					slog.String("age", age.Truncate(time.Minute).String()))
-				return cached.Valid
+				return boolToResult(cached.Valid)
 			}
-			// Cache is stale — try API, fall back to stale result below
+			// Cache is stale — try API, fall back to stale result below.
 		}
 	}
 
@@ -98,26 +140,28 @@ func (s *Service) ValidateTaxId(taxId string) bool {
 			slog.String("country", countryCode),
 			slog.String("vat_number", vatNumber),
 			sl.Err(err))
-
-		// Fall back to stale cache if available
-		if s.db != nil {
-			cached, dbErr := s.db.GetVIESValidation(countryCode, vatNumber)
-			if dbErr == nil && cached != nil {
-				s.log.Debug("using stale VIES cache after API failure",
-					slog.String("country", countryCode),
-					slog.Bool("valid", cached.Valid))
-				return cached.Valid
-			}
-		}
-		return false
+		return s.staleOr(countryCode, vatNumber, "API failure")
 	}
 
-	// Save result to MongoDB
+	result := resp.result()
+
+	// A transient/service error (e.g. MS_MAX_CONCURRENT_REQ) is not a verdict: the number
+	// may well be valid. Do not cache it and do not report it as invalid — fall back to a
+	// prior definitive result if we have one, otherwise report inconclusive.
+	if result == entity.VIESInconclusive {
+		s.log.Warn("VIES validation inconclusive",
+			slog.String("country", countryCode),
+			slog.String("vat_number", vatNumber),
+			slog.String("user_error", resp.UserError))
+		return s.staleOr(countryCode, vatNumber, "inconclusive result")
+	}
+
+	// Definitive verdict — persist it.
 	validation := &entity.VIESValidation{
 		CountryCode:       countryCode,
 		VATNumber:         vatNumber,
 		RequestDate:       resp.RequestDate,
-		Valid:             resp.IsValid,
+		Valid:             result == entity.VIESValid,
 		Name:              resp.Name,
 		Address:           resp.Address,
 		RequestIdentifier: resp.RequestIdentifier,
@@ -137,7 +181,22 @@ func (s *Service) ValidateTaxId(taxId string) bool {
 		slog.String("validated_at", validation.ValidatedAt.Format(time.RFC3339)),
 	).Debug("VIES validation completed")
 
-	return resp.IsValid
+	return result
+}
+
+// staleOr returns a cached definitive verdict when the live check could not produce one,
+// or VIESInconclusive if no cached result exists. reason is used only for logging.
+func (s *Service) staleOr(countryCode, vatNumber, reason string) entity.VIESResult {
+	if s.db != nil {
+		cached, err := s.db.GetVIESValidation(countryCode, vatNumber)
+		if err == nil && cached != nil {
+			s.log.Debug("using stale VIES cache after "+reason,
+				slog.String("country", countryCode),
+				slog.Bool("valid", cached.Valid))
+			return boolToResult(cached.Valid)
+		}
+	}
+	return entity.VIESInconclusive
 }
 
 // checkVATNumber sends a GET request to the VIES REST API.

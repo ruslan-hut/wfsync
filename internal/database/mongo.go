@@ -9,6 +9,7 @@ import (
 	"wfsync/internal/config"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -181,27 +182,28 @@ func (m *MongoDB) SaveCheckoutParams(params *entity.CheckoutParams) error {
 
 	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
 
-	// Prefer session_id as the upsert key when available — the hold record is created
-	// with session_id before any event_id exists, so subsequent webhook updates
-	// must match on session_id to update the same document.
-	if params.SessionId != "" {
-		filter := bson.D{{"session_id", params.SessionId}}
-		update := bson.D{{"$set", params}}
-		opts := options.Update().SetUpsert(true)
-		_, err = collection.UpdateOne(ctx, filter, update, opts)
+	// order_id is the canonical identity: one document per OpenCart order, so every write
+	// path (Stripe hold/webhook/capture and the wFirma-only invoice flows) converges on the
+	// same record instead of inserting a fresh one. session_id/event_id remain as fallbacks
+	// only for the rare record that carries no order_id. The omitempty bson tags on the
+	// linkage ids (session_id, payment_id, event_id, invoice_id, proforma_id) mean an upsert
+	// never clears an id it does not carry — so a wFirma re-invoice cannot wipe the Stripe
+	// references already stored on the order.
+	var filter bson.D
+	switch {
+	case params.OrderId != "":
+		filter = bson.D{{"order_id", params.OrderId}}
+	case params.SessionId != "":
+		filter = bson.D{{"session_id", params.SessionId}}
+	case params.EventId != "":
+		filter = bson.D{{"event_id", params.EventId}}
+	default:
+		_, err = collection.InsertOne(ctx, params)
 		return err
 	}
 
-	// Fallback: upsert by event_id for records without a session (e.g. invoice webhooks)
-	if params.EventId != "" {
-		filter := bson.D{{"event_id", params.EventId}}
-		update := bson.D{{"$set", params}}
-		opts := options.Update().SetUpsert(true)
-		_, err = collection.UpdateOne(ctx, filter, update, opts)
-		return err
-	}
-
-	_, err = collection.InsertOne(ctx, params)
+	opts := options.Update().SetUpsert(true)
+	_, err = collection.UpdateOne(ctx, filter, bson.D{{"$set", params}}, opts)
 	return err
 }
 
@@ -989,4 +991,140 @@ func (m *MongoDB) MigrateExistingTelegramUsers() error {
 	}}}
 	_, err = collection.UpdateMany(ctx, filter, update)
 	return err
+}
+
+// checkoutParamsDoc pairs a stored checkout params document with its Mongo _id so the
+// dedupe migration can merge a group and delete the redundant rows by id.
+type checkoutParamsDoc struct {
+	ID                    primitive.ObjectID `bson:"_id"`
+	entity.CheckoutParams `bson:",inline"`
+}
+
+// DedupeCheckoutParams collapses checkout_params documents that share an order_id into a
+// single record, then enforces a partial unique index on order_id so duplicates cannot
+// reappear. It is the one-off cleanup for records duplicated by the pre-fix write path
+// (wFirma-only flows inserting a fresh document on every invoice/proforma call). It is
+// idempotent: a second run finds no order_id with more than one document and only
+// re-ensures the index. order_id is the canonical identity for the collection — it tracks
+// one OpenCart order's lifecycle (see SaveCheckoutParams).
+//
+// Uses a dedicated, longer-lived context than opTimeout because a backlog of duplicate
+// groups can take more than a single per-op deadline to clear; a partial run is safe since
+// the merge is idempotent and the next startup continues.
+func (m *MongoDB) DedupeCheckoutParams() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
+
+	// Find order_ids with more than one document. Empty/missing order_ids are excluded so
+	// unrelated keyless records are never merged together.
+	pipeline := mongo.Pipeline{
+		{{"$match", bson.D{{"order_id", bson.D{{"$gt", ""}}}}}},
+		{{"$group", bson.D{
+			{"_id", "$order_id"},
+			{"count", bson.D{{"$sum", 1}}},
+		}}},
+		{{"$match", bson.D{{"count", bson.D{{"$gt", 1}}}}}},
+	}
+	cursor, err := collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return fmt.Errorf("aggregate duplicate order ids: %w", err)
+	}
+	var groups []struct {
+		OrderId string `bson:"_id"`
+	}
+	if err = cursor.All(ctx, &groups); err != nil {
+		return fmt.Errorf("read duplicate order ids: %w", err)
+	}
+
+	for _, g := range groups {
+		if err = m.mergeCheckoutParamsGroup(ctx, collection, g.OrderId); err != nil {
+			return fmt.Errorf("merge order_id %s: %w", g.OrderId, err)
+		}
+	}
+
+	return m.ensureCheckoutParamsIndex(ctx, collection)
+}
+
+// mergeCheckoutParamsGroup collapses all documents for one order_id into the most recently
+// modified survivor, then deletes the rest. The survivor holds the freshest order data
+// (client, line items, totals); resolution/linkage fields are backfilled from the rest of
+// the group so a value recorded on an older row is never lost — session_id, payment_id,
+// event_id, invoice_id/file, proforma_id/file, paid (logical OR), and the latest closed
+// timestamp. created is pulled back to the earliest seen so the original order date stands.
+func (m *MongoDB) mergeCheckoutParamsGroup(ctx context.Context, collection *mongo.Collection, orderId string) error {
+	cursor, err := collection.Find(ctx, bson.D{{"order_id", orderId}}, options.Find().SetSort(bson.D{{"modified", -1}}))
+	if err != nil {
+		return err
+	}
+	var docs []checkoutParamsDoc
+	if err = cursor.All(ctx, &docs); err != nil {
+		return err
+	}
+	if len(docs) <= 1 {
+		return nil
+	}
+
+	survivor := docs[0]
+	merged := survivor.CheckoutParams
+	for _, d := range docs[1:] {
+		fillIfEmpty(&merged.SessionId, d.SessionId)
+		fillIfEmpty(&merged.PaymentId, d.PaymentId)
+		fillIfEmpty(&merged.EventId, d.EventId)
+		fillIfEmpty(&merged.InvoiceId, d.InvoiceId)
+		fillIfEmpty(&merged.InvoiceFile, d.InvoiceFile)
+		fillIfEmpty(&merged.ProformaId, d.ProformaId)
+		fillIfEmpty(&merged.ProformaFile, d.ProformaFile)
+		if d.Paid {
+			merged.Paid = true
+		}
+		if d.Closed.After(merged.Closed) {
+			merged.Closed = d.Closed
+		}
+		if !d.Created.IsZero() && (merged.Created.IsZero() || d.Created.Before(merged.Created)) {
+			merged.Created = d.Created
+		}
+	}
+	merged.Modified = time.Now()
+
+	if _, err = collection.ReplaceOne(ctx, bson.D{{"_id", survivor.ID}}, merged); err != nil {
+		return err
+	}
+
+	redundant := make([]primitive.ObjectID, 0, len(docs)-1)
+	for _, d := range docs[1:] {
+		redundant = append(redundant, d.ID)
+	}
+	_, err = collection.DeleteMany(ctx, bson.D{{"_id", bson.D{{"$in", redundant}}}})
+	return err
+}
+
+// ensureCheckoutParamsIndex creates a partial unique index on order_id so a second document
+// for the same order can never be inserted. The partial filter (order_id is a non-empty
+// string) excludes the rare keyless record, which would otherwise collide on a null key.
+// Idempotent — re-creating an identical index is a no-op.
+func (m *MongoDB) ensureCheckoutParamsIndex(ctx context.Context, collection *mongo.Collection) error {
+	model := mongo.IndexModel{
+		Keys: bson.D{{"order_id", 1}},
+		Options: options.Index().
+			SetName("uniq_order_id").
+			SetUnique(true).
+			SetPartialFilterExpression(bson.D{{"order_id", bson.D{{"$gt", ""}}}}),
+	}
+	_, err := collection.Indexes().CreateOne(ctx, model)
+	return err
+}
+
+// fillIfEmpty copies src into dst only when dst is empty and src is not, used to backfill
+// linkage fields during the checkout params dedupe without overwriting an existing value.
+func fillIfEmpty(dst *string, src string) {
+	if *dst == "" && src != "" {
+		*dst = src
+	}
 }

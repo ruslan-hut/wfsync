@@ -73,6 +73,7 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 			st.Post("/capture/{id}", payment.Capture(log, handler))
 			st.Post("/cancel/{id}", payment.Cancel(log, handler))
 			st.Get("/status/{id}", payment.Status(log, handler))
+			st.Get("/queue", payment.Queue(log, handler))
 		})
 		rootApi.Route("/b2b", func(b2bRouter chi.Router) {
 			b2bRouter.Post("/proforma", b2b.CreateProforma(log, handler))
