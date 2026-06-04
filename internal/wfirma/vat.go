@@ -3,6 +3,7 @@ package wfirma
 import (
 	"fmt"
 	"strconv"
+	"wfsync/entity"
 )
 
 // VAT codes for cross-border transactions (passed in invoicecontent "vat" field).
@@ -24,27 +25,33 @@ var b2bCustomerGroups = map[int]bool{
 	-1: true, 6: true, 7: true, 16: true, 18: true, 19: true,
 }
 
-// euCountries contains EU member state codes (ISO 3166-1 alpha-2), excluding Poland.
-// Used as a fallback when the dynamic VATProvider is not available or unverified.
-var euCountries = map[string]bool{
-	"AT": true, "BE": true, "BG": true, "HR": true, "CY": true,
-	"CZ": true, "DK": true, "EE": true, "FI": true, "FR": true,
-	"DE": true, "GR": true, "HU": true, "IE": true, "IT": true,
-	"LV": true, "LT": true, "LU": true, "MT": true, "NL": true,
-	"PT": true, "RO": true, "SK": true, "SI": true, "ES": true,
-	"SE": true,
+// euCountries and defaultEURates are derived from the single curated source of
+// truth (entity.StandardVATRates) so the compliance data lives in exactly one
+// place and cannot drift between packages. Both are used as a fallback when the
+// dynamic VATProvider is unavailable or unverified.
+//
+//   - euCountries: EU member state codes (excluding Poland), for membership checks.
+//   - defaultEURates: standard rate per country, used as a last-resort rate when
+//     the caller didn't provide tax_value.
+var (
+	euCountries    = buildEUCountries()
+	defaultEURates = buildDefaultEURates()
+)
+
+func buildEUCountries() map[string]bool {
+	m := make(map[string]bool, len(entity.StandardVATRates))
+	for code := range entity.StandardVATRates {
+		m[code] = true
+	}
+	return m
 }
 
-// defaultEURates maps EU country codes to their standard VAT rates (as of 2025).
-// Used as a last-resort fallback when the caller doesn't provide tax_value and the
-// dynamic VATProvider is unavailable. Rates may drift — the VATProvider is preferred.
-var defaultEURates = map[string]int{
-	"AT": 20, "BE": 21, "BG": 20, "HR": 25, "CY": 19,
-	"CZ": 21, "DK": 25, "EE": 22, "FI": 25, "FR": 20,
-	"DE": 19, "GR": 24, "HU": 27, "IE": 23, "IT": 22,
-	"LV": 21, "LT": 21, "LU": 17, "MT": 18, "NL": 21,
-	"PT": 23, "RO": 19, "SK": 23, "SI": 22, "ES": 21,
-	"SE": 25,
+func buildDefaultEURates() map[string]int {
+	m := make(map[string]int, len(entity.StandardVATRates))
+	for code, rate := range entity.StandardVATRates {
+		m[code] = int(rate)
+	}
+	return m
 }
 
 // resolveGoodsVatCode determines the correct VAT code for invoice line items.
