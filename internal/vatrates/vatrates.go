@@ -171,6 +171,65 @@ func (s *Service) Stop() {
 	}
 }
 
+// reconcile validates dynamically-sourced rates (from the vatlookup.eu API or the
+// MongoDB cache) against the curated entity.StandardVATRates baseline, which is the
+// compliance source of truth. The returned map is what the service actually serves.
+//
+//   - Every country in the baseline is always present in the result with the baseline
+//     value. If the source disagrees (or omits it), the value is corrected to the
+//     baseline and flagged. This is the guard against a stale external feed — e.g.
+//     vatlookup.eu reporting Slovakia at the pre-2025 20% rather than the current 23%.
+//   - A country the baseline does not know about (e.g. a newly joined member not yet
+//     curated) is carried over only if its rate is within the plausible band; otherwise
+//     it is dropped as bad data.
+//
+// The second return value is the number of corrections/drops, for logging and for the
+// caller to decide how much to trust the source.
+func (s *Service) reconcile(src map[string]float64) (map[string]float64, int) {
+	out := make(map[string]float64, len(src)+len(entity.StandardVATRates))
+	issues := 0
+
+	// Anchor on the curated baseline: every known country is guaranteed correct.
+	for code, ref := range entity.StandardVATRates {
+		switch got, ok := src[code]; {
+		case !ok:
+			s.log.Warn("vat rate missing from source, using baseline",
+				slog.String("country", code),
+				slog.Float64("baseline", ref),
+				slog.String("tg_topic", entity.TopicError))
+			issues++
+		case got != ref:
+			s.log.Warn("vat rate drift, overriding source with baseline",
+				slog.String("country", code),
+				slog.Float64("source", got),
+				slog.Float64("baseline", ref),
+				slog.String("tg_topic", entity.TopicError))
+			issues++
+		}
+		out[code] = ref
+	}
+
+	// Carry over countries the baseline does not cover, if the rate is plausible.
+	for code, rate := range src {
+		if _, known := entity.StandardVATRates[code]; known {
+			continue
+		}
+		if rate < entity.MinStandardVATRate || rate > entity.MaxStandardVATRate {
+			s.log.Warn("vat rate out of plausible range, dropping",
+				slog.String("country", code),
+				slog.Float64("rate", rate),
+				slog.Float64("min", entity.MinStandardVATRate),
+				slog.Float64("max", entity.MaxStandardVATRate),
+				slog.String("tg_topic", entity.TopicError))
+			issues++
+			continue
+		}
+		out[code] = rate
+	}
+
+	return out, issues
+}
+
 // loadFromDB populates the in-memory cache from MongoDB.
 // Returns the newest UpdatedAt timestamp across all loaded rates (zero if DB is nil or empty).
 func (s *Service) loadFromDB() time.Time {
@@ -196,15 +255,23 @@ func (s *Service) loadFromDB() time.Time {
 		}
 	}
 
+	// Validate the cached rates against the curated baseline before serving them.
+	// A cache persisted before a rate change (e.g. Slovakia 20→23) is corrected here
+	// instead of being trusted as-is just because trustDB is set.
+	reconciled, issues := s.reconcile(loaded)
+	if issues > 0 {
+		s.log.Warn("vat rates from db corrected against baseline", slog.Int("corrections", issues))
+	}
+
 	s.mu.Lock()
-	s.rates = loaded
+	s.rates = reconciled
 	s.verified = s.trustDB
 	s.mu.Unlock()
 
 	if s.trustDB {
-		s.log.Info("vat rates loaded from db (trusted)", slog.Int("countries", len(loaded)))
+		s.log.Info("vat rates loaded from db (trusted)", slog.Int("countries", len(reconciled)))
 	} else {
-		s.log.Info("vat rates loaded from db (unverified, waiting for API refresh)", slog.Int("countries", len(loaded)))
+		s.log.Info("vat rates loaded from db (unverified, waiting for API refresh)", slog.Int("countries", len(reconciled)))
 	}
 	return newest
 }
@@ -218,8 +285,8 @@ func (s *Service) refreshFromAPI() {
 		return
 	}
 
-	now := time.Now()
-	newRates := make(map[string]float64, len(countries))
+	apiRates := make(map[string]float64, len(countries))
+	names := make(map[string]string, len(countries))
 	for _, c := range countries {
 		code := c.Code
 
@@ -242,29 +309,44 @@ func (s *Service) refreshFromAPI() {
 		}
 
 		if rate > 0 {
-			newRates[code] = rate
-
-			// Persist to DB
-			if s.db != nil {
-				if err := s.db.SaveVATRate(&entity.VATRate{
-					CountryCode:  code,
-					StandardRate: rate,
-					CountryName:  countryName,
-					UpdatedAt:    now,
-				}); err != nil {
-					s.log.Warn("save vat rate to db", slog.String("country", code), sl.Err(err))
-				}
-			}
+			apiRates[code] = rate
+			names[code] = countryName
 		}
 	}
 
-	// Only swap if we got results; keep stale cache on total failure
-	if len(newRates) == 0 {
+	// Only proceed if we got results; keep stale cache on total failure
+	if len(apiRates) == 0 {
 		s.log.Warn("vat rates refresh returned zero countries, keeping existing cache")
 		return
 	}
 
-	// Verify DB persistence: the saved count must match what we fetched from the API.
+	// Validate the freshly fetched rates against the curated baseline before trusting
+	// or persisting them. The corrected values (not the raw API values) are what get
+	// stored and served, so a stale external feed never poisons the cache.
+	reconciled, issues := s.reconcile(apiRates)
+	if issues > 0 {
+		s.log.Warn("vat rates from api corrected against baseline", slog.Int("corrections", issues))
+	}
+
+	now := time.Now()
+	if s.db != nil {
+		for code, rate := range reconciled {
+			name := names[code]
+			if name == "" {
+				name = code
+			}
+			if err := s.db.SaveVATRate(&entity.VATRate{
+				CountryCode:  code,
+				StandardRate: rate,
+				CountryName:  name,
+				UpdatedAt:    now,
+			}); err != nil {
+				s.log.Warn("save vat rate to db", slog.String("country", code), sl.Err(err))
+			}
+		}
+	}
+
+	// Verify DB persistence: the saved count must match what we reconciled.
 	// On mismatch, mark the service as unverified so consumers fall back to their own data.
 	dbVerified := true
 	if s.db != nil {
@@ -272,9 +354,9 @@ func (s *Service) refreshFromAPI() {
 		if err != nil {
 			s.log.Error("verify vat rates in db", sl.Err(err))
 			dbVerified = false
-		} else if len(dbRates) != len(newRates) {
+		} else if len(dbRates) != len(reconciled) {
 			s.log.Error("vat rates db count mismatch",
-				slog.Int("api_count", len(newRates)),
+				slog.Int("reconciled_count", len(reconciled)),
 				slog.Int("db_count", len(dbRates)),
 			)
 			dbVerified = false
@@ -282,15 +364,15 @@ func (s *Service) refreshFromAPI() {
 	}
 
 	s.mu.Lock()
-	s.rates = newRates
+	s.rates = reconciled
 	s.verified = dbVerified
 	s.mu.Unlock()
 
 	if dbVerified {
-		s.log.Info("vat rates refreshed and verified", slog.Int("countries", len(newRates)))
+		s.log.Info("vat rates refreshed and verified", slog.Int("countries", len(reconciled)))
 	} else {
 		s.log.Warn("vat rates refreshed but NOT verified, consumers will use fallback",
-			slog.Int("countries", len(newRates)))
+			slog.Int("countries", len(reconciled)))
 	}
 }
 

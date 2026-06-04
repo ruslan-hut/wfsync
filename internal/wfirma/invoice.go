@@ -172,7 +172,10 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 
 	// Cross-check OpenCart's calculated rate against our internal VAT rate database.
 	// Only meaningful for EU B2C orders where the destination-country rate is used.
-	// Internal rate (from vatlookup.eu) always takes priority over OpenCart data.
+	// Internal rate takes priority over OpenCart data because OpenCart's tax config can
+	// be wrong. The internal rate is validated against the curated baseline on load (see
+	// internal/vatrates.reconcile), so a stale external feed can no longer override a
+	// correct OpenCart rate with an outdated one.
 	if vp != nil && !isB2B && countryCode != "" && countryCode != "PL" {
 		if internalRate := vp.GetStandardRate(countryCode); internalRate > 0 && internalRate != float64(opencartRate) {
 			log.Warn("VAT rate mismatch: using internal",
