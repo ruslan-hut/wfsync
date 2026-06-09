@@ -25,7 +25,7 @@ type VATRate struct {
 // MAINTENANCE: update an entry whenever an EU member changes its standard rate.
 var StandardVATRates = map[string]float64{
 	"AT": 20, "BE": 21, "BG": 20, "HR": 25, "CY": 19,
-	"CZ": 21, "DK": 25, "EE": 22, "FI": 25, "FR": 20,
+	"CZ": 21, "DK": 25, "EE": 22, "FI": 25.5, "FR": 20,
 	"DE": 19, "GR": 24, "HU": 27, "IE": 23, "IT": 22,
 	"LV": 21, "LT": 21, "LU": 17, "MT": 18, "NL": 21,
 	"PT": 23, "RO": 19, "SK": 23, "SI": 22, "ES": 21,
