@@ -1,8 +1,9 @@
-// Package vatrates fetches and caches standard EU VAT rates from the vatlookup.eu API.
-// It provides dynamic EU country membership and rate lookups, replacing hardcoded maps.
-// Rates are refreshed periodically in the background; stale cache is kept on fetch failure.
-// When a Database is configured, rates are persisted to MongoDB and loaded on startup
-// to avoid unnecessary API calls after restarts.
+// Package vatrates fetches and caches standard EU VAT rates from the vatnode
+// eu-vat-rates-data dataset, which is sourced from the European Commission TEDB
+// and refreshed daily. It provides dynamic EU country membership and rate lookups,
+// replacing hardcoded maps. Rates are refreshed periodically in the background;
+// stale cache is kept on fetch failure. When a Database is configured, rates are
+// persisted to MongoDB and loaded on startup to avoid unnecessary fetches after restarts.
 package vatrates
 
 import (
@@ -17,7 +18,9 @@ import (
 	"wfsync/lib/sl"
 )
 
-const baseURL = "https://api.vatlookup.eu"
+// dataURL is the vatnode eu-vat-rates-data JSON, served via the jsDelivr CDN.
+// The dataset is sourced from the European Commission TEDB and updated daily.
+const dataURL = "https://cdn.jsdelivr.net/gh/vatnode/eu-vat-rates-data@main/data/eu-vat-rates-data.json"
 
 // retryInterval is used instead of the normal refresh interval when the service is unverified.
 const retryInterval = 30 * time.Minute
@@ -28,21 +31,19 @@ type Database interface {
 	GetAllVATRates() ([]*entity.VATRate, error)
 }
 
-// countryEntry represents a single item from the /countrylist/ endpoint.
-type countryEntry struct {
-	Code      string `json:"code"`
-	VATPrefix string `json:"vat_prefix"`
-	Name      string `json:"name"`
+// vatnodeData is the top-level shape of the vatnode eu-vat-rates-data document.
+type vatnodeData struct {
+	Version string                    `json:"version"`
+	Source  string                    `json:"source"`
+	Rates   map[string]vatnodeCountry `json:"rates"`
 }
 
-// ratesResponse represents the response from the /rates/{code}/ endpoint.
-type ratesResponse struct {
-	Rates []rateGroup `json:"rates"`
-}
-
-type rateGroup struct {
-	Name  string    `json:"name"`
-	Rates []float64 `json:"rates"`
+// vatnodeCountry is a single country entry. The dataset covers non-EU European
+// countries too, so EUMember is used to filter down to EU members.
+type vatnodeCountry struct {
+	Country  string  `json:"country"`
+	EUMember bool    `json:"eu_member"`
+	Standard float64 `json:"standard"`
 }
 
 // Service fetches EU VAT rates from vatlookup.eu and caches them in memory.
@@ -279,39 +280,10 @@ func (s *Service) loadFromDB() time.Time {
 // refreshFromAPI fetches rates from the external API, updates the in-memory cache,
 // and persists each rate to the database (if configured).
 func (s *Service) refreshFromAPI() {
-	countries, err := s.fetchCountryList()
+	apiRates, names, err := s.fetchRates()
 	if err != nil {
-		s.log.Error("fetch country list", sl.Err(err))
+		s.log.Error("fetch vat rates", sl.Err(err))
 		return
-	}
-
-	apiRates := make(map[string]float64, len(countries))
-	names := make(map[string]string, len(countries))
-	for _, c := range countries {
-		code := c.Code
-
-		// Skip UK and PL
-		if code == "UK" || code == "XI" || code == "PL" {
-			continue
-		}
-
-		rate, err := s.fetchStandardRate(code)
-		if err != nil {
-			s.log.Warn("fetch rate", slog.String("country", code), sl.Err(err))
-			continue
-		}
-
-		countryName := c.Name
-
-		// Map EL (Greece in EU VAT system) to GR (ISO 3166)
-		if code == "EL" {
-			code = "GR"
-		}
-
-		if rate > 0 {
-			apiRates[code] = rate
-			names[code] = countryName
-		}
 	}
 
 	// Only proceed if we got results; keep stale cache on total failure
@@ -376,46 +348,36 @@ func (s *Service) refreshFromAPI() {
 	}
 }
 
-// fetchCountryList calls GET /countrylist/ and returns the list of EU countries.
-func (s *Service) fetchCountryList() ([]countryEntry, error) {
-	resp, err := s.hc.Get(baseURL + "/countrylist/")
+// fetchRates downloads the vatnode dataset and returns standard rates and country
+// names keyed by ISO alpha-2 code. Only EU members are kept, and PL is excluded
+// (Polish rates are handled directly elsewhere). The dataset already uses ISO codes
+// (GR for Greece), so no code remapping is needed.
+func (s *Service) fetchRates() (map[string]float64, map[string]string, error) {
+	resp, err := s.hc.Get(dataURL)
 	if err != nil {
-		return nil, fmt.Errorf("GET countrylist: %w", err)
+		return nil, nil, fmt.Errorf("GET vat rates: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("countrylist status %d", resp.StatusCode)
+		return nil, nil, fmt.Errorf("vat rates status %d", resp.StatusCode)
 	}
 
-	var countries []countryEntry
-	if err = json.NewDecoder(resp.Body).Decode(&countries); err != nil {
-		return nil, fmt.Errorf("decode countrylist: %w", err)
-	}
-	return countries, nil
-}
-
-// fetchStandardRate calls GET /rates/{code}/ and extracts the first "Standard" rate.
-func (s *Service) fetchStandardRate(code string) (float64, error) {
-	resp, err := s.hc.Get(fmt.Sprintf("%s/rates/%s/", baseURL, code))
-	if err != nil {
-		return 0, fmt.Errorf("GET rates/%s: %w", code, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("rates/%s status %d", code, resp.StatusCode)
+	var data vatnodeData
+	if err = json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, nil, fmt.Errorf("decode vat rates: %w", err)
 	}
 
-	var rr ratesResponse
-	if err = json.NewDecoder(resp.Body).Decode(&rr); err != nil {
-		return 0, fmt.Errorf("decode rates/%s: %w", code, err)
-	}
-
-	for _, g := range rr.Rates {
-		if g.Name == "Standard" && len(g.Rates) > 0 {
-			return g.Rates[0], nil
+	rates := make(map[string]float64, len(data.Rates))
+	names := make(map[string]string, len(data.Rates))
+	for code, c := range data.Rates {
+		if !c.EUMember || code == "PL" {
+			continue
+		}
+		if c.Standard > 0 {
+			rates[code] = c.Standard
+			names[code] = c.Country
 		}
 	}
-	return 0, nil
+	return rates, names, nil
 }
