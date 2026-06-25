@@ -31,7 +31,7 @@ type CheckoutParams struct {
 	TaxTitle      string         `json:"tax_title" bson:"tax_title"`
 	TaxValue      int64          `json:"tax_value" bson:"tax_value"`
 	SubTotal      int64          `json:"sub_total,omitempty" bson:"sub_total,omitempty"`
-	Currency      string         `json:"currency" bson:"currency" validate:"required,oneof=PLN EUR"`
+	Currency      string         `json:"currency" bson:"currency" validate:"required,oneof=PLN EUR USD"`
 	CurrencyValue float64        `json:"currency_value,omitempty" bson:"currency_value,omitempty"`
 	OrderId       string         `json:"order_id" bson:"order_id" validate:"required,min=1,max=32"`
 	SuccessUrl    string         `json:"success_url" bson:"success_url" validate:"required,url"`

@@ -14,6 +14,7 @@ type InvoiceListItem struct {
 	IsStripe       bool   `json:"is_stripe"`
 	TotalPLN       int64  `json:"total_pln"`
 	TotalEUR       int64  `json:"total_eur"`
+	TotalUSD       int64  `json:"total_usd"`
 	Currency       string `json:"currency"`
 }
 

@@ -761,6 +761,8 @@ func (c *Core) InvoiceList(ctx context.Context, from, to string) ([]*entity.Invo
 			item.TotalPLN = oc.Total
 		} else if oc.Currency == "EUR" {
 			item.TotalEUR = oc.Total
+		} else if oc.Currency == "USD" {
+			item.TotalUSD = oc.Total
 		}
 
 		// If WFirma invoice exists for this order, prefer WFirma data
@@ -799,6 +801,8 @@ func (c *Core) InvoiceList(ctx context.Context, from, to string) ([]*entity.Invo
 			item.TotalPLN = total
 		} else if inv.Currency == "EUR" {
 			item.TotalEUR = total
+		} else if inv.Currency == "USD" {
+			item.TotalUSD = total
 		}
 		items = append(items, item)
 	}

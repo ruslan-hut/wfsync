@@ -157,7 +157,7 @@ func writeInvoiceListCSV(w http.ResponseWriter, items []*entity.InvoiceListItem,
 	// Header row
 	_ = cw.Write([]string{
 		"Date", "Order Status", "Order ID", "Invoice Number",
-		"Contractor Name", "B2B", "Stripe", "Total PLN", "Total EUR", "Currency",
+		"Contractor Name", "B2B", "Stripe", "Total PLN", "Total EUR", "Total USD", "Currency",
 	})
 
 	for _, item := range items {
@@ -171,6 +171,7 @@ func writeInvoiceListCSV(w http.ResponseWriter, items []*entity.InvoiceListItem,
 			boolYesNo(item.IsStripe),
 			formatCents(item.TotalPLN),
 			formatCents(item.TotalEUR),
+			formatCents(item.TotalUSD),
 			item.Currency,
 		})
 	}

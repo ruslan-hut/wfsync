@@ -32,7 +32,7 @@ type B2BOrder struct {
 	DiscountPercent float64    `json:"discount_percent"`
 	DiscountAmount  float64    `json:"discount_amount"`
 	Shipment        float64    `json:"shipment"`
-	CurrencyCode    string     `json:"currency_code" validate:"required,oneof=PLN EUR"`
+	CurrencyCode    string     `json:"currency_code" validate:"required,oneof=PLN EUR USD"`
 	CreatedAt       time.Time  `json:"created_at"`
 	Items           []*B2BItem `json:"items" validate:"required,min=1,dive"`
 }
