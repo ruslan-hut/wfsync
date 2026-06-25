@@ -27,6 +27,13 @@ type WfirmaConfig struct {
 	AccessKey string `yaml:"access_key" env-default:""`
 	SecretKey string `yaml:"secret_key" env-default:""`
 	AppID     string `yaml:"app_id" env-default:""`
+
+	// KSefDraftFallback, when true, makes invoice creation fall back to a draft
+	// (wersja robocza, type "normal_draft") if wFirma rejects a normal invoice with a
+	// KSeF authorization error. The draft is not sent to KSeF, so it succeeds without
+	// the API user's KSeF authorization, but must be accepted manually in wFirma to
+	// become a legal invoice. See docs/wfirma-ksef-draft-fallback.md.
+	KSefDraftFallback bool `yaml:"ksef_draft_fallback" env-default:"false"`
 }
 
 type Mongo struct {

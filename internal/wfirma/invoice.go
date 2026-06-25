@@ -29,6 +29,13 @@ const (
 	invoiceProforma invoiceType = "proforma" // proforma invoice (przedpłata)
 	invoiceNormal   invoiceType = "normal"   // standard VAT invoice (faktura VAT)
 
+	// invoiceNormalDraft is a draft VAT invoice (wersja robocza faktury, "WRF").
+	// Unlike invoiceNormal, a draft is NOT auto-submitted to KSeF on creation, so it
+	// can be registered even when the API user has no KSeF authorization. It is not yet
+	// an accounting document (no number, no KSeF UID) and must be accepted manually in
+	// wFirma to become a legal invoice. Used only as a fallback — see submitInvoice.
+	invoiceNormalDraft invoiceType = "normal_draft"
+
 	// defaultPaymentMethod is used for all created invoices.
 	// Supported values: "transfer", "cash", "compensation", "cod", "payment_card".
 	defaultPaymentMethod = "transfer"
@@ -470,6 +477,16 @@ func (c *Client) submitInvoice(ctx context.Context, log *slog.Logger, inv *Invoi
 				rl.Warn("retry invoice creation error")
 				return nil, fmt.Errorf("wFirma error (retry): %s", retryErrMsg)
 			}
+		} else if c.draftFallback && isKSefAuthError(errMsg) && inv.Type == string(invoiceNormal) {
+			// wFirma blocked issuance because the API user has no KSeF authorization.
+			// Re-submit the same document as a draft (wersja robocza), which is not sent
+			// to KSeF and therefore succeeds. The draft is NOT a legal invoice yet — a
+			// human must accept it in wFirma once KSeF authorization is restored.
+			draftInv, draftErr := c.submitDraftFallback(ctx, log, inv, errMsg)
+			if draftErr != nil {
+				return nil, draftErr
+			}
+			return draftInv, nil
 		} else {
 			el := log.With(slog.String("error", errMsg), tgAttr)
 			if !isRetry {
@@ -488,6 +505,84 @@ func (c *Client) submitInvoice(ctx context.Context, log *slog.Logger, inv *Invoi
 		log.With(slog.String("response", string(addRes))).Warn("no invoice id in response")
 		return nil, fmt.Errorf("no invoice id returned from wFirma")
 	}
+
+	return &result, nil
+}
+
+// ksefAuthErrorPhrases are fragments of the wFirma error message returned when an
+// invoice cannot be issued because the API user lacks KSeF authorization, e.g.
+// "Brak autoryzacji w KSeF 2.0. Zautoryzuj się w zakładce PRZYCHODY » KSEF I INTEGRACJE".
+// Matched case-insensitively so wording/version changes ("KSeF 2.0" → "KSeF") still hit.
+var ksefAuthErrorPhrases = []string{"ksef"}
+
+// isKSefAuthError reports whether a wFirma error message indicates the document was
+// blocked due to missing KSeF authorization (as opposed to a payload/validation error).
+func isKSefAuthError(msg string) bool {
+	lower := strings.ToLower(msg)
+	if !strings.Contains(lower, "autoryzac") { // "autoryzacji"/"autoryzuj" — authorization
+		return false
+	}
+	for _, p := range ksefAuthErrorPhrases {
+		if strings.Contains(lower, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// submitDraftFallback re-issues an invoice as a draft (wersja robocza / "WRF") after the
+// normal issuance was rejected for missing KSeF authorization. A draft is not transmitted
+// to KSeF, so it registers successfully, but it is not yet a legal accounting document
+// (it has no final number until accepted in wFirma). This always raises a Telegram alert —
+// including on retry-queue attempts — because the resulting draft requires manual acceptance.
+func (c *Client) submitDraftFallback(ctx context.Context, log *slog.Logger, inv *Invoice, origErr string) (*InvoiceData, error) {
+	inv.Type = string(invoiceNormalDraft)
+
+	draftPayload := map[string]interface{}{
+		"api": map[string]interface{}{
+			"invoices": []map[string]interface{}{
+				{"invoice": inv},
+			},
+		},
+	}
+
+	res, err := c.request(ctx, "invoices", "add", draftPayload)
+	if err != nil {
+		log.Error("draft fallback add invoice", sl.Err(err))
+		return nil, fmt.Errorf("draft fallback add invoice: %w", err)
+	}
+
+	var resp InvoiceResponse
+	if err = json.Unmarshal(res, &resp); err != nil {
+		return nil, fmt.Errorf("unmarshal draft invoice response: %w", err)
+	}
+
+	if resp.Status.Code == "ERROR" {
+		draftErrMsg := extractInvoiceErrors(&resp)
+		log.With(
+			slog.String("ksef_error", origErr),
+			slog.String("draft_error", draftErrMsg),
+			slog.String("tg_topic", entity.TopicError),
+		).Error("KSeF draft fallback also failed")
+		return nil, fmt.Errorf("wFirma error (draft fallback): %s", draftErrMsg)
+	}
+
+	var result InvoiceData
+	if wrapper, ok := resp.Invoices["0"]; ok {
+		result = wrapper.Invoice
+	}
+	if result.Id == "" {
+		log.With(slog.String("response", string(res))).Warn("no invoice id in draft response")
+		return nil, fmt.Errorf("no invoice id returned from wFirma (draft fallback)")
+	}
+
+	// Always alert: a draft was created instead of a real invoice and someone must
+	// accept it in wFirma (PRZYCHODY » FAKTURY) once KSeF authorization is restored.
+	log.With(
+		slog.String("wfirma_id", result.Id),
+		slog.String("ksef_error", origErr),
+		slog.String("tg_topic", entity.TopicError),
+	).Warn("KSeF authorization missing — invoice saved as DRAFT (wersja robocza), accept it manually in wFirma")
 
 	return &result, nil
 }

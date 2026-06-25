@@ -66,6 +66,7 @@ type Database interface {
 // Client is the wFirma API client. Use NewClient to create one.
 type Client struct {
 	enabled       bool
+	draftFallback bool // fall back to a KSeF-free draft when wFirma rejects on KSeF authorization
 	hc            *http.Client
 	db            Database
 	vatRates      VATProvider
@@ -91,14 +92,15 @@ type Config struct {
 
 func NewClient(conf *config.Config, logger *slog.Logger) *Client {
 	return &Client{
-		enabled:   conf.WFirma.Enabled,
-		hc:        &http.Client{Timeout: 55 * time.Second},
-		baseURL:   "https://api2.wfirma.pl",
-		accessKey: conf.WFirma.AccessKey,
-		secretKey: conf.WFirma.SecretKey,
-		appID:     conf.WFirma.AppID,
-		filePath:  conf.FilePath,
-		log:       logger.With(sl.Module("wfirma")),
+		enabled:       conf.WFirma.Enabled,
+		draftFallback: conf.WFirma.KSefDraftFallback,
+		hc:            &http.Client{Timeout: 55 * time.Second},
+		baseURL:       "https://api2.wfirma.pl",
+		accessKey:     conf.WFirma.AccessKey,
+		secretKey:     conf.WFirma.SecretKey,
+		appID:         conf.WFirma.AppID,
+		filePath:      conf.FilePath,
+		log:           logger.With(sl.Module("wfirma")),
 	}
 }
 

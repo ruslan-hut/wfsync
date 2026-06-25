@@ -18,6 +18,9 @@ wfirma:
   access_key: your-wfirma-access-key
   secret_key: your-wfirma-secret-key
   app_id: your-wfirma-app-id
+  # On KSeF auth rejection, save the invoice as a draft (wersja robocza) instead of failing.
+  # Draft is not sent to KSeF and must be accepted manually in wFirma. See docs/wfirma-ksef-draft-fallback.md.
+  ksef_draft_fallback: false
 mongo:
   enabled: false
   host: 127.0.0.1
