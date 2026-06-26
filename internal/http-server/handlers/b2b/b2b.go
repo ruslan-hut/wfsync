@@ -2,6 +2,7 @@ package b2b
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -89,6 +90,12 @@ func CreateProforma(logger *slog.Logger, handler Core) http.HandlerFunc {
 
 		payment, err := handler.B2BCreateProforma(r.Context(), &order)
 		if err != nil {
+			if errors.Is(err, entity.ErrVATRateMismatch) {
+				log.Warn("proforma vat rate mismatch", sl.Err(err))
+				render.Status(r, 400)
+				render.JSON(w, r, errorResponse{Error: err.Error()})
+				return
+			}
 			log.Error("proforma creation", sl.Err(err))
 			render.Status(r, 500)
 			render.JSON(w, r, errorResponse{Error: fmt.Sprintf("Request failed: %v", err)})
@@ -145,6 +152,12 @@ func CreateInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 
 		payment, err := handler.B2BCreateInvoice(r.Context(), &order)
 		if err != nil {
+			if errors.Is(err, entity.ErrVATRateMismatch) {
+				log.Warn("invoice vat rate mismatch", sl.Err(err))
+				render.Status(r, 400)
+				render.JSON(w, r, errorResponse{Error: err.Error()})
+				return
+			}
 			log.Error("invoice creation", sl.Err(err))
 			render.Status(r, 500)
 			render.JSON(w, r, errorResponse{Error: fmt.Sprintf("Request failed: %v", err)})

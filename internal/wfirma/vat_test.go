@@ -38,6 +38,35 @@ func TestSlovakiaB2CRate(t *testing.T) {
 	}
 }
 
+// TestExpectedB2BVATRate locks the numeric rates that B2B order payloads are
+// validated against: PL and EU-without-VAT default to 23%, EU-with-VAT is 0% WDT,
+// and non-EU is 0% EXP. These are the rates a calling system must agree with or
+// its order is rejected with ErrVATRateMismatch.
+func TestExpectedB2BVATRate(t *testing.T) {
+	cases := []struct {
+		name     string
+		country  string
+		hasTaxId bool
+		want     int
+	}{
+		{"PL with vat number", "PL", true, 23},
+		{"PL without vat number", "PL", false, 23},
+		{"empty country", "", false, 23},
+		{"EU with vat number → WDT 0%", "DE", true, 0},
+		{"EU without vat number → 23%", "DE", false, 23},
+		{"non-EU with vat number → EXP 0%", "US", true, 0},
+		{"non-EU without vat number → EXP 0%", "US", false, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// nil provider → fall back to the hardcoded euCountries map.
+			if got := ExpectedB2BVATRate(tc.country, tc.hasTaxId, nil); got != tc.want {
+				t.Errorf("ExpectedB2BVATRate(%q, %t) = %d, want %d", tc.country, tc.hasTaxId, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestNormalizeEUVatNumber is the regression for the PL-290 incident: a Czech B2B
 // buyer's bare national number must gain its "CZ" prefix so wFirma accepts the
 // 0% WDT invoice, while already-prefixed, non-EU, and domestic numbers are left

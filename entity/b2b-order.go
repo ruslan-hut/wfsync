@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"errors"
 	"math"
 	"net/http"
 	"time"
@@ -11,6 +12,11 @@ const (
 	SourceB2B               Source = "b2b"
 	DefaultCustomerGroupB2B        = 6
 )
+
+// ErrVATRateMismatch signals that the VAT rate implied by an order payload does
+// not match the rate our internal rules require. Handlers should surface it as a
+// 400 validation error so the calling system can reconcile its VAT calculation.
+var ErrVATRateMismatch = errors.New("vat rate mismatch")
 
 type B2BOrder struct {
 	OrderUID        string     `json:"order_uid" validate:"required"`
@@ -73,6 +79,7 @@ func (o *B2BOrder) ToCheckoutParams() *CheckoutParams {
 		Created:       time.Now(),
 		Source:        SourceB2B,
 		TaxValue:      floatToCents(o.TotalVAT),
+		SubTotal:      floatToCents(o.Subtotal),
 		CustomerGroup: DefaultCustomerGroupB2B,
 	}
 

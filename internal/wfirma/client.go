@@ -114,6 +114,19 @@ func (c *Client) SetVATProvider(vp VATProvider) {
 	c.vatRates = vp
 }
 
+// ExpectedB2BVATRate returns the VAT rate percent that internal rules require for
+// a B2B order to countryCode, given whether the buyer supplied a VAT number. It
+// uses the dynamic VAT provider only when it has been verified against the DB
+// (same gate as invoice creation), otherwise it falls back to the hardcoded EU
+// country map. Used to validate a B2B payload's declared rate before submission.
+func (c *Client) ExpectedB2BVATRate(countryCode string, hasTaxId bool) int {
+	var vp VATProvider
+	if c.vatRates != nil && c.vatRates.Verified() {
+		vp = c.vatRates
+	}
+	return ExpectedB2BVATRate(countryCode, hasTaxId, vp)
+}
+
 // SetVIESProvider injects a VIES VAT number validator.
 // When set, invoice creation logs a warning if a B2B TaxId fails VIES validation.
 func (c *Client) SetVIESProvider(vp VIESProvider) {

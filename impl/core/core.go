@@ -39,6 +39,7 @@ type InvoiceService interface {
 	SyncToRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
 	FindInvoices(ctx context.Context, from, to string) ([]*entity.LocalInvoice, error)
 	InvoiceExists(ctx context.Context, invoiceID string) (bool, error)
+	ExpectedB2BVATRate(countryCode string, hasTaxId bool) int
 }
 
 // PaymentDatabase provides access to payment-related data in MongoDB.
@@ -682,12 +683,57 @@ func (c *Core) WFirmaCreateInvoice(ctx context.Context, params *entity.CheckoutP
 
 func (c *Core) B2BCreateProforma(ctx context.Context, order *entity.B2BOrder) (*entity.Payment, error) {
 	params := order.ToCheckoutParams()
+	if err := c.validateB2BVATRate(params); err != nil {
+		return nil, err
+	}
 	return c.WFirmaRegisterProforma(ctx, params)
 }
 
 func (c *Core) B2BCreateInvoice(ctx context.Context, order *entity.B2BOrder) (*entity.Payment, error) {
 	params := order.ToCheckoutParams()
+	if err := c.validateB2BVATRate(params); err != nil {
+		return nil, err
+	}
 	return c.WFirmaRegisterInvoice(ctx, params)
+}
+
+// validateB2BVATRate cross-checks the VAT rate implied by a B2B order payload
+// against the rate our internal rules require for the buyer's country and VAT
+// number. The two systems must agree before we create a document, so a mismatch
+// is rejected with entity.ErrVATRateMismatch (surfaced as a 400) rather than
+// silently overriding the payload — this keeps the calling system's VAT
+// calculation in sync with ours.
+//
+// A payload with no VAT (TaxValue 0 ⇒ TaxRate 0) passes only when the expected
+// rate is also 0, i.e. a legitimately zero-rated WDT/EXP order; a zero-rated
+// expectation against a non-zero declared rate, or vice versa, is rejected.
+func (c *Core) validateB2BVATRate(params *entity.CheckoutParams) error {
+	if c.inv == nil {
+		return fmt.Errorf("invoice service not connected")
+	}
+
+	countryCode := params.ClientDetails.CountryCode()
+	hasTaxId := params.ClientDetails.TaxId != ""
+
+	expected := c.inv.ExpectedB2BVATRate(countryCode, hasTaxId)
+	declared := params.TaxRate()
+
+	if declared != expected {
+		c.log.With(
+			slog.String("order_id", params.OrderId),
+			slog.String("country", countryCode),
+			slog.Bool("has_tax_id", hasTaxId),
+			slog.Int("expected_rate", expected),
+			slog.Int("declared_rate", declared),
+			slog.Int64("total", params.Total),
+			slog.Int64("tax_value", params.TaxValue),
+			slog.String("tg_topic", entity.TopicError),
+		).Warn("b2b vat rate mismatch")
+		return fmt.Errorf("%w: country %q (vat number: %t) requires %d%%, payload declares %d%%",
+			entity.ErrVATRateMismatch, countryCode, hasTaxId, expected, declared)
+	}
+
+	return nil
 }
 
 // InvoiceList returns a merged invoice list from WFirma, OpenCart, and MongoDB.

@@ -556,7 +556,7 @@ Each part is a complete, standalone proforma in wFirma, with `(część N/M)` ap
 
 | Code | Description |
 |------|-------------|
-| 400 | Invalid request body or validation error |
+| 400 | Invalid request body, validation error, or VAT rate mismatch (see [B2B VAT validation](#b2b-vat-rate-validation)) |
 | 401 | User not found / unauthorized |
 | 403 | User lacks `WFirmaAllowInvoice` permission |
 | 500 | B2B service unavailable or proforma creation failed |
@@ -618,10 +618,41 @@ Split order (e.g. 450 line items → 3 invoices of 200/200/50):
 
 | Code | Description |
 |------|-------------|
-| 400 | Invalid request body or validation error |
+| 400 | Invalid request body, validation error, or VAT rate mismatch (see [B2B VAT validation](#b2b-vat-rate-validation)) |
 | 401 | User not found / unauthorized |
 | 403 | User lacks `WFirmaAllowInvoice` permission |
 | 500 | B2B service unavailable or invoice creation failed |
+
+---
+
+### B2B VAT rate validation
+
+Both B2B endpoints validate the VAT rate implied by the payload against the rate our
+internal rules require **before** creating any document, keeping the calling system's
+VAT calculation in sync with ours. On a mismatch the request is rejected with `400` and
+no proforma/invoice is created.
+
+The expected rate is derived purely from the buyer's country and whether a `client_vat`
+number was supplied (it does **not** depend on the amounts in the payload):
+
+| Country | With `client_vat` | Without `client_vat` |
+|---------|-------------------|----------------------|
+| PL (or empty) | 23% | 23% |
+| EU country | 0% (WDT, intra-community delivery) | 23% (Polish rate) |
+| Non-EU | 0% (EXP, export) | 0% (EXP, export) |
+
+The declared rate is computed from the order totals
+(`total_vat / (subtotal or total − shipment − total_vat) × 100`, rounded to a whole
+percent). A B2B order to an EU country **without** a VAT number is therefore expected
+to carry 23% VAT; sending it with 0% (or a destination-country rate) is rejected.
+
+Example mismatch response (`400`):
+
+```json
+{
+  "error": "vat rate mismatch: country \"DE\" (vat number: false) requires 23%, payload declares 0%"
+}
+```
 
 ---
 

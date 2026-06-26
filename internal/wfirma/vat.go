@@ -115,6 +115,30 @@ func resolveGoodsVatCode(taxRate int, countryCode string, hasTaxId bool, b2b boo
 	return strconv.Itoa(taxRate)
 }
 
+// ExpectedB2BVATRate returns the VAT rate percent that internal rules require for
+// a B2B order shipped to countryCode, given whether the buyer supplied a VAT
+// number. It mirrors resolveGoodsVatCode's B2B branch but yields a plain numeric
+// percent (0 for the zero-rated WDT/EXP/exempt codes) so callers can validate a
+// payload-declared rate before an invoice is created.
+//
+// The rules are deliberately independent of any rate the payload carries:
+//   - PL or unknown country        → 23 (Polish standard rate)
+//   - EU country with VAT number   → 0  (WDT, intra-community delivery)
+//   - EU country without VAT number→ 23 (Polish rate, not the destination rate)
+//   - Non-EU country               → 0  (EXP, export)
+//
+// Passing taxRate 0 into resolveGoodsVatCode forces the PL/unknown branch to the
+// 23% default, which is exactly the rule we want B2B callers to be held to.
+func ExpectedB2BVATRate(countryCode string, hasTaxId bool, vp VATProvider) int {
+	code := resolveGoodsVatCode(0, countryCode, hasTaxId, true, vp)
+	switch code {
+	case vatWDT, vatEXP, vatNP, vatNPUE, vatZW:
+		return 0
+	}
+	rate, _ := strconv.Atoi(code)
+	return rate
+}
+
 // euVatPrefixes maps an ISO 3166 alpha-2 country code to its EU VAT-UE number
 // prefix where it differs from the country code. The only such case is Greece,
 // whose VAT numbers carry the "EL" prefix while its country code is "GR".
