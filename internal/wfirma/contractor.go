@@ -40,6 +40,9 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 	if countryCode == "PL" {
 		customer.ZipCode = customer.NormalizeZipCode()
 	}
+	// Foreign EU buyers need the country prefix on their VAT-UE number or wFirma
+	// rejects 0% WDT / EU reverse-charge invoices (contractor.nip validation).
+	nip := normalizeEUVatNumber(countryCode, customer.TaxId)
 
 	// If not found, create a new contractor.
 	payload := map[string]interface{}{
@@ -54,7 +57,7 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 						"city":        customer.City,
 						"street":      customer.Street,
 						"tax_id_type": taxIdType,
-						"nip":         customer.TaxId,
+						"nip":         nip,
 					},
 				},
 			},
@@ -109,6 +112,11 @@ func (c *Client) updateContractor(ctx context.Context, contractorID string, cust
 		taxIdType = "custom"
 	}
 
+	countryCode := customer.CountryCode()
+	// Foreign EU buyers need the country prefix on their VAT-UE number or wFirma
+	// rejects 0% WDT / EU reverse-charge invoices (contractor.nip validation).
+	nip := normalizeEUVatNumber(countryCode, customer.TaxId)
+
 	payload := map[string]interface{}{
 		"api": map[string]interface{}{
 			"contractors": []map[string]interface{}{
@@ -116,9 +124,9 @@ func (c *Client) updateContractor(ctx context.Context, contractorID string, cust
 					"contractor": map[string]interface{}{
 						"id":          contractorID,
 						"name":        customer.Name,
-						"country":     customer.CountryCode(),
+						"country":     countryCode,
 						"tax_id_type": taxIdType,
-						"nip":         customer.TaxId,
+						"nip":         nip,
 					},
 				},
 			},
@@ -143,7 +151,7 @@ func (c *Client) updateContractor(ctx context.Context, contractorID string, cust
 	}
 	c.log.Debug("contractor updated",
 		slog.String("contractor_id", contractorID),
-		slog.String("nip", customer.TaxId))
+		slog.String("nip", nip))
 	return nil
 }
 

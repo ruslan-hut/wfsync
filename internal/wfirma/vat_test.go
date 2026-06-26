@@ -37,3 +37,33 @@ func TestSlovakiaB2CRate(t *testing.T) {
 		t.Fatalf("SK B2C rate = %q, want \"23\"", got)
 	}
 }
+
+// TestNormalizeEUVatNumber is the regression for the PL-290 incident: a Czech B2B
+// buyer's bare national number must gain its "CZ" prefix so wFirma accepts the
+// 0% WDT invoice, while already-prefixed, non-EU, and domestic numbers are left
+// untouched.
+func TestNormalizeEUVatNumber(t *testing.T) {
+	cases := []struct {
+		name    string
+		country string
+		taxId   string
+		want    string
+	}{
+		{"bare CZ number gets prefix", "CZ", "28982711", "CZ28982711"},
+		{"already prefixed left as-is", "CZ", "CZ28982711", "CZ28982711"},
+		{"whitespace trimmed then prefixed", "CZ", "  28982711 ", "CZ28982711"},
+		{"Greece uses EL prefix", "GR", "123456789", "EL123456789"},
+		{"Greek EL already present", "GR", "EL123456789", "EL123456789"},
+		{"Polish NIP untouched (not in EU map)", "PL", "1234567890", "1234567890"},
+		{"non-EU country untouched", "US", "123456789", "123456789"},
+		{"empty tax id untouched", "CZ", "", ""},
+		{"empty country untouched", "", "28982711", "28982711"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := normalizeEUVatNumber(tc.country, tc.taxId); got != tc.want {
+				t.Errorf("normalizeEUVatNumber(%q, %q) = %q, want %q", tc.country, tc.taxId, got, tc.want)
+			}
+		})
+	}
+}

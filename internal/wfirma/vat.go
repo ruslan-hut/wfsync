@@ -3,6 +3,7 @@ package wfirma
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"wfsync/entity"
 )
 
@@ -112,6 +113,39 @@ func resolveGoodsVatCode(taxRate int, countryCode string, hasTaxId bool, b2b boo
 		return "23"
 	}
 	return strconv.Itoa(taxRate)
+}
+
+// euVatPrefixes maps an ISO 3166 alpha-2 country code to its EU VAT-UE number
+// prefix where it differs from the country code. The only such case is Greece,
+// whose VAT numbers carry the "EL" prefix while its country code is "GR".
+var euVatPrefixes = map[string]string{
+	"GR": "EL",
+}
+
+// normalizeEUVatNumber ensures an EU contractor's tax ID carries the country
+// prefix that wFirma requires for 0% WDT (intra-community delivery) and EU
+// reverse-charge invoices. wFirma validates the buyer's VAT-UE number and
+// rejects a bare national number (e.g. "28982711" instead of "CZ28982711") with
+// "Nieprawidłowy prefiks kraju Unii Europejskiej".
+//
+// It is a no-op when the tax ID is empty, the country is not a foreign EU member
+// (euCountries excludes Poland, so domestic NIPs are left untouched), or the tax
+// ID already starts with a two-letter alphabetic prefix (assumed to be the
+// country code already).
+func normalizeEUVatNumber(countryCode, taxId string) string {
+	taxId = strings.TrimSpace(taxId)
+	if taxId == "" || !euCountries[countryCode] {
+		return taxId
+	}
+	isLetter := func(b byte) bool { return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') }
+	if len(taxId) >= 2 && isLetter(taxId[0]) && isLetter(taxId[1]) {
+		return taxId
+	}
+	prefix := countryCode
+	if alt, ok := euVatPrefixes[countryCode]; ok {
+		prefix = alt
+	}
+	return prefix + taxId
 }
 
 // IsB2BCustomerGroup returns true if the given customer group ID is a B2B group.
