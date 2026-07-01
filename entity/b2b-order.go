@@ -30,6 +30,10 @@ type B2BOrder struct {
 	ClientCity      string     `json:"client_city"`
 	ClientAddress   string     `json:"client_address"`
 	ClientZipcode   string     `json:"client_zipcode"`
+	BillingCountry  string     `json:"billing_country"`
+	BillingCity     string     `json:"billing_city"`
+	BillingAddress  string     `json:"billing_address"`
+	BillingZipcode  string     `json:"billing_zipcode"`
 	StoreUID        string     `json:"store_uid"`
 	Status          string     `json:"status"`
 	Total           float64    `json:"total" validate:"required,gt=0"`
@@ -59,17 +63,27 @@ func (o *B2BOrder) Bind(_ *http.Request) error {
 	return validate.Struct(o)
 }
 
-// ToCheckoutParams converts B2BOrder to CheckoutParams format
+// ToCheckoutParams converts B2BOrder to CheckoutParams format.
+//
+// The invoice contractor address defaults to the client's (delivery) address,
+// but when the payload carries a billing address, it takes precedence — it
+// reflects the client's official/registered address, which is what wFirma
+// invoices must show rather than a shipping destination.
 func (o *B2BOrder) ToCheckoutParams() *CheckoutParams {
+	country, city, street, zipcode := o.ClientCountry, o.ClientCity, o.ClientAddress, o.ClientZipcode
+	if o.hasBillingAddress() {
+		country, city, street, zipcode = o.BillingCountry, o.BillingCity, o.BillingAddress, o.BillingZipcode
+	}
+
 	params := &CheckoutParams{
 		ClientDetails: &ClientDetails{
 			Name:    o.ClientName,
 			Email:   o.ClientEmail,
 			Phone:   o.ClientPhone,
-			Country: o.ClientCountry,
-			City:    o.ClientCity,
-			Street:  o.ClientAddress,
-			ZipCode: o.ClientZipcode,
+			Country: country,
+			City:    city,
+			Street:  street,
+			ZipCode: zipcode,
 			TaxId:   o.ClientVAT,
 		},
 		Total:         floatToCents(o.Total),
@@ -103,6 +117,12 @@ func (o *B2BOrder) ToCheckoutParams() *CheckoutParams {
 	}
 
 	return params
+}
+
+// hasBillingAddress reports whether the payload carries a billing address,
+// i.e. at least one billing_* field is non-empty.
+func (o *B2BOrder) hasBillingAddress() bool {
+	return o.BillingCountry != "" || o.BillingCity != "" || o.BillingAddress != "" || o.BillingZipcode != ""
 }
 
 // floatToCents converts a float64 amount to int64 cents

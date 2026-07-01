@@ -464,6 +464,10 @@ Requires `WFirmaAllowInvoice` permission.
 | `client_city` | string | No | City name |
 | `client_address` | string | No | Street address |
 | `client_zipcode` | string | No | Postal code |
+| `billing_country` | string | No | Billing (official/registered) country code. When any `billing_*` field is set, the billing address is used as the wFirma contractor address instead of the `client_*` address |
+| `billing_city` | string | No | Billing city name |
+| `billing_address` | string | No | Billing street address |
+| `billing_zipcode` | string | No | Billing postal code |
 | `store_uid` | string | No | Store identifier |
 | `status` | string | No | Order status |
 | `total` | number | Yes | Total amount in major units, e.g. `150.00` (must be > 0) |
