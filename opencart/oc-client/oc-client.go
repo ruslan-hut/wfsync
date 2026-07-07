@@ -47,7 +47,7 @@ func New(conf *config.Config, log *slog.Logger) (*Opencart, error) {
 	if !conf.OpenCart.Enabled {
 		return nil, nil
 	}
-	db, err := database.NewSQLClient(conf)
+	db, err := database.NewSQLClient(conf, log)
 	if err != nil {
 		return nil, fmt.Errorf("sql client: %w", err)
 	}

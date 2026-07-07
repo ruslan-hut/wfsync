@@ -61,6 +61,25 @@ func (r *viesResponse) result() entity.VIESResult {
 	}
 }
 
+// splitTaxId separates a tax ID into its VIES country code and national number.
+// If the ID already carries a 2-letter alphabetic prefix it is taken as the country
+// code; otherwise fallbackCountry (the client's address country) is used. Any spaces
+// and hyphens in the number are stripped. Returns an empty country code when neither a
+// prefix nor a fallback is available, so the caller can reject the input.
+func splitTaxId(taxId, fallbackCountry string) (country, number string) {
+	taxId = strings.TrimSpace(taxId)
+	isLetter := func(b byte) bool { return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') }
+	if len(taxId) >= 2 && isLetter(taxId[0]) && isLetter(taxId[1]) {
+		country = strings.ToUpper(taxId[:2])
+		number = taxId[2:]
+	} else {
+		country = strings.ToUpper(strings.TrimSpace(fallbackCountry))
+		number = taxId
+	}
+	number = strings.NewReplacer(" ", "", "-", "").Replace(number)
+	return country, number
+}
+
 // boolToResult maps a cached boolean verdict to a definitive result.
 // Only definitive verdicts are ever cached, so the cache never yields VIESInconclusive.
 func boolToResult(valid bool) entity.VIESResult {
@@ -97,21 +116,24 @@ func (s *Service) SetDatabase(db Database) {
 }
 
 // ValidateTaxId checks whether the given tax ID is valid according to the VIES service.
-// The taxId is expected to start with a 2-letter country code (e.g. "DE123456789");
-// the country code is sent separately from the number, as VIES requires.
+// The country code and number are sent separately, as VIES requires. When the taxId
+// already starts with a 2-letter alphabetic prefix (e.g. "DE123456789") that prefix is
+// used; otherwise fallbackCountry (the client's address country, e.g. "PL") is prepended
+// so a bare national number like a Polish NIP "5252863476" is not mis-split into a bogus
+// "52" country code.
 //
 // Returns VIESValid / VIESInvalid for definitive verdicts, or VIESInconclusive when the
 // VIES service is unavailable or rate-limited (transient userError codes). Inconclusive
 // results are never cached and must not be reported as invalid. Errors are logged but
 // never block the caller.
-func (s *Service) ValidateTaxId(taxId string) entity.VIESResult {
-	if len(taxId) < 3 {
-		s.log.Warn("tax ID too short for VIES validation", slog.String("tax_id", taxId))
+func (s *Service) ValidateTaxId(taxId, fallbackCountry string) entity.VIESResult {
+	countryCode, vatNumber := splitTaxId(taxId, fallbackCountry)
+	if len(countryCode) != 2 || vatNumber == "" {
+		s.log.Warn("tax ID too short for VIES validation",
+			slog.String("tax_id", taxId),
+			slog.String("fallback_country", fallbackCountry))
 		return entity.VIESInvalid
 	}
-
-	countryCode := taxId[:2]
-	vatNumber := taxId[2:]
 
 	// Check MongoDB cache first. Only definitive verdicts are ever stored, so a fresh
 	// cache hit is always conclusive.

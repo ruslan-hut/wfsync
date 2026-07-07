@@ -4,12 +4,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"wfsync/entity"
 	"wfsync/internal/config"
+	"wfsync/lib/sl"
 
 	_ "github.com/go-sql-driver/mysql" // MySQL driver
 )
@@ -25,6 +28,7 @@ const (
 type MySql struct {
 	db         *sql.DB
 	loc        *time.Location
+	log        *slog.Logger
 	prefix     string
 	structure  map[string]map[string]Column
 	statements map[string]*sql.Stmt
@@ -32,7 +36,7 @@ type MySql struct {
 	mu         sync.Mutex
 }
 
-func NewSQLClient(conf *config.Config) (*MySql, error) {
+func NewSQLClient(conf *config.Config, log *slog.Logger) (*MySql, error) {
 	if !conf.OpenCart.Enabled {
 		return nil, fmt.Errorf("opencart client is disabled in configuration")
 	}
@@ -60,6 +64,7 @@ func NewSQLClient(conf *config.Config) (*MySql, error) {
 
 	sdb := &MySql{
 		db:         db,
+		log:        log.With(sl.Module("opencart-db")),
 		prefix:     conf.OpenCart.Prefix,
 		structure:  make(map[string]map[string]Column),
 		statements: make(map[string]*sql.Stmt),
@@ -230,7 +235,8 @@ func (s *MySql) OrderSearchStatus(statusId int) ([]*entity.CheckoutParams, error
 		}
 
 		// client data
-		_ = client.ParseTaxId(s.nipId, customField)
+		taxErr := client.ParseTaxId(s.nipId, customField)
+		s.logTaxId(order.OrderId, customField, client.TaxId, taxErr)
 		client.Name = firstName + " " + lastName
 		order.ClientDetails = &client
 		// order summary
@@ -304,7 +310,8 @@ func (s *MySql) OrderSearchId(orderId int64) (*entity.CheckoutParams, error) {
 		}
 
 		// client data
-		_ = client.ParseTaxId(s.nipId, customField)
+		taxErr := client.ParseTaxId(s.nipId, customField)
+		s.logTaxId(order.OrderId, customField, client.TaxId, taxErr)
 		client.Name = firstName + " " + lastName
 		order.ClientDetails = &client
 		// order summary
@@ -318,6 +325,39 @@ func (s *MySql) OrderSearchId(orderId int64) (*entity.CheckoutParams, error) {
 	}
 
 	return s.addOrderData(orderId, &order)
+}
+
+// logTaxId records the outcome of NIP extraction from an order's custom_field.
+// It flags the cases the invoice flow would otherwise swallow silently: a blob
+// that carried data but yielded no tax id (malformed JSON, or a custom_field_nip
+// key that doesn't match the order's structure). OpenCart's empty markers
+// ("", "[]", "{}") are ignored so retail orders don't produce noise.
+func (s *MySql) logTaxId(orderId, customField, taxId string, err error) {
+	if s.log == nil {
+		return
+	}
+	if taxId != "" {
+		s.log.Debug("tax id detected in order",
+			slog.String("order_id", orderId),
+			sl.Secret("tax_id", taxId))
+		return
+	}
+	switch strings.TrimSpace(customField) {
+	case "", "[]", "{}":
+		return
+	}
+	if err != nil {
+		s.log.Warn("order custom_field is malformed, tax id not parsed",
+			slog.String("order_id", orderId),
+			slog.String("nip_field", s.nipId),
+			slog.String("custom_field", customField),
+			sl.Err(err))
+		return
+	}
+	s.log.Warn("order custom_field has data but no tax id extracted",
+		slog.String("order_id", orderId),
+		slog.String("nip_field", s.nipId),
+		slog.String("custom_field", customField))
 }
 
 // OrderIdByPaymentRef recovers the numeric OpenCart order id from the Stripe payment

@@ -161,6 +161,8 @@ func normalizeEUVatNumber(countryCode, taxId string) string {
 	if taxId == "" || !euCountries[countryCode] {
 		return taxId
 	}
+	// Strip separators so wFirma receives a compact VAT-UE number (e.g. "DE 362-155" → "DE362155").
+	taxId = strings.NewReplacer(" ", "", "-", "").Replace(taxId)
 	isLetter := func(b byte) bool { return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') }
 	if len(taxId) >= 2 && isLetter(taxId[0]) && isLetter(taxId[1]) {
 		return taxId

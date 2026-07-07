@@ -46,7 +46,7 @@ type VATProvider interface {
 // invalid; a service/transient failure (VIESInconclusive) is logged at debug level.
 // Validation is non-blocking: the result is logged but does not affect invoice creation.
 type VIESProvider interface {
-	ValidateTaxId(taxId string) entity.VIESResult
+	ValidateTaxId(taxId, countryCode string) entity.VIESResult
 }
 
 // Database defines the persistence methods the wFirma client needs.

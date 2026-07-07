@@ -147,7 +147,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	// VIES validation: check the TaxId against the EU VIES service.
 	// Non-blocking — the result is logged but does not change hasTaxId or prevent invoice creation.
 	if hasTaxId && c.vies != nil {
-		switch c.vies.ValidateTaxId(params.ClientDetails.TaxId) {
+		switch c.vies.ValidateTaxId(params.ClientDetails.TaxId, countryCode) {
 		case entity.VIESValid:
 			log.Debug("VIES validation passed",
 				slog.String("tax_id", params.ClientDetails.TaxId),
