@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 	"wfsync/lib/validate"
 )
@@ -66,14 +67,16 @@ func (o *B2BOrder) Bind(_ *http.Request) error {
 // ToCheckoutParams converts B2BOrder to CheckoutParams format.
 //
 // The invoice contractor address defaults to the client's (delivery) address,
-// but when the payload carries a billing address, it takes precedence — it
-// reflects the client's official/registered address, which is what wFirma
-// invoices must show rather than a shipping destination.
+// but each billing_* field takes precedence when present — it reflects the
+// client's official/registered address, which is what wFirma invoices must show
+// rather than a shipping destination. The fallback is per-field: a payload that
+// omits billing_country must not leave the country empty, since CountryCode()
+// drives VAT code resolution and OSS detection, not just the printed address.
 func (o *B2BOrder) ToCheckoutParams() *CheckoutParams {
-	country, city, street, zipcode := o.ClientCountry, o.ClientCity, o.ClientAddress, o.ClientZipcode
-	if o.hasBillingAddress() {
-		country, city, street, zipcode = o.BillingCountry, o.BillingCity, o.BillingAddress, o.BillingZipcode
-	}
+	country := firstNonEmpty(o.BillingCountry, o.ClientCountry)
+	city := firstNonEmpty(o.BillingCity, o.ClientCity)
+	street := firstNonEmpty(o.BillingAddress, o.ClientAddress)
+	zipcode := firstNonEmpty(o.BillingZipcode, o.ClientZipcode)
 
 	params := &CheckoutParams{
 		ClientDetails: &ClientDetails{
@@ -119,10 +122,14 @@ func (o *B2BOrder) ToCheckoutParams() *CheckoutParams {
 	return params
 }
 
-// hasBillingAddress reports whether the payload carries a billing address,
-// i.e. at least one billing_* field is non-empty.
-func (o *B2BOrder) hasBillingAddress() bool {
-	return o.BillingCountry != "" || o.BillingCity != "" || o.BillingAddress != "" || o.BillingZipcode != ""
+// firstNonEmpty returns the first value that is not empty or blank.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // floatToCents converts a float64 amount to int64 cents

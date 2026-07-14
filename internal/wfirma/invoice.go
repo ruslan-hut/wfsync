@@ -101,36 +101,36 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		return nil, fmt.Errorf("invalid checkout params: %w", err)
 	}
 
-	contractorID, existingNip, err := c.getContractor(ctx, params.ClientDetails.Email)
+	existing, err := c.getContractor(ctx, params.ClientDetails.Email)
 	if err != nil {
 		return nil, fmt.Errorf("contractor: %w", err)
 	}
-	if contractorID == "" {
-		email := params.ClientDetails.Email
-		if email == "" {
-			email = fmt.Sprintf("%s@example.com", uuid.New().String())
-		}
+	var contractorID string
+	if existing == nil {
 		contractorID, err = c.createContractor(ctx, params.ClientDetails)
 		if err != nil {
 			return nil, fmt.Errorf("create contractor: %w", err)
 		}
-	} else if params.ClientDetails.TaxId == "" && existingNip != "" {
-		// Returning customer already registered as B2B on wFirma side but the current
-		// order omits a tax ID. Promote to B2B so EU VAT rules (WDT / Polish 23% / EXP)
-		// apply consistently — without this the order would fall under OSS as B2C.
-		params.ClientDetails.TaxId = existingNip
-		if !b2bCustomerGroups[params.CustomerGroup] {
-			params.CustomerGroup = -1
+	} else {
+		contractorID = existing.ID
+		if params.ClientDetails.TaxId == "" && existing.Nip != "" {
+			// Returning customer already registered as B2B on wFirma side but the current
+			// order omits a tax ID. Promote to B2B so EU VAT rules (WDT / Polish 23% / EXP)
+			// apply consistently — without this the order would fall under OSS as B2C.
+			params.ClientDetails.TaxId = existing.Nip
+			if !b2bCustomerGroups[params.CustomerGroup] {
+				params.CustomerGroup = -1
+			}
+			log.Info("promoted to B2B from wFirma stored tax id",
+				slog.String("tax_id", existing.Nip),
+				slog.String("contractor_id", contractorID),
+				slog.String("email", params.ClientDetails.Email))
 		}
-		log.Info("promoted to B2B from wFirma stored tax id",
-			slog.String("tax_id", existingNip),
-			slog.String("contractor_id", contractorID),
-			slog.String("email", params.ClientDetails.Email))
-	} else if params.ClientDetails.TaxId != "" {
-		// Existing contractor — ensure wFirma has the current tax ID.
-		// Without this, WDT invoices fail when the contractor was previously created without a NIP.
-		if err := c.updateContractor(ctx, contractorID, params.ClientDetails); err != nil {
-			log.Warn("update contractor tax id", sl.Err(err))
+		// The invoice references the contractor by ID only, so wFirma prints whatever
+		// address is on the record. Push the current order's address and tax ID before
+		// issuing the document, or a customer who moved keeps getting stale invoices.
+		if err := c.syncContractor(ctx, existing, params.ClientDetails); err != nil {
+			log.Warn("sync contractor", sl.Err(err))
 		}
 	}
 	log = log.With(slog.String("contractor_id", contractorID))

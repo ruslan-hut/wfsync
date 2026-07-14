@@ -104,36 +104,74 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 	return contr.ID, nil
 }
 
-// updateContractor updates an existing contractor's tax ID and related fields in wFirma.
-// Called when a returning customer now provides a tax ID that wasn't set before.
-func (c *Client) updateContractor(ctx context.Context, contractorID string, customer *entity.ClientDetails) error {
-	taxIdType := "none"
-	if customer.TaxId != "" {
-		taxIdType = "custom"
+// syncContractor refreshes an existing wFirma contractor from the current order.
+//
+// wFirma prints the invoice header from the contractor record, not from the invoice
+// payload, so a customer who moved would keep receiving invoices with their old
+// address unless the record is refreshed before the document is issued.
+//
+// Empty request fields never blank out stored values, and the edit call is skipped
+// entirely when nothing differs.
+func (c *Client) syncContractor(ctx context.Context, stored *Contractor, customer *entity.ClientDetails) error {
+	if stored == nil || customer == nil {
+		return nil
 	}
 
 	countryCode := customer.CountryCode()
+	zip := customer.ZipCode
+	if countryCode == "PL" && zip != "" {
+		zip = customer.NormalizeZipCode()
+	}
 	// Foreign EU buyers need the country prefix on their VAT-UE number or wFirma
 	// rejects 0% WDT / EU reverse-charge invoices (contractor.nip validation).
 	nip := normalizeEUVatNumber(countryCode, customer.TaxId)
 
+	fields := map[string]string{
+		"name":    firstNonEmpty(customer.Name, stored.Name),
+		"country": firstNonEmpty(countryCode, stored.Country),
+		"zip":     firstNonEmpty(zip, stored.Zip),
+		"city":    firstNonEmpty(customer.City, stored.City),
+		"street":  firstNonEmpty(customer.Street, stored.Street),
+		"nip":     firstNonEmpty(nip, stored.Nip),
+	}
+	current := map[string]string{
+		"name":    stored.Name,
+		"country": stored.Country,
+		"zip":     stored.Zip,
+		"city":    stored.City,
+		"street":  stored.Street,
+		"nip":     stored.Nip,
+	}
+
+	var changed []string
+	for field, value := range fields {
+		if !strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(current[field])) {
+			changed = append(changed, field)
+		}
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+
+	contractor := map[string]interface{}{"id": stored.ID}
+	for field, value := range fields {
+		contractor[field] = value
+	}
+	// tax_id_type: "none" = no tax ID, "custom" = tax ID present in the nip field.
+	contractor["tax_id_type"] = "none"
+	if fields["nip"] != "" {
+		contractor["tax_id_type"] = "custom"
+	}
+
 	payload := map[string]interface{}{
 		"api": map[string]interface{}{
 			"contractors": []map[string]interface{}{
-				{
-					"contractor": map[string]interface{}{
-						"id":          contractorID,
-						"name":        customer.Name,
-						"country":     countryCode,
-						"tax_id_type": taxIdType,
-						"nip":         nip,
-					},
-				},
+				{"contractor": contractor},
 			},
 		},
 	}
 
-	res, err := c.request(ctx, "contractors", "edit/"+contractorID, payload)
+	res, err := c.request(ctx, "contractors", "edit/"+stored.ID, payload)
 	if err != nil {
 		return fmt.Errorf("edit contractor: %w", err)
 	}
@@ -149,19 +187,32 @@ func (c *Client) updateContractor(ctx context.Context, contractorID string, cust
 		}
 		return fmt.Errorf("edit contractor: unknown error")
 	}
-	c.log.Debug("contractor updated",
-		slog.String("contractor_id", contractorID),
-		slog.String("nip", nip))
+	c.log.Info("contractor updated",
+		slog.String("contractor_id", stored.ID),
+		slog.String("email", customer.Email),
+		slog.String("fields", strings.Join(changed, ",")))
 	return nil
 }
 
+// firstNonEmpty returns the first non-empty value, ignoring surrounding whitespace.
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // getContractor searches for an existing contractor by email.
-// Returns the wFirma contractor ID and the stored tax ID (NIP), or empty strings
-// when no match is found. The NIP is used by the invoice flow to promote returning
-// customers to B2B when the current order omits a tax ID.
-func (c *Client) getContractor(ctx context.Context, email string) (string, string, error) {
+// Returns the stored wFirma record, or nil when no match is found.
+//
+// The whole record is returned (not just the ID) so the invoice flow can promote
+// returning customers to B2B from the stored NIP and refresh a stale address before
+// issuing the document.
+func (c *Client) getContractor(ctx context.Context, email string) (*Contractor, error) {
 	if email == "" {
-		return "", "", nil
+		return nil, nil
 	}
 	log := c.log.With(slog.String("email", email))
 
@@ -189,27 +240,23 @@ func (c *Client) getContractor(ctx context.Context, email string) (string, strin
 		var findResp struct {
 			Contractors struct {
 				Element0 struct {
-					Contractor struct {
-						ID  string `json:"id"`
-						Nip string `json:"nip"`
-					} `json:"contractor"`
+					Contractor Contractor `json:"contractor"`
 				} `json:"0"`
 			} `json:"contractors"`
 		}
 		if err := json.Unmarshal(res, &findResp); err != nil {
 			log.Warn("parse contractor find response", sl.Err(err))
 		}
-		if findResp.Contractors.Element0.Contractor.ID != "" {
-			contractorID := findResp.Contractors.Element0.Contractor.ID
-			nip := strings.TrimSpace(findResp.Contractors.Element0.Contractor.Nip)
+		if found := findResp.Contractors.Element0.Contractor; found.ID != "" {
+			found.Nip = strings.TrimSpace(found.Nip)
 			log.Debug("found existing contractor",
-				slog.String("contractor_id", contractorID),
-				slog.String("nip", nip))
-			return contractorID, nip, nil
+				slog.String("contractor_id", found.ID),
+				slog.String("nip", found.Nip))
+			return &found, nil
 		}
 	} else {
 		log.Warn("searching for contractor", sl.Err(err))
 	}
 
-	return "", "", nil
+	return nil, nil
 }
