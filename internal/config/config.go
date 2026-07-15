@@ -34,6 +34,14 @@ type WfirmaConfig struct {
 	// the API user's KSeF authorization, but must be accepted manually in wFirma to
 	// become a legal invoice. See docs/wfirma-ksef-draft-fallback.md.
 	KSefDraftFallback bool `yaml:"ksef_draft_fallback" env-default:"false"`
+
+	// KSefDownloadWaitSeconds bounds how long DownloadInvoice waits for a KSeF-submitted
+	// invoice to finish processing before falling back to a best-effort download. Until an
+	// invoice is processed by KSeF, wFirma can only render an interim "transaction
+	// confirmation" (a QR-only summary, not the full invoice), so we poll invoices/get for
+	// the assigned KSeF number first. 0 disables the gate (download immediately, legacy
+	// behavior). See docs/wfirma-ksef-download-confirmation.md.
+	KSefDownloadWaitSeconds int `yaml:"ksef_download_wait_seconds" env-default:"30"`
 }
 
 type Mongo struct {

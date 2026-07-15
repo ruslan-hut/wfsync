@@ -65,22 +65,23 @@ type Database interface {
 
 // Client is the wFirma API client. Use NewClient to create one.
 type Client struct {
-	enabled       bool
-	draftFallback bool // fall back to a KSeF-free draft when wFirma rejects on KSeF authorization
-	hc            *http.Client
-	db            Database
-	vatRates      VATProvider
-	vies          VIESProvider
-	baseURL       string
-	accessKey     string
-	secretKey     string
-	appID         string
-	filePath      string
-	log           *slog.Logger
-	cacheMu       sync.Mutex                   // guards vatCodes, ossVatCodes, declCountries
-	vatCodes      map[string]string            // cached Polish vat code name → wFirma ID (e.g. "23" → "222")
-	ossVatCodes   map[string]map[string]string // cached declaration_country_id → normalized rate ("27") → wFirma vat_code ID
-	declCountries map[string]string            // cached ISO country code → declaration_country_id (e.g. "SE" → "205")
+	enabled          bool
+	draftFallback    bool          // fall back to a KSeF-free draft when wFirma rejects on KSeF authorization
+	ksefDownloadWait time.Duration // max wait for KSeF processing before downloading; 0 disables the gate
+	hc               *http.Client
+	db               Database
+	vatRates         VATProvider
+	vies             VIESProvider
+	baseURL          string
+	accessKey        string
+	secretKey        string
+	appID            string
+	filePath         string
+	log              *slog.Logger
+	cacheMu          sync.Mutex                   // guards vatCodes, ossVatCodes, declCountries
+	vatCodes         map[string]string            // cached Polish vat code name → wFirma ID (e.g. "23" → "222")
+	ossVatCodes      map[string]map[string]string // cached declaration_country_id → normalized rate ("27") → wFirma vat_code ID
+	declCountries    map[string]string            // cached ISO country code → declaration_country_id (e.g. "SE" → "205")
 }
 
 // Config holds wFirma API credentials (currently unused — credentials come from config.Config).
@@ -92,15 +93,16 @@ type Config struct {
 
 func NewClient(conf *config.Config, logger *slog.Logger) *Client {
 	return &Client{
-		enabled:       conf.WFirma.Enabled,
-		draftFallback: conf.WFirma.KSefDraftFallback,
-		hc:            &http.Client{Timeout: 55 * time.Second},
-		baseURL:       "https://api2.wfirma.pl",
-		accessKey:     conf.WFirma.AccessKey,
-		secretKey:     conf.WFirma.SecretKey,
-		appID:         conf.WFirma.AppID,
-		filePath:      conf.FilePath,
-		log:           logger.With(sl.Module("wfirma")),
+		enabled:          conf.WFirma.Enabled,
+		draftFallback:    conf.WFirma.KSefDraftFallback,
+		ksefDownloadWait: time.Duration(conf.WFirma.KSefDownloadWaitSeconds) * time.Second,
+		hc:               &http.Client{Timeout: 55 * time.Second},
+		baseURL:          "https://api2.wfirma.pl",
+		accessKey:        conf.WFirma.AccessKey,
+		secretKey:        conf.WFirma.SecretKey,
+		appID:            conf.WFirma.AppID,
+		filePath:         conf.FilePath,
+		log:              logger.With(sl.Module("wfirma")),
 	}
 }
 

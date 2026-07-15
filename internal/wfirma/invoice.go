@@ -903,6 +903,12 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (fileNam
 		}
 	}()
 
+	// Wait for KSeF to finish processing before downloading. Until the invoice has an
+	// assigned KSeF number, wFirma can only render an interim "transaction confirmation"
+	// (a QR-only summary without line items), not the full invoice. See waitForKSefProcessed
+	// and docs/wfirma-ksef-download-confirmation.md.
+	c.waitForKSefProcessed(ctx, invoiceID, log)
+
 	payload := map[string]interface{}{
 		"api": map[string]interface{}{
 			"invoices": map[string]interface{}{
@@ -993,4 +999,151 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (fileNam
 	).Info("invoice downloaded")
 
 	return fileName, meta, nil
+}
+
+// ksefDownloadPollInterval is how often waitForKSefProcessed re-checks the KSeF state.
+const ksefDownloadPollInterval = 3 * time.Second
+
+// waitForKSefProcessed blocks until the invoice has been processed by KSeF (a KSeF number
+// is assigned) or the configured budget (c.ksefDownloadWait) elapses. It exists because a
+// KSeF-submitted invoice that is still processing can only be downloaded as an interim
+// "transaction confirmation" (a QR-only summary) rather than the full invoice PDF.
+//
+// It is deliberately fail-open and best-effort: any ambiguity (non-KSeF invoice, unreadable
+// state, budget exhausted, or the gate disabled) results in proceeding with the download, so
+// this can never do worse than the legacy immediate-download behavior. It only ever delays a
+// download that we can positively tell is still pending in KSeF.
+func (c *Client) waitForKSefProcessed(ctx context.Context, invoiceID string, log *slog.Logger) {
+	if c.ksefDownloadWait <= 0 || invoiceID == "" {
+		return
+	}
+
+	deadline := time.Now().Add(c.ksefDownloadWait)
+	waited := false
+	for {
+		ready, pending := c.ksefReadiness(ctx, invoiceID)
+		if ready || !pending {
+			// ready: processed; not-pending: not a KSeF invoice or state unknown → download now.
+			if waited {
+				log.Debug("KSeF processing complete; proceeding with download")
+			}
+			return
+		}
+		if !waited {
+			log.Debug("invoice not yet processed by KSeF; waiting before download")
+			waited = true
+		}
+		if !time.Now().Add(ksefDownloadPollInterval).Before(deadline) {
+			log.Warn("KSeF still processing after wait budget; downloading best-effort (may be a transaction confirmation)")
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(ksefDownloadPollInterval):
+		}
+	}
+}
+
+// ksefReadiness inspects invoices/get/{id} and reports whether the invoice is ready to
+// download as a full invoice.
+//
+//   - ready:   the invoice carries an assigned KSeF number (or a success status), so the
+//     full invoice PDF is available.
+//   - pending: the invoice is a KSeF document still being processed (has KSeF state but no
+//     number yet) — downloading now would yield the interim transaction confirmation.
+//
+// When the invoice has no KSeF fields at all (non-KSeF account/document) or the state cannot
+// be read, it returns ready=false, pending=false so the caller downloads immediately.
+//
+// Field names are matched loosely (any key containing "ksef") to stay robust to wFirma's
+// exact response shape: the KSeF number lives in a key like ksef_reference_number /
+// ksef_number, the status in ksef_status, and the processing time in ksef_registration_date.
+func (c *Client) ksefReadiness(ctx context.Context, invoiceID string) (ready, pending bool) {
+	res, err := c.request(ctx, "invoices", "get/"+invoiceID, map[string]interface{}{})
+	if err != nil {
+		return false, false
+	}
+
+	var probe struct {
+		Invoices map[string]struct {
+			Invoice map[string]json.RawMessage `json:"invoice"`
+		} `json:"invoices"`
+		Status Status `json:"status"`
+	}
+	if err := json.Unmarshal(res, &probe); err != nil || probe.Status.Code != "OK" {
+		return false, false
+	}
+
+	// Locate the single invoice object (the "invoices" map also carries a "parameters" entry).
+	var fields map[string]json.RawMessage
+	for _, w := range probe.Invoices {
+		if len(w.Invoice) > 0 {
+			fields = w.Invoice
+			break
+		}
+	}
+	if fields == nil {
+		return false, false
+	}
+	return classifyKSefFields(fields)
+}
+
+// classifyKSefFields inspects an invoice object's fields and reports its KSeF readiness.
+// It is the pure core of ksefReadiness (extracted for testing). Field names are matched
+// loosely (any key containing "ksef") to stay robust to wFirma's exact response shape.
+func classifyKSefFields(fields map[string]json.RawMessage) (ready, pending bool) {
+	hasKSef := false
+	numberAssigned := false
+	statusOK := false
+	for key, raw := range fields {
+		lk := strings.ToLower(key)
+		if !strings.Contains(lk, "ksef") {
+			continue
+		}
+		hasKSef = true
+		val := strings.TrimSpace(rawJSONString(raw))
+		if val == "" {
+			continue
+		}
+		switch {
+		case strings.Contains(lk, "status"):
+			// wFirma reports "ok" once the invoice is accepted by KSeF.
+			if strings.EqualFold(val, "ok") || strings.EqualFold(val, "accepted") {
+				statusOK = true
+			}
+		case strings.Contains(lk, "number"), strings.Contains(lk, "numer"),
+			strings.Contains(lk, "reference"), strings.Contains(lk, "registration"):
+			// The KSeF number (ksef_reference_number) and registration date
+			// (ksef_registration_date) are only populated once KSeF accepts the invoice.
+			// Deliberately NOT matching a bare "date" — a submission/send date can be set
+			// while the invoice is still pending and must not read as processed.
+			numberAssigned = true
+		}
+	}
+
+	if !hasKSef {
+		return false, false // non-KSeF invoice — nothing to wait for
+	}
+	if numberAssigned || statusOK {
+		return true, false
+	}
+	return false, true // KSeF invoice, not processed yet
+}
+
+// rawJSONString renders a JSON value as a trimmed string, tolerating both string and
+// non-string (number) encodings — wFirma is inconsistent about quoting scalar fields.
+func rawJSONString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	t := strings.TrimSpace(string(raw))
+	if t == "null" {
+		return ""
+	}
+	return strings.Trim(t, `"`)
 }
