@@ -92,6 +92,11 @@ func (o *B2BOrder) ToCheckoutParams() *CheckoutParams {
 		Total:         floatToCents(o.Total),
 		Currency:      o.CurrencyCode,
 		OrderId:       o.OrderNumber,
+		// The B2B portal is a separate system with its own id space, so OrderNumber can
+		// collide with an OpenCart order id. Dedup on the globally-unique order UID instead
+		// (stamped into the invoice id_external), while OrderNumber stays as the human
+		// reference printed on the invoice.
+		ExternalId:    o.OrderUID,
 		SuccessUrl:    "https://b2b.internal/success",
 		Created:       time.Now(),
 		Source:        SourceB2B,

@@ -34,6 +34,12 @@ type CheckoutParams struct {
 	Currency      string         `json:"currency" bson:"currency" validate:"required,oneof=PLN EUR USD"`
 	CurrencyValue float64        `json:"currency_value,omitempty" bson:"currency_value,omitempty"`
 	OrderId       string         `json:"order_id" bson:"order_id" validate:"required,min=1,max=32"`
+	// ExternalId is the value stamped into the wFirma invoice id_external field and used
+	// as the order-level dedup key. It defaults to OrderId when empty (OpenCart, whose
+	// order id is globally unique and matches all existing invoices). Systems with a
+	// separate id namespace set it explicitly to a globally-unique value so their order
+	// ids cannot collide with OpenCart's — e.g. the B2B portal sets it to the order UID.
+	ExternalId    string         `json:"external_id,omitempty" bson:"external_id,omitempty"`
 	SuccessUrl    string         `json:"success_url" bson:"success_url" validate:"required,url"`
 	Created       time.Time      `json:"created" bson:"created"`
 	Closed        time.Time      `json:"closed,omitempty" bson:"closed"`
@@ -65,6 +71,17 @@ func (c *CheckoutParams) Bind(_ *http.Request) error {
 		c.CustomerGroup = -1
 	}
 	return validate.Struct(c)
+}
+
+// ExternalRef returns the value to use as the wFirma invoice id_external and as the
+// order-level dedup key: the explicit ExternalId when set, otherwise OrderId. Keeping the
+// two decoupled lets the invoice still show the human OrderId in its description while
+// dedup runs against a globally-unique key.
+func (c *CheckoutParams) ExternalRef() string {
+	if c.ExternalId != "" {
+		return c.ExternalId
+	}
+	return c.OrderId
 }
 
 func (c *CheckoutParams) ItemsTotal() int64 {

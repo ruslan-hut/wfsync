@@ -214,10 +214,10 @@ func (rq *RetryQueue) processOneJob(job *entity.RetryJob) {
 
 	// Order-level idempotency: a capture / webhook / reconciler may have issued the faktura
 	// for this order already. The job holds no invoice id to verify with InvoiceExists, so
-	// match on the order via id_external before creating. On a lookup error, reschedule
-	// rather than create — proceeding blind could produce a duplicate faktura.
-	if params.OrderId != "" {
-		existingId, findErr := rq.inv.FindInvoiceByOrderId(ctx, params.OrderId)
+	// match on the order via id_external (ExternalRef) before creating. On a lookup error,
+	// reschedule rather than create — proceeding blind could produce a duplicate faktura.
+	if params.ExternalRef() != "" {
+		existingId, findErr := rq.inv.FindInvoiceByExternalId(ctx, params.ExternalRef())
 		if findErr != nil {
 			job.Attempts++
 			job.UpdatedAt = time.Now()
