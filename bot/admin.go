@@ -2,6 +2,7 @@ package bot
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"wfsync/entity"
@@ -11,6 +12,9 @@ import (
 	tgbotapi "github.com/PaulSonOfLars/gotgbot/v2"
 	"github.com/PaulSonOfLars/gotgbot/v2/ext"
 )
+
+// retryJobTimeFormat renders next-retry timestamps as e.g. 20-05-2026 17:32.
+const retryJobTimeFormat = "02-01-2006 15:04"
 
 // usersCmd lists all registered Telegram users, grouped by role.
 // Sends approve/revoke inline buttons for each pending user.
@@ -247,4 +251,81 @@ func (t *TgBot) invite(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	deepLink := fmt.Sprintf("https://t.me/%s?start=%s", botUsername, code)
 	t.plainResponse(chatId, fmt.Sprintf("Invite code: `%s`\nDeep link: %s", Sanitize(code), Sanitize(deepLink)))
 	return nil
+}
+
+// retries lists all pending invoice retry jobs, grouped by their last error.
+// One message is sent per distinct error, listing the affected orders with their
+// attempt count and next scheduled retry, followed by the raw error text. Admin only.
+func (t *TgBot) retries(_ *tgbotapi.Bot, ctx *ext.Context) error {
+	if t.db == nil {
+		return nil
+	}
+	chatId := ctx.EffectiveUser.Id
+	if !t.requireAdmin(chatId) {
+		t.plainResponse(chatId, "Admin access required\\.")
+		return nil
+	}
+
+	jobs, err := t.db.GetAllPendingRetryJobs()
+	if err != nil {
+		t.reportError(chatId, "/retries", err)
+		return nil
+	}
+	if len(jobs) == 0 {
+		t.plainResponse(chatId, "No pending retry jobs\\.")
+		return nil
+	}
+
+	// Group jobs by their last error message so each distinct failure is reported once.
+	groups := map[string][]*entity.RetryJob{}
+	for _, job := range jobs {
+		groups[job.LastError] = append(groups[job.LastError], job)
+	}
+
+	// Sort errors by descending order count (most-affected first) for a stable, useful order.
+	errKeys := make([]string, 0, len(groups))
+	for k := range groups {
+		errKeys = append(errKeys, k)
+	}
+	sort.Slice(errKeys, func(i, j int) bool {
+		if len(groups[errKeys[i]]) != len(groups[errKeys[j]]) {
+			return len(groups[errKeys[i]]) > len(groups[errKeys[j]])
+		}
+		return errKeys[i] < errKeys[j]
+	})
+
+	for _, errKey := range errKeys {
+		group := groups[errKey]
+
+		var sb strings.Builder
+		sb.WriteString("*Retry job*\n")
+		sb.WriteString(fmt.Sprintf("*%d* orders\n", len(group)))
+		for _, job := range group {
+			sb.WriteString(fmt.Sprintf("`%s`: %d \\(%s\\)\n",
+				Sanitize(job.OrderId),
+				job.Attempts,
+				Sanitize(job.NextRetryAt.Format(retryJobTimeFormat)),
+			))
+		}
+
+		errText := errKey
+		if errText == "" {
+			errText = "(no error recorded)"
+		}
+		sb.WriteString("```\n")
+		sb.WriteString(escapeCodeBlock(errText))
+		sb.WriteString("\n```")
+
+		t.plainResponse(chatId, sb.String())
+	}
+	return nil
+}
+
+// escapeCodeBlock escapes the characters Telegram MarkdownV2 requires inside a
+// pre/code entity (backslash and backtick), so arbitrary error text — which may
+// itself contain backticks — cannot break out of the fenced block.
+func escapeCodeBlock(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "`", "\\`")
+	return s
 }

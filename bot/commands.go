@@ -402,6 +402,7 @@ func (t *TgBot) help(_ *tgbotapi.Bot, ctx *ext.Context) error {
 		sb.WriteString("`/revoke <id|@user>` \\- Revoke a user\n")
 		sb.WriteString("`/admin <id|@user>` \\- Promote to admin\n")
 		sb.WriteString("`/invite` \\- Generate invite code\n")
+		sb.WriteString("`/retries` \\- List pending invoice retry jobs\n")
 	}
 
 	t.plainResponse(chatId, sb.String())

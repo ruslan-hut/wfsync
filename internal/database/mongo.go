@@ -869,6 +869,38 @@ func (m *MongoDB) GetPendingRetryJobs() ([]*entity.RetryJob, error) {
 	return jobs, nil
 }
 
+// GetAllPendingRetryJobs returns every retry job still in the pending state,
+// regardless of whether it is due yet. Unlike GetPendingRetryJobs (which filters
+// by next_retry_at for the processing loop), this is meant for operator inspection,
+// so it returns the full pending backlog sorted by soonest next retry first.
+func (m *MongoDB) GetAllPendingRetryJobs() ([]*entity.RetryJob, error) {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionRetryJobs)
+	filter := bson.D{{"status", entity.RetryJobPending}}
+	opts := options.Find().SetSort(bson.D{{"next_retry_at", 1}})
+	cursor, err := collection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer func(cursor *mongo.Cursor, ctx context.Context) {
+		_ = cursor.Close(ctx)
+	}(cursor, ctx)
+
+	var jobs []*entity.RetryJob
+	err = cursor.All(ctx, &jobs)
+	if err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
 // UpdateRetryJob replaces a retry job document by _id.
 func (m *MongoDB) UpdateRetryJob(job *entity.RetryJob) error {
 	ctx, cancel := m.opCtx()

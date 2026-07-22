@@ -58,6 +58,7 @@ type Database interface {
 	CreateInviteCode(code *entity.InviteCode) error
 	UseInviteCode(code string, telegramId int64) error
 	MigrateExistingTelegramUsers() error
+	GetAllPendingRetryJobs() ([]*entity.RetryJob, error)
 }
 
 // TgBot is the central Telegram bot instance.
@@ -136,6 +137,7 @@ func (t *TgBot) Start() error {
 	dispatcher.AddHandler(handlers.NewCommand("revoke", t.revoke))
 	dispatcher.AddHandler(handlers.NewCommand("admin", t.adminCmd))
 	dispatcher.AddHandler(handlers.NewCommand("invite", t.invite))
+	dispatcher.AddHandler(handlers.NewCommand("retries", t.retries))
 
 	// Callback query handlers
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(cbTopicToggle), t.onTopicCallback))
