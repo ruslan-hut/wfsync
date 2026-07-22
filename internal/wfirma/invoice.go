@@ -817,6 +817,82 @@ func isNotFoundStatus(code string) bool {
 	return strings.Contains(strings.ToUpper(code), "NOT FOUND")
 }
 
+// isFakturaType reports whether a wFirma invoice type counts as a faktura for
+// duplicate-prevention purposes: a normal VAT invoice, or a KSeF-draft fallback
+// (normal_draft) which is a pending faktura awaiting manual acceptance. Proformas —
+// which carry the same id_external as their order — are deliberately excluded.
+func isFakturaType(t string) bool {
+	return t == string(invoiceNormal) || t == string(invoiceNormalDraft)
+}
+
+// FindInvoiceByOrderId returns the wFirma id of an existing faktura issued for the given
+// OpenCart order, or "" when none exists yet. Matching is by the invoice id_external field,
+// which every invoice created here carries set to the order id (see invoice(), IdExternal).
+//
+// It is the order-keyed idempotency guard for flows that hold no stored invoice id to verify
+// with InvoiceExists — POST /v1/wf/invoice, POST /v1/b2b/invoice, and the retry queue. The
+// wFirma-side conditions filter narrows to id_external only; the type is checked in Go rather
+// than in the query because (a) a proforma for the same order shares the id_external and must
+// not count, and (b) the result set for a single order is tiny. A split order yields several
+// faktura parts sharing the id_external — any one blocks re-creation, so the first is returned.
+//
+// Callers must treat a non-nil error as "state unknown" and abort rather than risk a
+// duplicate, mirroring InvoiceExists.
+func (c *Client) FindInvoiceByOrderId(ctx context.Context, orderId string) (string, error) {
+	if !c.enabled {
+		return "", fmt.Errorf("wFirma is disabled")
+	}
+	if orderId == "" {
+		return "", nil
+	}
+
+	payload := map[string]interface{}{
+		"api": map[string]interface{}{
+			"invoices": map[string]interface{}{
+				"parameters": map[string]interface{}{
+					"limit": 100,
+					"conditions": map[string]interface{}{
+						"and": []map[string]interface{}{
+							{
+								"condition": map[string]interface{}{
+									"field":    "id_external",
+									"operator": "eq",
+									"value":    orderId,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	res, err := c.request(ctx, "invoices", "find", payload)
+	if err != nil {
+		return "", fmt.Errorf("find invoice by order %s: %w", orderId, err)
+	}
+
+	var resp InvoiceFindResponse
+	if err := json.Unmarshal(res, &resp); err != nil {
+		return "", fmt.Errorf("parse find response: %w", err)
+	}
+	if resp.Status.Code == "ERROR" {
+		msg := resp.Status.Message
+		if msg == "" {
+			msg = resp.Status.Code
+		}
+		return "", fmt.Errorf("wfirma find invoice by order %s: %s", orderId, msg)
+	}
+
+	// The invoices map also carries a non-invoice "parameters" entry (Id == ""), skipped here.
+	for _, w := range resp.Invoices {
+		if w.Invoice.Id != "" && isFakturaType(w.Invoice.Type) {
+			return w.Invoice.Id, nil
+		}
+	}
+	return "", nil
+}
+
 // DeleteProforma removes a proforma document from wFirma via invoices/delete/{id}.
 //
 // Deletion is irreversible, so it is guarded: the target is fetched first and the call

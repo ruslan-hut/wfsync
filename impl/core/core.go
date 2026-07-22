@@ -39,6 +39,7 @@ type InvoiceService interface {
 	SyncToRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
 	FindInvoices(ctx context.Context, from, to string) ([]*entity.LocalInvoice, error)
 	InvoiceExists(ctx context.Context, invoiceID string) (bool, error)
+	FindInvoiceByOrderId(ctx context.Context, orderId string) (string, error)
 	ExpectedB2BVATRate(countryCode string, hasTaxId bool) int
 }
 
@@ -453,6 +454,25 @@ func (c *Core) WFirmaRegisterInvoice(ctx context.Context, params *entity.Checkou
 
 	// when the invoice was already registered, we will get InvoiceId in CheckoutParams
 	// in this case we need only to download a file
+
+	// Order-level idempotency for flows that arrive without a stored invoice id (direct
+	// POST /v1/wf/invoice and /v1/b2b/invoice build params from the request body). Ask
+	// wFirma whether a faktura already exists for this order (matched on id_external) and
+	// reuse it instead of issuing a second one. An error means the state is unknown, so
+	// abort rather than risk a duplicate.
+	if params.InvoiceId == "" && params.OrderId != "" {
+		existingId, findErr := c.inv.FindInvoiceByOrderId(ctx, params.OrderId)
+		if findErr != nil {
+			return nil, fmt.Errorf("check existing invoice for order %s: %w", params.OrderId, findErr)
+		}
+		if existingId != "" {
+			c.log.With(
+				slog.String("invoice_id", existingId),
+				slog.String("order_id", params.OrderId),
+			).Info("faktura already exists for order, skipping creation")
+			params.InvoiceId = existingId
+		}
+	}
 
 	if params.InvoiceId == "" {
 		payment, err = c.inv.RegisterInvoice(ctx, params)

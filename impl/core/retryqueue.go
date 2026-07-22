@@ -208,35 +208,52 @@ func (rq *RetryQueue) processOneJob(job *entity.RetryJob) {
 		}
 	}
 
-	// Attempt to register the invoice. Flag the context as a retry so the wFirma
-	// layer keeps per-attempt failures local — the original error was already
-	// reported to Telegram when the job was enqueued.
+	// Flag the context as a retry so the wFirma layer keeps per-attempt failures local —
+	// the original error was already reported to Telegram when the job was enqueued.
 	ctx := entity.WithRetry(context.Background())
+
+	// Order-level idempotency: a capture / webhook / reconciler may have issued the faktura
+	// for this order already. The job holds no invoice id to verify with InvoiceExists, so
+	// match on the order via id_external before creating. On a lookup error, reschedule
+	// rather than create — proceeding blind could produce a duplicate faktura.
+	if params.OrderId != "" {
+		existingId, findErr := rq.inv.FindInvoiceByOrderId(ctx, params.OrderId)
+		if findErr != nil {
+			job.Attempts++
+			job.UpdatedAt = time.Now()
+			log.Warn("check existing invoice before retry", sl.Err(findErr))
+			rq.retryLater(job, log, "check existing invoice: "+findErr.Error())
+			return
+		}
+		if existingId != "" {
+			job.Attempts++
+			job.UpdatedAt = time.Now()
+			if rq.oc != nil {
+				if ocErr := rq.oc.SaveInvoiceId(params.OrderId, existingId, ""); ocErr != nil {
+					log.Error("save existing invoice id to opencart", sl.Err(ocErr))
+				}
+			}
+			job.Status = entity.RetryJobCompleted
+			job.LastError = ""
+			if dbErr := rq.db.UpdateRetryJob(job); dbErr != nil {
+				log.Error("update retry job after dedup", sl.Err(dbErr))
+			}
+			log.With(
+				slog.String("invoice_id", existingId),
+				slog.String("tg_topic", entity.TopicPayment),
+			).Info("retry job resolved: faktura already exists for order")
+			return
+		}
+	}
+
+	// Attempt to register the invoice.
 	payment, err := rq.inv.RegisterInvoice(ctx, params)
 	job.Attempts++
 	job.UpdatedAt = time.Now()
 
 	if err != nil {
 		log.Warn("retry invoice registration failed", sl.Err(err))
-		job.LastError = err.Error()
-
-		if job.Attempts >= job.MaxAttempts {
-			job.Status = entity.RetryJobFailed
-			log.Error("retry job exhausted all attempts",
-				slog.String("last_error", job.LastError),
-				slog.String("tg_topic", entity.TopicError))
-		} else {
-			// Exponential backoff: baseDelay * 2^(attempts-1)
-			delay := rq.baseDelay * (1 << (job.Attempts - 1))
-			job.NextRetryAt = time.Now().Add(delay)
-			log.Info("retry job rescheduled",
-				slog.String("next_retry_at", job.NextRetryAt.Format(time.RFC3339)),
-				slog.Duration("delay", delay))
-		}
-
-		if dbErr := rq.db.UpdateRetryJob(job); dbErr != nil {
-			log.Error("update retry job after failure", sl.Err(dbErr))
-		}
+		rq.retryLater(job, log, err.Error())
 		return
 	}
 
@@ -256,6 +273,31 @@ func (rq *RetryQueue) processOneJob(job *entity.RetryJob) {
 	log.Info("retry job completed successfully",
 		slog.String("invoice_id", payment.Id),
 		slog.String("tg_topic", entity.TopicPayment))
+}
+
+// retryLater records a failed attempt: it applies exponential backoff, or marks the job
+// permanently failed once MaxAttempts is reached, then persists the change. The caller is
+// responsible for having already incremented job.Attempts and set job.UpdatedAt.
+func (rq *RetryQueue) retryLater(job *entity.RetryJob, log *slog.Logger, lastError string) {
+	job.LastError = lastError
+
+	if job.Attempts >= job.MaxAttempts {
+		job.Status = entity.RetryJobFailed
+		log.Error("retry job exhausted all attempts",
+			slog.String("last_error", job.LastError),
+			slog.String("tg_topic", entity.TopicError))
+	} else {
+		// Exponential backoff: baseDelay * 2^(attempts-1)
+		delay := rq.baseDelay * (1 << (job.Attempts - 1))
+		job.NextRetryAt = time.Now().Add(delay)
+		log.Info("retry job rescheduled",
+			slog.String("next_retry_at", job.NextRetryAt.Format(time.RFC3339)),
+			slog.Duration("delay", delay))
+	}
+
+	if dbErr := rq.db.UpdateRetryJob(job); dbErr != nil {
+		log.Error("update retry job after failure", sl.Err(dbErr))
+	}
 }
 
 // failJob marks a job as permanently failed.
