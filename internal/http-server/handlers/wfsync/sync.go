@@ -21,7 +21,7 @@ import (
 type Core interface {
 	WFirmaSyncFromRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
 	WFirmaSyncToRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
-	InvoiceList(ctx context.Context, from, to string) ([]*entity.InvoiceListItem, error)
+	InvoiceList(ctx context.Context, from, to string) (*entity.InvoiceListResult, error)
 }
 
 var datePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
@@ -102,7 +102,9 @@ func SyncToRemote(logger *slog.Logger, handler Core) http.HandlerFunc {
 	}
 }
 
-// InvoiceList handles GET /v1/wf/list — returns merged invoice list from WFirma + OpenCart + MongoDB.
+// InvoiceList handles GET /v1/wf/list — reports which orders in a date range were
+// registered as invoices in wFirma, merging OpenCart, checkout_params and wFirma.
+// With ?format=csv the items are streamed as a spreadsheet instead of JSON.
 func InvoiceList(logger *slog.Logger, handler Core) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		mod := sl.Module("http.handlers.wfsync")
@@ -137,7 +139,7 @@ func InvoiceList(logger *slog.Logger, handler Core) http.HandlerFunc {
 		}
 
 		if r.URL.Query().Get("format") == "csv" {
-			writeInvoiceListCSV(w, result, from, to)
+			writeInvoiceListCSV(w, result)
 			return
 		}
 
@@ -145,9 +147,10 @@ func InvoiceList(logger *slog.Logger, handler Core) http.HandlerFunc {
 	}
 }
 
-// writeInvoiceListCSV writes the invoice list as a CSV file response.
-func writeInvoiceListCSV(w http.ResponseWriter, items []*entity.InvoiceListItem, from, to string) {
-	fileName := fmt.Sprintf("invoices_%s_%s.csv", from, to)
+// writeInvoiceListCSV writes the invoice list items as a CSV file response. Only the
+// items are exported; the summary and per-source status stay in the JSON form.
+func writeInvoiceListCSV(w http.ResponseWriter, result *entity.InvoiceListResult) {
+	fileName := fmt.Sprintf("invoices_%s_%s.csv", result.From, result.To)
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))
 
@@ -156,16 +159,23 @@ func writeInvoiceListCSV(w http.ResponseWriter, items []*entity.InvoiceListItem,
 
 	// Header row
 	_ = cw.Write([]string{
-		"Date", "Order Status", "Order ID", "Invoice Number",
+		"Order Date", "Invoice Date", "Order Status", "Order ID", "External ID", "Source",
+		"Invoiced", "Document", "Invoice Number", "Parts",
 		"Contractor Name", "B2B", "Stripe", "Total PLN", "Total EUR", "Total USD", "Currency",
 	})
 
-	for _, item := range items {
+	for _, item := range result.Items {
 		_ = cw.Write([]string{
-			item.Date,
+			item.OrderDate,
+			item.InvoiceDate,
 			strconv.Itoa(item.OrderStatus),
 			item.OrderId,
+			item.ExternalId,
+			string(item.Source),
+			boolYesNo(item.Invoiced),
+			string(item.DocumentType),
 			item.InvoiceNumber,
+			formatParts(item.InvoiceParts),
 			item.ContractorName,
 			boolYesNo(item.IsB2B),
 			boolYesNo(item.IsStripe),
@@ -175,6 +185,14 @@ func writeInvoiceListCSV(w http.ResponseWriter, items []*entity.InvoiceListItem,
 			item.Currency,
 		})
 	}
+}
+
+// formatParts renders the split-invoice part count, blank for the ordinary single-part case.
+func formatParts(n int) string {
+	if n <= 1 {
+		return ""
+	}
+	return strconv.Itoa(n)
 }
 
 func boolYesNo(v bool) string {

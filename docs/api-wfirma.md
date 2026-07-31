@@ -787,6 +787,126 @@ curl -X POST "https://api.example.com/v1/wf/sync/push?from=2025-01-01&to=2025-01
 
 ---
 
+### Invoice List (registration report)
+
+Answers "which orders in this period were registered as invoices?". Merges what OpenCart, the `checkout_params` collection and Wfirma each know about the orders in a date range into one row per order.
+
+```
+GET /v1/wf/list?from=YYYY-MM-DD&to=YYYY-MM-DD[&format=csv]
+```
+
+#### Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `from` | string | Yes | Start date (inclusive), format `YYYY-MM-DD` |
+| `to` | string | Yes | End date (inclusive), format `YYYY-MM-DD` |
+| `format` | string | No | `csv` returns a spreadsheet download (items only); anything else returns JSON |
+
+#### Permissions
+
+Requires `WFirmaAllowInvoice` permission.
+
+#### How It Works
+
+1. Fetches Wfirma documents dated in the range — both accepted invoices (`normal`) and **drafts** (`normal_draft`, created by the KSeF fallback), grouped by `id_external`.
+2. Fetches OpenCart orders placed in the range.
+3. Fetches `checkout_params` documents created in the range, plus any referenced by the orders/invoices above but created earlier.
+4. Merges everything into one row per **external reference** — the value stored in the Wfirma `id_external` field, which is the order id for OpenCart and the order UID for B2B (see `ExternalRef`). This is what lets a B2B invoice match its order despite the differing id spaces.
+
+Notes on the merge:
+
+- An order created from any source appears even when it has no invoice at all (e.g. still in the retry queue) — that is the point of the report.
+- A **split order** (several Wfirma parts sharing one `id_external`) is a single row: numbers are listed together, amounts summed, `invoice_parts` counts them.
+- Amounts come from the most authoritative source available, in order: OpenCart → `checkout_params` → Wfirma.
+- Order date and invoice date can fall in different months and are reported separately; `date` is the order date when known, else the invoice date.
+- A source that fails does not fail the request — it is reported in `sources` with `ok: false`, so an empty `items` list always means "nothing matched".
+
+#### Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "from": "2025-01-01",
+    "to": "2025-01-31",
+    "summary": {"orders": 3, "invoiced": 1, "drafts": 1, "not_invoiced": 1},
+    "sources": [
+      {"name": "wfirma", "ok": true, "count": 2},
+      {"name": "opencart", "ok": true, "count": 2},
+      {"name": "checkout_params", "ok": true, "count": 3}
+    ],
+    "items": [
+      {
+        "date": "2025-01-05",
+        "order_date": "2025-01-05",
+        "invoice_date": "2025-01-07",
+        "order_status": 5,
+        "order_id": "12345",
+        "source": "opencart",
+        "invoiced": true,
+        "document_type": "invoice",
+        "invoice_number": "FV 1/01/2025",
+        "invoice_id": "8811",
+        "contractor_name": "Jan Kowalski",
+        "is_b2b": false,
+        "is_stripe": true,
+        "total_pln": 24600,
+        "total_eur": 0,
+        "total_usd": 0,
+        "currency": "PLN"
+      }
+    ]
+  },
+  "status_message": "Success",
+  "timestamp": "2025-02-01T09:00:00Z"
+}
+```
+
+#### Item Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `date` | string | Display date: order date when known, otherwise invoice date |
+| `order_date` | string | Date the order was placed |
+| `invoice_date` | string | Date of the (earliest) Wfirma document |
+| `order_status` | integer | OpenCart order status id (0 for non-OpenCart orders) |
+| `order_id` | string | Order id as used by its own system (B2B: portal order number) |
+| `external_id` | string | Separate external reference when the source has its own id space (B2B: order UID) |
+| `source` | string | `opencart`, `b2b`, `api` or `stripe` |
+| `invoiced` | boolean | Any Wfirma document exists for the order |
+| `document_type` | string | `invoice` (accepted faktura), `draft` (awaiting manual acceptance in Wfirma), or empty |
+| `invoice_number` | string | Wfirma number; comma-separated for split orders; empty for drafts (they have no number yet) |
+| `invoice_id` | string | Wfirma invoice id |
+| `invoice_parts` | integer | Number of parts, present only when the order was split |
+| `contractor_name` | string | Customer name |
+| `is_b2b` | boolean | B2B customer group or B2B-portal order |
+| `is_stripe` | boolean | Order has a Stripe checkout session |
+| `total_pln` / `total_eur` / `total_usd` | integer | Order total in minor units, in the column matching `currency` |
+| `currency` | string | Order currency |
+
+#### Example
+
+```bash
+curl "https://api.example.com/v1/wf/list?from=2025-01-01&to=2025-01-31" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# CSV download
+curl -OJ "https://api.example.com/v1/wf/list?from=2025-01-01&to=2025-01-31&format=csv" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+#### Errors
+
+| Code | Description |
+|------|-------------|
+| 400 | Invalid date format (expected `YYYY-MM-DD`) |
+| 401 | Unauthorized |
+| 403 | User lacks `WFirmaAllowInvoice` permission |
+| 500 | Wfirma service not connected |
+
+---
+
 ## VAT & Customer Group
 
 Applies to `POST /v1/wf/proforma` and `POST /v1/wf/invoice` endpoints.

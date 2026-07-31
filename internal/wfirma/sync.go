@@ -80,38 +80,52 @@ func (c *Client) findInvoices(ctx context.Context, from, to string, invType invo
 	return all, nil
 }
 
-// FindInvoices returns all normal invoices from wFirma matching a date range.
+// FindInvoices returns every faktura registered in wFirma within a date range —
+// both accepted invoices (normal) and drafts (normal_draft). Drafts are included
+// because the KSeF fallback registers a real order as a draft (see submitInvoice),
+// so omitting them would report those orders as never invoiced. The type is carried
+// on each item so callers can tell the two apart.
+//
+// The API filters type with an equality condition, so each type is fetched in its own
+// paginated query and the results concatenated.
 // Converts API response data to entity.LocalInvoice to avoid leaking internal types.
 func (c *Client) FindInvoices(ctx context.Context, from, to string) ([]*entity.LocalInvoice, error) {
 	if !c.enabled {
 		return nil, fmt.Errorf("wFirma is disabled")
 	}
-	data, err := c.findInvoices(ctx, from, to, invoiceNormal)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]*entity.LocalInvoice, 0, len(data))
-	for _, inv := range data {
-		li := &entity.LocalInvoice{
-			Id:         inv.Id,
-			Number:     inv.Number,
-			Type:       inv.Type,
-			Date:       inv.Date,
-			Currency:   inv.Currency,
-			IdExternal: inv.IdExternal,
+	var result []*entity.LocalInvoice
+	for _, invType := range []invoiceType{invoiceNormal, invoiceNormalDraft} {
+		data, err := c.findInvoices(ctx, from, to, invType)
+		if err != nil {
+			return nil, fmt.Errorf("find %s invoices: %w", invType, err)
 		}
-		if t, err := strconv.ParseFloat(inv.Total, 64); err == nil {
-			li.Total = t
+		for _, inv := range data {
+			result = append(result, toLocalInvoice(inv))
 		}
-		if inv.Contractor != nil {
-			li.Contractor = &entity.LocalContractor{
-				ID:   inv.Contractor.ID,
-				Name: inv.Contractor.Name,
-			}
-		}
-		result = append(result, li)
 	}
 	return result, nil
+}
+
+// toLocalInvoice converts an API invoice record to the transport-neutral entity form.
+func toLocalInvoice(inv InvoiceData) *entity.LocalInvoice {
+	li := &entity.LocalInvoice{
+		Id:         inv.Id,
+		Number:     inv.Number,
+		Type:       inv.Type,
+		Date:       inv.Date,
+		Currency:   inv.Currency,
+		IdExternal: inv.IdExternal,
+	}
+	if t, err := strconv.ParseFloat(inv.Total, 64); err == nil {
+		li.Total = t
+	}
+	if inv.Contractor != nil {
+		li.Contractor = &entity.LocalContractor{
+			ID:   inv.Contractor.ID,
+			Name: inv.Contractor.Name,
+		}
+	}
+	return li
 }
 
 // SyncFromRemote pulls invoices from wFirma for the given date range and syncs them to local DB.

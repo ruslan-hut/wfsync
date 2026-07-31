@@ -76,6 +76,7 @@ On error, `success` is `false` and `status_message` contains the error descripti
 | POST | `/v1/wf/invoice` | Create invoice from payload |
 | POST | `/v1/wf/sync/pull` | Sync invoices from Wfirma to local DB |
 | POST | `/v1/wf/sync/push` | Sync local invoices to Wfirma |
+| GET | `/v1/wf/list` | Report which orders in a date range were invoiced (JSON or CSV) |
 
 See [Wfirma API Documentation](api-wfirma.md) for details.
 

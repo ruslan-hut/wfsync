@@ -79,6 +79,7 @@ All `/v1/*` endpoints require `Authorization: Bearer TOKEN`
 - `GET /v1/wf/file/invoice/{id}` - Get invoice file for OpenCart order
 - `POST /v1/wf/proforma` - Create proforma from CheckoutParams payload
 - `POST /v1/wf/invoice` - Create invoice from CheckoutParams payload
+- `GET /v1/wf/list` - Invoice registration report for a date range (JSON, or CSV with `format=csv`)
 
 ### B2B (Wfirma)
 - `POST /v1/b2b/proforma` - Create proforma from B2B order payload

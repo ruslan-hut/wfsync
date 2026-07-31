@@ -292,8 +292,6 @@ func (m *MongoDB) GetCheckoutParamsSession(sessionId string) (*entity.CheckoutPa
 	return &params, nil
 }
 
-// GetStripeOrderIds returns a set of order IDs that have a non-empty session_id
-// in the checkout_params collection. Used to determine which orders were paid via Stripe.
 // reconcileClosedSentinel is an early date used to tell an unset Created/Closed
 // timestamp (Go zero value 0001-01-01) apart from a real one. Records closed after a
 // real action have Closed = time.Now(), which is always after this sentinel.
@@ -365,10 +363,50 @@ func (m *MongoDB) GetCheckoutParamsByOrder(orderId string) (*entity.CheckoutPara
 	return &params, nil
 }
 
-func (m *MongoDB) GetStripeOrderIds(orderIds []string) (map[string]bool, error) {
-	if len(orderIds) == 0 {
+// GetCheckoutParamsByDateRange returns every checkout params document created within
+// the given day range (inclusive, YYYY-MM-DD). This is the only store that knows about
+// orders from all sources — OpenCart, B2B portal and direct API callers alike — so the
+// invoice list uses it to report orders that exist nowhere else, including those whose
+// invoice failed and is still sitting in the retry queue.
+func (m *MongoDB) GetCheckoutParamsByDateRange(from, to string) ([]*entity.CheckoutParams, error) {
+	start, err := time.Parse(entity.DateLayout, from)
+	if err != nil {
+		return nil, fmt.Errorf("parse from date: %w", err)
+	}
+	end, err := time.Parse(entity.DateLayout, to)
+	if err != nil {
+		return nil, fmt.Errorf("parse to date: %w", err)
+	}
+	// `to` is an inclusive day, so the upper bound is the start of the following day.
+	end = end.AddDate(0, 0, 1)
+
+	filter := bson.D{
+		{"created", bson.D{{"$gte", start}, {"$lt", end}}},
+	}
+	return m.findCheckoutParams(filter)
+}
+
+// GetCheckoutParamsByRefs returns checkout params whose order_id or external_id is in
+// refs. Both keys are matched because an order's external reference (the value stamped
+// into the wFirma id_external) differs from its order id for systems with their own id
+// space — the B2B portal keys on the order UID. Used to resolve orders whose invoice
+// falls in the requested range but which were created before it.
+func (m *MongoDB) GetCheckoutParamsByRefs(refs []string) ([]*entity.CheckoutParams, error) {
+	if len(refs) == 0 {
 		return nil, nil
 	}
+	filter := bson.D{
+		{"$or", bson.A{
+			bson.D{{"order_id", bson.D{{"$in", refs}}}},
+			bson.D{{"external_id", bson.D{{"$in", refs}}}},
+		}},
+	}
+	return m.findCheckoutParams(filter)
+}
+
+// findCheckoutParams runs a filter against the checkout_params collection and decodes
+// the full documents.
+func (m *MongoDB) findCheckoutParams(filter bson.D) ([]*entity.CheckoutParams, error) {
 	ctx, cancel := m.opCtx()
 	defer cancel()
 	connection, err := m.connect(ctx)
@@ -378,12 +416,7 @@ func (m *MongoDB) GetStripeOrderIds(orderIds []string) (map[string]bool, error) 
 	defer m.disconnect(ctx, connection)
 
 	collection := connection.Database(m.database).Collection(collectionCheckoutParams)
-	filter := bson.D{
-		{"order_id", bson.D{{"$in", orderIds}}},
-		{"session_id", bson.D{{"$ne", ""}}},
-	}
-
-	cursor, err := collection.Find(ctx, filter, options.Find().SetProjection(bson.D{{"order_id", 1}}))
+	cursor, err := collection.Find(ctx, filter, options.Find().SetSort(bson.D{{"created", 1}}))
 	if err != nil {
 		return nil, err
 	}
@@ -391,19 +424,11 @@ func (m *MongoDB) GetStripeOrderIds(orderIds []string) (map[string]bool, error) 
 		_ = cursor.Close(ctx)
 	}(cursor, ctx)
 
-	result := make(map[string]bool)
-	for cursor.Next(ctx) {
-		var doc struct {
-			OrderId string `bson:"order_id"`
-		}
-		if err = cursor.Decode(&doc); err != nil {
-			return nil, err
-		}
-		if doc.OrderId != "" {
-			result[doc.OrderId] = true
-		}
+	var result []*entity.CheckoutParams
+	if err = cursor.All(ctx, &result); err != nil {
+		return nil, err
 	}
-	return result, cursor.Err()
+	return result, nil
 }
 
 func (m *MongoDB) GetProductBySku(sku string) (*entity.Product, error) {
