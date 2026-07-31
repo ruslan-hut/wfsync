@@ -291,3 +291,77 @@ func TestOrderRefFromDescription(t *testing.T) {
 		}
 	}
 }
+
+// Several documents per order are normal for a split order, and must not be reported as
+// duplicates: the parts carry different amounts. Two documents of the same amount for one
+// order are the shape of a duplicate and are flagged.
+func TestInvoiceListFlagsRepeatedAmountsOnly(t *testing.T) {
+	created := time.Date(2026, 7, 30, 9, 0, 0, 0, time.UTC)
+	c := testCore(
+		&listInvoiceService{invoices: []*entity.LocalInvoice{
+			// 17098: registered twice for the same amount — a duplicate.
+			{Id: "1", Number: "FV 1830/2026", Type: "normal", Date: "2026-07-30", Currency: "PLN",
+				Total: 1161.05, IdExternal: "17098"},
+			{Id: "2", Number: "FV 1831/2026", Type: "normal", Date: "2026-07-30", Currency: "PLN",
+				Total: 1161.05, IdExternal: "17098"},
+			// 17099: a large order split into two parts of different value.
+			{Id: "3", Number: "FV 1832/2026", Type: "normal", Date: "2026-07-30", Currency: "PLN",
+				Total: 8000, IdExternal: "17099"},
+			{Id: "4", Number: "FV 1833/2026", Type: "normal", Date: "2026-07-30", Currency: "PLN",
+				Total: 1500.50, IdExternal: "17099"},
+			// 17100: a single document — the question does not arise.
+			{Id: "5", Number: "FV 1834/2026", Type: "normal", Date: "2026-07-30", Currency: "PLN",
+				Total: 309.98, IdExternal: "17100"},
+		}},
+		&listDatabase{inRange: []*entity.CheckoutParams{
+			{OrderId: "17098", Source: entity.SourceOpenCart, Currency: "PLN", Total: 116105, Created: created},
+			{OrderId: "17099", Source: entity.SourceOpenCart, Currency: "PLN", Total: 950050, Created: created},
+			{OrderId: "17100", Source: entity.SourceOpenCart, Currency: "PLN", Total: 30998, Created: created},
+		}},
+	)
+
+	result, err := c.InvoiceList(context.Background(), "2026-07-01", "2026-07-31")
+	if err != nil {
+		t.Fatalf("InvoiceList: %v", err)
+	}
+
+	want := map[string]bool{"17098": true, "17099": false, "17100": false}
+	for orderId, suspect := range want {
+		item := itemByOrderId(result.Items, orderId)
+		if item == nil {
+			t.Fatalf("order %s missing from list", orderId)
+		}
+		if item.DuplicateSuspect != suspect {
+			t.Errorf("order %s duplicate_suspect = %v, want %v (parts: %d)",
+				orderId, item.DuplicateSuspect, suspect, item.InvoiceParts)
+		}
+	}
+	if result.Summary.DuplicateSuspects != 1 {
+		t.Errorf("summary duplicate_suspects = %d, want 1", result.Summary.DuplicateSuspects)
+	}
+}
+
+// Documents in different currencies never pair up, however close their numbers are.
+func TestInvoiceListDuplicateCheckIsCurrencyAware(t *testing.T) {
+	c := testCore(
+		&listInvoiceService{invoices: []*entity.LocalInvoice{
+			{Id: "1", Number: "FV 1/2026", Type: "normal", Date: "2026-07-30", Currency: "PLN",
+				Total: 100, IdExternal: "17098"},
+			{Id: "2", Number: "FV 2/2026", Type: "normal", Date: "2026-07-30", Currency: "EUR",
+				Total: 100, IdExternal: "17098"},
+		}},
+		&listDatabase{},
+	)
+
+	result, err := c.InvoiceList(context.Background(), "2026-07-01", "2026-07-31")
+	if err != nil {
+		t.Fatalf("InvoiceList: %v", err)
+	}
+	item := itemByOrderId(result.Items, "17098")
+	if item == nil {
+		t.Fatal("order 17098 missing from list")
+	}
+	if item.DuplicateSuspect {
+		t.Error("documents in different currencies flagged as duplicates")
+	}
+}

@@ -151,6 +151,9 @@ func (c *Core) InvoiceList(ctx context.Context, from, to string) (*entity.Invoic
 			item.Date = item.InvoiceDate
 		}
 		result.Summary.Orders++
+		if item.DuplicateSuspect {
+			result.Summary.DuplicateSuspects++
+		}
 		switch item.DocumentType {
 		case entity.DocumentInvoice:
 			result.Summary.Invoiced++
@@ -281,6 +284,7 @@ func applyInvoices(item *entity.InvoiceListItem, invoices []*entity.LocalInvoice
 	var (
 		numbers  []string
 		totals   = make(map[string]int64)
+		seen     = make(map[string]int)
 		docType  = entity.DocumentDraft
 		currency string
 	)
@@ -298,11 +302,21 @@ func applyInvoices(item *entity.InvoiceListItem, invoices []*entity.LocalInvoice
 			currency = inv.Currency
 			totals[inv.Currency] += toCents(inv.Total)
 		}
+		// Parts of a split order differ in amount; the same amount registered twice for
+		// one order is the shape of a duplicate. Currency is part of the key so documents
+		// in different currencies are never paired.
+		seen[fmt.Sprintf("%s|%d", inv.Currency, toCents(inv.Total))]++
 	}
 
 	item.Invoiced = true
 	item.DocumentType = docType
 	item.InvoiceParts = len(invoices)
+	for _, count := range seen {
+		if count > 1 {
+			item.DuplicateSuspect = true
+			break
+		}
+	}
 	item.InvoiceNumber = strings.Join(numbers, ", ")
 	item.InvoiceDate = invoices[0].Date
 	if item.InvoiceId == "" {

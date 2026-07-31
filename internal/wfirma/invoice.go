@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -305,20 +306,43 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	// deterministic for the same params, so index n maps to the next missing part.
 	startIdx := 0
 	if invType != invoiceProforma && params.ExternalRef() != "" {
-		existingIds, findErr := c.findFakturaIdsByExternalId(ctx, params.ExternalRef())
+		existing, findErr := c.findFakturasByExternalId(ctx, params.ExternalRef())
 		if findErr != nil {
 			// State unknown — abort rather than risk a duplicate.
 			return nil, fmt.Errorf("check existing faktura for order %s: %w", params.OrderId, findErr)
 		}
-		for i, id := range existingIds {
+		for i, ex := range existing {
 			if i >= totalParts {
 				break
 			}
+			amount := contentsTotal(chunks[i])
+			// The amount a part should carry is known from its chunk, so a mismatch means
+			// the existing documents are not the parts of this order laid out in order —
+			// most likely a duplicate among them. Creation still stops (a faktura cannot be
+			// unissued), but the order is flagged for review rather than silently accepted.
+			if !sameAmount(ex.Total, amount) {
+				log.With(
+					slog.String("invoice_id", ex.Id),
+					slog.String("external_id", params.ExternalRef()),
+					slog.String("part", fmt.Sprintf("%d/%d", i+1, totalParts)),
+					slog.String("registered_total", fmt.Sprintf("%.2f", ex.Total)),
+					slog.String("expected_total", fmt.Sprintf("%.2f", amount)),
+					slog.String("tg_topic", entity.TopicError),
+				).Warn("registered faktura amount does not match the order part, check for duplicates")
+			}
 			parts = append(parts, &entity.Payment{
-				Amount:  int64(contentsTotal(chunks[i]) * 100),
-				Id:      id,
+				Amount:  int64(amount * 100),
+				Id:      ex.Id,
 				OrderId: params.OrderId,
 			})
+		}
+		if len(existing) > totalParts {
+			log.With(
+				slog.String("external_id", params.ExternalRef()),
+				slog.Int("registered", len(existing)),
+				slog.Int("parts", totalParts),
+				slog.String("tg_topic", entity.TopicError),
+			).Warn("order holds more fakturas than it has parts, check for duplicates")
 		}
 		startIdx = len(parts)
 		if startIdx > 0 {
@@ -916,24 +940,38 @@ func isFakturaType(t string) bool {
 // Callers must treat a non-nil error as "state unknown" and abort rather than risk a
 // duplicate, mirroring InvoiceExists.
 func (c *Client) FindInvoiceByExternalId(ctx context.Context, externalId string) (string, error) {
-	ids, err := c.findFakturaIdsByExternalId(ctx, externalId)
+	existing, err := c.findFakturasByExternalId(ctx, externalId)
 	if err != nil {
 		return "", err
 	}
-	if len(ids) == 0 {
+	if len(existing) == 0 {
 		return "", nil
 	}
-	return ids[0], nil
+	return existing[0].Id, nil
 }
 
-// findFakturaIdsByExternalId returns the wFirma ids of every faktura carrying externalId
-// in id_external, ordered by id — i.e. in creation order, which for a split order is part
-// order. An empty slice means the order has no faktura yet.
+// existingFaktura is a faktura already registered for an order: enough to decide whether
+// a part still needs creating (Id) and whether the documents look like the parts of this
+// order or like duplicates (Total).
+type existingFaktura struct {
+	Id    string
+	Total float64
+}
+
+// sameAmount compares two gross amounts at cent precision, the granularity wFirma
+// itself rounds to.
+func sameAmount(a, b float64) bool {
+	return math.Round(a*100) == math.Round(b*100)
+}
+
+// findFakturasByExternalId returns every faktura carrying externalId in id_external,
+// ordered by id — i.e. in creation order, which for a split order is part order. An empty
+// slice means the order has no faktura yet.
 //
 // Returning all of them (rather than just the first) is what lets invoice() resume a split
 // order that failed part-way: n existing documents mean chunks 1..n are done and creation
 // picks up at n+1. Proformas share the id_external and are filtered out here.
-func (c *Client) findFakturaIdsByExternalId(ctx context.Context, externalId string) ([]string, error) {
+func (c *Client) findFakturasByExternalId(ctx context.Context, externalId string) ([]existingFaktura, error) {
 	if !c.enabled {
 		return nil, fmt.Errorf("wFirma is disabled")
 	}
@@ -980,23 +1018,30 @@ func (c *Client) findFakturaIdsByExternalId(ctx context.Context, externalId stri
 	}
 
 	// The invoices map also carries a non-invoice "parameters" entry (Id == ""), skipped here.
-	var ids []string
+	var found []existingFaktura
 	for _, w := range resp.Invoices {
-		if w.Invoice.Id != "" && isFakturaType(w.Invoice.Type) {
-			ids = append(ids, w.Invoice.Id)
+		if w.Invoice.Id == "" || !isFakturaType(w.Invoice.Type) {
+			continue
 		}
+		ex := existingFaktura{Id: w.Invoice.Id}
+		// Total comes back as a formatted decimal string; an unparsable one leaves the
+		// amount at zero, which only costs the caller its cross-check.
+		if t, parseErr := strconv.ParseFloat(w.Invoice.Total, 64); parseErr == nil {
+			ex.Total = t
+		}
+		found = append(found, ex)
 	}
 	// The response is a map, so iteration order is random; sort numerically to restore
 	// creation order (wFirma ids are ascending integers).
-	sort.Slice(ids, func(i, j int) bool {
-		a, errA := strconv.ParseInt(ids[i], 10, 64)
-		b, errB := strconv.ParseInt(ids[j], 10, 64)
+	sort.Slice(found, func(i, j int) bool {
+		a, errA := strconv.ParseInt(found[i].Id, 10, 64)
+		b, errB := strconv.ParseInt(found[j].Id, 10, 64)
 		if errA != nil || errB != nil {
-			return ids[i] < ids[j]
+			return found[i].Id < found[j].Id
 		}
 		return a < b
 	})
-	return ids, nil
+	return found, nil
 }
 
 // DeleteProforma removes a proforma document from wFirma via invoices/delete/{id}.

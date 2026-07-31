@@ -160,7 +160,7 @@ func writeInvoiceListCSV(w http.ResponseWriter, result *entity.InvoiceListResult
 	// Header row
 	_ = cw.Write([]string{
 		"Order Date", "Invoice Date", "Order Status", "Order ID", "External ID", "Source",
-		"Invoiced", "Document", "Invoice Number", "Parts",
+		"Invoiced", "Document", "Invoice Number", "Parts", "Duplicate?",
 		"Contractor Name", "B2B", "Stripe", "Total PLN", "Total EUR", "Total USD", "Currency",
 	})
 
@@ -176,6 +176,7 @@ func writeInvoiceListCSV(w http.ResponseWriter, result *entity.InvoiceListResult
 			string(item.DocumentType),
 			item.InvoiceNumber,
 			formatParts(item.InvoiceParts),
+			formatDuplicate(item),
 			item.ContractorName,
 			boolYesNo(item.IsB2B),
 			boolYesNo(item.IsStripe),
@@ -193,6 +194,16 @@ func formatParts(n int) string {
 		return ""
 	}
 	return strconv.Itoa(n)
+}
+
+// formatDuplicate renders the duplicate hint only for multi-document orders: "Yes" when
+// an amount repeats across the order's documents, "No" when the amounts all differ (an
+// ordinary split), blank for the single-document case where the question does not arise.
+func formatDuplicate(item *entity.InvoiceListItem) string {
+	if item.InvoiceParts <= 1 {
+		return ""
+	}
+	return boolYesNo(item.DuplicateSuspect)
 }
 
 func boolYesNo(v bool) string {

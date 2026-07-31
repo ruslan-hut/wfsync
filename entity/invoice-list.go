@@ -70,6 +70,13 @@ type InvoiceListItem struct {
 	InvoiceId     string `json:"invoice_id,omitempty"`
 	InvoiceParts  int    `json:"invoice_parts,omitempty"`
 
+	// DuplicateSuspect flags an order holding two or more documents of the same amount.
+	// Several documents per order are normal — a large order is split into parts — but
+	// the parts of a split carry different amounts, whereas a document registered twice
+	// for the same order carries the same amount twice. It is a hint for review, not a
+	// verdict: an order split into equal-valued parts trips it legitimately.
+	DuplicateSuspect bool `json:"duplicate_suspect,omitempty"`
+
 	ContractorName string `json:"contractor_name"`
 	IsB2B          bool   `json:"is_b2b"`
 	IsStripe       bool   `json:"is_stripe"`
@@ -105,6 +112,9 @@ type InvoiceListSummary struct {
 	Invoiced    int `json:"invoiced"`
 	Drafts      int `json:"drafts"`
 	NotInvoiced int `json:"not_invoiced"`
+	// DuplicateSuspects counts orders whose documents repeat an amount — see
+	// InvoiceListItem.DuplicateSuspect. Normally zero; a non-zero value is worth a look.
+	DuplicateSuspects int `json:"duplicate_suspects,omitempty"`
 }
 
 // InvoiceListSource records the outcome of one data source. A failed source is

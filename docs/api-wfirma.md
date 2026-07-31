@@ -821,6 +821,7 @@ Notes on the merge:
 
 - An order created from any source appears even when it has no invoice at all (e.g. still in the retry queue) — that is the point of the report.
 - A **split order** (several Wfirma parts sharing one `id_external`) is a single row: numbers are listed together, amounts summed, `invoice_parts` counts them.
+- `duplicate_suspect` (CSV column `Duplicate?`) tells a split from a genuine duplicate. Several documents per order are normal — a large order is split into parts — but the parts of a split carry **different** amounts, while a document registered twice carries the **same** amount twice. The flag is set when an amount repeats among an order's documents, in the same currency. It is a hint for review, not a verdict: an order split into equal-valued parts trips it legitimately. The column is blank for single-document orders, and `summary.duplicate_suspects` counts the flagged rows.
 - A document with **no `id_external`** (registered before the field was stamped, or created directly in Wfirma) is matched by the order number in its description — `Numer zamówienia: <order>` — so it is reported against its order rather than as an unattributed document. A present `id_external` always wins.
 - Amounts come from the most authoritative source available, in order: OpenCart → `checkout_params` → Wfirma.
 - Order date and invoice date can fall in different months and are reported separately; `date` is the order date when known, else the invoice date.
@@ -944,6 +945,13 @@ so a split that failed part-way **resumes at the first missing part** instead of
 treated as fully invoiced. The failure is reported with the number of parts already
 registered, and re-running the request (or letting the retry queue re-run it) completes the
 rest without duplicating the earlier ones.
+
+Because chunking is deterministic for the same order, part *n* always carries the same
+amount. That amount is cross-checked against each already-registered document; a mismatch,
+or more documents than the order has parts, raises a Telegram warning. Creation still stops
+in that case — a faktura cannot be unissued, so the guard never resolves an ambiguity by
+creating — but the order is surfaced for review. `GET /v1/wf/list` marks the same condition
+per order with `duplicate_suspect`.
 
 ---
 
