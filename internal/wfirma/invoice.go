@@ -748,6 +748,16 @@ func isStockError(msg string) bool {
 	return false
 }
 
+// ossSaleTypeGoods is the wFirma OSS "rodzaj sprzedaży" code for intra-EU
+// distance selling of goods (WSTO — wewnątrzwspólnotowa sprzedaż towarów na
+// odległość), which is what we ship.
+//
+// Do not use the legacy MOSS letter codes here: they classify *services* only
+// (SA–SE electronic, TA–TK telecom, BA/BB broadcasting). "BA" in particular is
+// radio/TV broadcasting, not goods — it was used here by mistake and made
+// wFirma show "BA - programy radiowe lub telewizyjne…" on the OSS tab.
+const ossSaleTypeGoods = "WSTO"
+
 // buildVatMossDetails constructs the OSS evidence wrapper for an invoice.
 // Uses the customer's address as evidence type A and the delivery country as evidence type F.
 func buildVatMossDetails(client *entity.ClientDetails, countryCode string) *VatMossDetailWrapper {
@@ -771,7 +781,7 @@ func buildVatMossDetails(client *entity.ClientDetails, countryCode string) *VatM
 
 	return &VatMossDetailWrapper{
 		Detail: &VatMossDetail{
-			Type:                 "BA", // goods (WSTO)
+			Type:                 ossSaleTypeGoods,
 			Evidence1Type:        "A",  // billing/shipping address
 			Evidence1Description: evidence1Desc,
 			Evidence2Type:        "F", // other commercially relevant info

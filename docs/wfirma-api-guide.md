@@ -401,7 +401,7 @@ This is a **one-to-one relation** (`"pelny, pojedynczy"` in the API docs), not o
 ```json
 "vat_moss_details": {
   "vat_moss_detail": {
-    "type": "BA",
+    "type": "WSTO",
     "evidence1_type": "A",
     "evidence1_description": "Customer Street, 12345, City, DE",
     "evidence2_type": "F",
@@ -414,15 +414,15 @@ This is a **one-to-one relation** (`"pelny, pojedynczy"` in the API docs), not o
 
 | Code | Description |
 |---|---|
-| `BA` | Distance selling of goods (WSTO) |
-| `BB` | Domestic delivery of goods by electronic interfaces |
-| `SA` | Telecommunication services |
-| `SB` | Broadcasting services |
-| `SC` | Electronic services |
-| `SD` | Other services |
-| `SE` | Services provided by intermediaries |
+| `WSTO` | Intra-EU distance selling of goods (wewnątrzwspólnotowa sprzedaż towarów na odległość) |
+| `TBE` | Telecom / broadcasting / electronic services |
+| `SA`–`SE` | Legacy MOSS codes for electronic services |
+| `TA`–`TK` | Legacy MOSS codes for telecommunication services |
+| `BA`, `BB` | Legacy MOSS codes for broadcasting services (`BA` = radio/TV programmes transmitted over a radio/TV network) |
 
-For e-commerce goods, use `"BA"`.
+For e-commerce goods, use `"WSTO"`. The letter codes come from the pre-2021 MOSS
+taxonomy and cover **services only** — using `BA` for goods makes wFirma label the
+invoice's OSS tab "BA - programy radiowe lub telewizyjne…", which is wrong for shipped goods.
 
 #### Evidence type codes
 
@@ -453,7 +453,7 @@ Two pieces of evidence are required to prove the buyer's location:
         "contractor": { "id": 56789 },
         "vat_moss_details": {
           "vat_moss_detail": {
-            "type": "BA",
+            "type": "WSTO",
             "evidence1_type": "A",
             "evidence1_description": "Kungsgatan 5, 11143, Stockholm, SE",
             "evidence2_type": "F",

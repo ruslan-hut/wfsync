@@ -98,7 +98,7 @@ ISO country code → declaration_country_id → foreign vat_code_id
         "type": "normal",
         "vat_moss_details": {
           "vat_moss_detail": {
-            "type": "BA",
+            "type": "WSTO",
             "evidence1_type": "A",
             "evidence1_description": "Street, Zip, City, Country",
             "evidence2_type": "F",

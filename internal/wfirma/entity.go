@@ -63,7 +63,7 @@ type VatMossDetailWrapper struct {
 // VatMossDetail represents OSS evidence attached to an invoice.
 // Required when using foreign vat_code IDs — the API validates all fields are non-empty.
 type VatMossDetail struct {
-	Type                 string `json:"type" bson:"type"`                                   // "BA"/"BB" (goods), "SA"-"SE" (services)
+	Type                 string `json:"type" bson:"type"`                                   // sale type: "WSTO" (distance selling of goods), "TBE"/legacy MOSS letter codes for services
 	Evidence1Type        string `json:"evidence1_type" bson:"evidence1_type"`               // "A" (address), "B" (IP), "C" (bank), "D" (SIM), "E" (landline), "F" (other)
 	Evidence1Description string `json:"evidence1_description" bson:"evidence1_description"` // e.g. customer's address
 	Evidence2Type        string `json:"evidence2_type" bson:"evidence2_type"`               // same codes as above
