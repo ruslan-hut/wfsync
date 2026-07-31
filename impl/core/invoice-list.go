@@ -49,13 +49,20 @@ func (c *Core) InvoiceList(ctx context.Context, from, to string) (*entity.Invoic
 	wfByRef := make(map[string][]*entity.LocalInvoice)
 	var wfOrphans []*entity.LocalInvoice
 	for _, inv := range wfInvoices {
-		if inv.IdExternal == "" {
-			// Registered directly in wFirma (or before id_external was stamped) — it
-			// belongs to no order we can name, but still counts as a document.
+		ref := inv.IdExternal
+		if ref == "" {
+			// Documents created before id_external was stamped still name their order in
+			// the description we generate. Recovering the ref from there keeps them out of
+			// the orphan bucket, where they would make their order read as never invoiced.
+			ref = orderRefFromDescription(inv.Description)
+		}
+		if ref == "" {
+			// Registered directly in wFirma — it belongs to no order we can name, but
+			// still counts as a document.
 			wfOrphans = append(wfOrphans, inv)
 			continue
 		}
-		wfByRef[inv.IdExternal] = append(wfByRef[inv.IdExternal], inv)
+		wfByRef[ref] = append(wfByRef[ref], inv)
 	}
 
 	// Step 2: OpenCart orders placed in the range.
@@ -217,6 +224,25 @@ func newerParams(a, b *entity.CheckoutParams) bool {
 		return a.Modified.After(b.Modified)
 	}
 	return a.Created.After(b.Created)
+}
+
+// descriptionOrderPrefix is the invoice description this service writes, e.g.
+// "Numer zamówienia: 17098" or "Numer zamówienia: 17098 (część 1/2)" for a split order.
+const descriptionOrderPrefix = "Numer zamówienia:"
+
+// orderRefFromDescription extracts the order reference from an invoice description,
+// returning "" for any description this service did not write. It is a fallback for
+// documents with no id_external; the stamped field always wins when present.
+func orderRefFromDescription(description string) string {
+	_, after, found := strings.Cut(description, descriptionOrderPrefix)
+	if !found {
+		return ""
+	}
+	// Drop the part suffix a split order carries.
+	if idx := strings.Index(after, "("); idx >= 0 {
+		after = after[:idx]
+	}
+	return strings.TrimSpace(after)
 }
 
 // listRefs collects the lookup keys for the checkout params query: OpenCart order ids

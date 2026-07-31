@@ -812,7 +812,7 @@ Requires `WFirmaAllowInvoice` permission.
 
 #### How It Works
 
-1. Fetches Wfirma documents dated in the range — both accepted invoices (`normal`) and **drafts** (`normal_draft`, created by the KSeF fallback), grouped by `id_external`.
+1. Fetches Wfirma documents dated in the range — both accepted invoices (`normal`) and **drafts** (`normal_draft`, created by the KSeF fallback), grouped by `id_external`. The fetch pages through the whole range (Wfirma returns at most 100 documents per page), so a range with hundreds of invoices is reported in full.
 2. Fetches OpenCart orders placed in the range.
 3. Fetches `checkout_params` documents created in the range, plus any referenced by the orders/invoices above but created earlier.
 4. Merges everything into one row per **external reference** — the value stored in the Wfirma `id_external` field, which is the order id for OpenCart and the order UID for B2B (see `ExternalRef`). This is what lets a B2B invoice match its order despite the differing id spaces.
@@ -821,6 +821,7 @@ Notes on the merge:
 
 - An order created from any source appears even when it has no invoice at all (e.g. still in the retry queue) — that is the point of the report.
 - A **split order** (several Wfirma parts sharing one `id_external`) is a single row: numbers are listed together, amounts summed, `invoice_parts` counts them.
+- A document with **no `id_external`** (registered before the field was stamped, or created directly in Wfirma) is matched by the order number in its description — `Numer zamówienia: <order>` — so it is reported against its order rather than as an unattributed document. A present `id_external` always wins.
 - Amounts come from the most authoritative source available, in order: OpenCart → `checkout_params` → Wfirma.
 - Order date and invoice date can fall in different months and are reported separately; `date` is the order date when known, else the invoice date.
 - A source that fails does not fail the request — it is reported in `sources` with `ok: false`, so an empty `items` list always means "nothing matched".

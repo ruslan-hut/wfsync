@@ -214,3 +214,80 @@ func TestInvoiceListReportsSourceFailure(t *testing.T) {
 		t.Errorf("expected failed wfirma source, got %+v", wf)
 	}
 }
+
+// An invoice with no id_external still names its order in the description this service
+// writes. Without the fallback it lands in the orphan bucket and its order is reported as
+// never invoiced — the very false negative the report exists to rule out.
+func TestInvoiceListMatchesByDescriptionWhenExternalIdMissing(t *testing.T) {
+	created := time.Date(2026, 7, 30, 9, 0, 0, 0, time.UTC)
+	c := testCore(
+		&listInvoiceService{invoices: []*entity.LocalInvoice{
+			{Id: "11", Number: "FV 1830/2026", Type: "normal", Date: "2026-07-30", Currency: "PLN",
+				Total: 1161.05, Description: "Numer zamówienia: 17098"},
+			{Id: "12", Number: "FV 1832/2026", Type: "normal", Date: "2026-07-30", Currency: "PLN",
+				Total: 475.34, Description: "Numer zamówienia: 17099 (część 1/2)"},
+		}},
+		&listDatabase{inRange: []*entity.CheckoutParams{
+			{OrderId: "17098", Source: entity.SourceOpenCart, Currency: "PLN", Total: 116105, Created: created},
+			{OrderId: "17099", Source: entity.SourceOpenCart, Currency: "PLN", Total: 47534, Created: created},
+		}},
+	)
+
+	result, err := c.InvoiceList(context.Background(), "2026-07-01", "2026-07-31")
+	if err != nil {
+		t.Fatalf("InvoiceList: %v", err)
+	}
+	for _, orderId := range []string{"17098", "17099"} {
+		item := itemByOrderId(result.Items, orderId)
+		if item == nil {
+			t.Fatalf("order %s missing from list", orderId)
+		}
+		if !item.Invoiced {
+			t.Errorf("order %s reported as not invoiced: %+v", orderId, item)
+		}
+	}
+	if result.Summary.Invoiced != 2 || result.Summary.NotInvoiced != 0 {
+		t.Errorf("unexpected summary: %+v", result.Summary)
+	}
+}
+
+// The stamped id_external is authoritative: a description naming a different order must
+// never move an invoice off the order wFirma itself records it under.
+func TestInvoiceListPrefersExternalIdOverDescription(t *testing.T) {
+	c := testCore(
+		&listInvoiceService{invoices: []*entity.LocalInvoice{
+			{Id: "13", Number: "FV 9/2026", Type: "normal", Date: "2026-07-30", Currency: "PLN",
+				Total: 10, IdExternal: "uid-xyz", Description: "Numer zamówienia: 17098"},
+		}},
+		&listDatabase{inRange: []*entity.CheckoutParams{
+			{OrderId: "17098", ExternalId: "uid-xyz", Source: entity.SourceB2B, Currency: "PLN",
+				Total: 1000, Created: time.Date(2026, 7, 30, 9, 0, 0, 0, time.UTC)},
+		}},
+	)
+
+	result, err := c.InvoiceList(context.Background(), "2026-07-01", "2026-07-31")
+	if err != nil {
+		t.Fatalf("InvoiceList: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("expected one row, got %d: %+v", len(result.Items), result.Items)
+	}
+	if !result.Items[0].Invoiced || result.Items[0].OrderId != "17098" {
+		t.Errorf("unexpected row: %+v", result.Items[0])
+	}
+}
+
+func TestOrderRefFromDescription(t *testing.T) {
+	cases := map[string]string{
+		"Numer zamówienia: 17098":             "17098",
+		"Numer zamówienia: 17099 (część 1/2)": "17099",
+		"Numer zamówienia: ORD-73917800005":   "ORD-73917800005",
+		"Zamówienie 17098":                    "",
+		"":                                    "",
+	}
+	for desc, want := range cases {
+		if got := orderRefFromDescription(desc); got != want {
+			t.Errorf("orderRefFromDescription(%q) = %q, want %q", desc, got, want)
+		}
+	}
+}

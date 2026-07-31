@@ -12,11 +12,20 @@ import (
 
 // findInvoices fetches all invoices from wFirma matching a date range and type.
 // Paginates through results with 100 items per page.
+//
+// wFirma pages are 1-based, and the page metadata for invoices/find is returned inside
+// the invoices map (as a "parameters" entry) rather than at the top level — so the total
+// is not readable from the decoded response. Pagination therefore stops when a page comes
+// back short, the same approach as the vat_codes cache. maxPages bounds the loop should
+// the API ever keep returning full pages.
 func (c *Client) findInvoices(ctx context.Context, from, to string, invType invoiceType) ([]InvoiceData, error) {
-	const pageSize = 100
+	const (
+		pageSize = 100
+		maxPages = 200
+	)
 	var all []InvoiceData
 
-	for page := 0; ; page++ {
+	for page := 1; page <= maxPages; page++ {
 		payload := map[string]interface{}{
 			"api": map[string]interface{}{
 				"invoices": map[string]interface{}{
@@ -66,14 +75,28 @@ func (c *Client) findInvoices(ctx context.Context, from, to string, invType invo
 			return nil, fmt.Errorf("find invoices: API error")
 		}
 
+		// The map carries a non-invoice "parameters" entry alongside the numbered ones;
+		// it decodes to an empty InvoiceData, so skip anything without an id.
+		found := 0
 		for _, wrapper := range findResp.Invoices {
+			if wrapper.Invoice.Id == "" {
+				continue
+			}
 			all = append(all, wrapper.Invoice)
+			found++
 		}
 
-		// Stop if we've fetched all results
-		fetched := (page + 1) * pageSize
-		if fetched >= findResp.Parameters.Total || len(findResp.Invoices) == 0 {
-			break
+		// A short page is the last page.
+		if found < pageSize {
+			return all, nil
+		}
+		if page == maxPages {
+			c.log.With(
+				slog.String("from", from),
+				slog.String("to", to),
+				slog.String("type", string(invType)),
+				slog.Int("fetched", len(all)),
+			).Warn("invoice pagination hit page limit, results may be incomplete")
 		}
 	}
 
@@ -109,12 +132,13 @@ func (c *Client) FindInvoices(ctx context.Context, from, to string) ([]*entity.L
 // toLocalInvoice converts an API invoice record to the transport-neutral entity form.
 func toLocalInvoice(inv InvoiceData) *entity.LocalInvoice {
 	li := &entity.LocalInvoice{
-		Id:         inv.Id,
-		Number:     inv.Number,
-		Type:       inv.Type,
-		Date:       inv.Date,
-		Currency:   inv.Currency,
-		IdExternal: inv.IdExternal,
+		Id:          inv.Id,
+		Number:      inv.Number,
+		Type:        inv.Type,
+		Date:        inv.Date,
+		Currency:    inv.Currency,
+		IdExternal:  inv.IdExternal,
+		Description: inv.Description,
 	}
 	if t, err := strconv.ParseFloat(inv.Total, 64); err == nil {
 		li.Total = t
