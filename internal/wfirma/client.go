@@ -78,6 +78,7 @@ type Client struct {
 	appID            string
 	filePath         string
 	log              *slog.Logger
+	orderLocks       *orderLocks                  // serializes faktura creation per id_external
 	cacheMu          sync.Mutex                   // guards vatCodes, ossVatCodes, declCountries
 	vatCodes         map[string]string            // cached Polish vat code name → wFirma ID (e.g. "23" → "222")
 	ossVatCodes      map[string]map[string]string // cached declaration_country_id → normalized rate ("27") → wFirma vat_code ID
@@ -102,6 +103,7 @@ func NewClient(conf *config.Config, logger *slog.Logger) *Client {
 		secretKey:        conf.WFirma.SecretKey,
 		appID:            conf.WFirma.AppID,
 		filePath:         conf.FilePath,
+		orderLocks:       newOrderLocks(),
 		log:              logger.With(sl.Module("wfirma")),
 	}
 }

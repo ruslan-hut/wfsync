@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -90,6 +91,14 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 			err = fmt.Errorf("panic in invoice creation: %v", r)
 		}
 	}()
+	// Serialize faktura creation for this order across the concurrent triggers that can
+	// observe the same capture (capture API goroutine, Stripe webhook, reconciler, retry
+	// queue) so the duplicate check below cannot be overtaken between find and add.
+	// Proformas are exempt: they are intentionally re-issued when an order changes.
+	if invType != invoiceProforma {
+		defer c.orderLocks.lock(params.ExternalRef())()
+	}
+
 	if c.db != nil {
 		err := c.db.SaveCheckoutParams(params)
 		if err != nil {
@@ -284,14 +293,49 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	var firstPayment *entity.Payment
 	var parts []*entity.Payment
 
-	for partIdx, chunk := range chunks {
+	// Order-level duplicate guard, applied here because every source of a faktura — the
+	// Stripe webhook, the capture API, the reconciler, the retry queue, the order-to-invoice
+	// and payload endpoints — funnels through this function. Callers that guard themselves
+	// stay correct; callers that cannot (they hold no invoice id, or their local record of
+	// one failed to save) are covered by this check.
+	//
+	// Existing documents also make the creation loop resumable: n fakturas for this order
+	// mean chunks 1..n were already registered, so a split order that died part-way finishes
+	// its remaining parts instead of being written off as "already invoiced". Chunking is
+	// deterministic for the same params, so index n maps to the next missing part.
+	startIdx := 0
+	if invType != invoiceProforma && params.ExternalRef() != "" {
+		existingIds, findErr := c.findFakturaIdsByExternalId(ctx, params.ExternalRef())
+		if findErr != nil {
+			// State unknown — abort rather than risk a duplicate.
+			return nil, fmt.Errorf("check existing faktura for order %s: %w", params.OrderId, findErr)
+		}
+		for i, id := range existingIds {
+			if i >= totalParts {
+				break
+			}
+			parts = append(parts, &entity.Payment{
+				Amount:  int64(contentsTotal(chunks[i]) * 100),
+				Id:      id,
+				OrderId: params.OrderId,
+			})
+		}
+		startIdx = len(parts)
+		if startIdx > 0 {
+			log.With(
+				slog.String("invoice_id", parts[0].Id),
+				slog.String("external_id", params.ExternalRef()),
+				slog.String("parts", fmt.Sprintf("%d/%d", startIdx, totalParts)),
+			).Info("faktura already exists for order, skipping creation")
+		}
+	}
+
+	for partIdx := startIdx; partIdx < totalParts; partIdx++ {
+		chunk := chunks[partIdx]
 		partNum := partIdx + 1
 
 		// Calculate the total for this chunk from its line items.
-		var chunkTotal float64
-		for _, cl := range chunk {
-			chunkTotal += cl.Content.Price * float64(cl.Content.Count)
-		}
+		chunkTotal := contentsTotal(chunk)
 
 		description := "Numer zamówienia: " + params.OrderId
 		if totalParts > 1 {
@@ -331,6 +375,13 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 
 		resultInv, err := c.submitInvoice(ctx, log, inv, chunk)
 		if err != nil {
+			// A split order that fails part-way leaves the earlier parts registered in
+			// wFirma. Say so in the error: the order is neither uninvoiced nor complete,
+			// and a re-run resumes at this part rather than duplicating the earlier ones.
+			if len(parts) > 0 {
+				return nil, fmt.Errorf("part %d/%d (%d already registered, re-run to resume): %w",
+					partNum, totalParts, len(parts), err)
+			}
 			return nil, err
 		}
 
@@ -385,13 +436,17 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		firstPayment.Parts = parts
 	}
 
-	// Persist the first invoice ID back to checkout params.
-	if c.db != nil && firstPayment != nil {
+	// Persist the first invoice ID back to checkout params. The id is set on params even
+	// without a database so callers still learn which document the order resolved to —
+	// including when creation was skipped because it already existed.
+	if firstPayment != nil {
 		if invType == invoiceProforma {
 			params.ProformaId = firstPayment.Id
 		} else {
 			params.InvoiceId = firstPayment.Id
 		}
+	}
+	if c.db != nil && firstPayment != nil {
 		if err := c.db.UpdateCheckoutParams(params); err != nil {
 			log.Error("update checkout params", sl.Err(err))
 		}
@@ -589,6 +644,17 @@ func (c *Client) submitDraftFallback(ctx context.Context, log *slog.Logger, inv 
 
 // chunkContents splits a slice of content lines into chunks of at most size elements.
 // If the total number of items is below softLimit, no split is performed.
+// contentsTotal sums the gross value of a chunk of invoice lines. Chunking is
+// deterministic for given params, so this also yields the amount of an already-registered
+// part when creation is resumed or skipped.
+func contentsTotal(contents []*ContentLine) float64 {
+	var total float64
+	for _, cl := range contents {
+		total += cl.Content.Price * float64(cl.Content.Count)
+	}
+	return total
+}
+
 func chunkContents(contents []*ContentLine, size, softLimit int) [][]*ContentLine {
 	if len(contents) < softLimit {
 		return [][]*ContentLine{contents}
@@ -840,11 +906,29 @@ func isFakturaType(t string) bool {
 // Callers must treat a non-nil error as "state unknown" and abort rather than risk a
 // duplicate, mirroring InvoiceExists.
 func (c *Client) FindInvoiceByExternalId(ctx context.Context, externalId string) (string, error) {
+	ids, err := c.findFakturaIdsByExternalId(ctx, externalId)
+	if err != nil {
+		return "", err
+	}
+	if len(ids) == 0 {
+		return "", nil
+	}
+	return ids[0], nil
+}
+
+// findFakturaIdsByExternalId returns the wFirma ids of every faktura carrying externalId
+// in id_external, ordered by id — i.e. in creation order, which for a split order is part
+// order. An empty slice means the order has no faktura yet.
+//
+// Returning all of them (rather than just the first) is what lets invoice() resume a split
+// order that failed part-way: n existing documents mean chunks 1..n are done and creation
+// picks up at n+1. Proformas share the id_external and are filtered out here.
+func (c *Client) findFakturaIdsByExternalId(ctx context.Context, externalId string) ([]string, error) {
 	if !c.enabled {
-		return "", fmt.Errorf("wFirma is disabled")
+		return nil, fmt.Errorf("wFirma is disabled")
 	}
 	if externalId == "" {
-		return "", nil
+		return nil, nil
 	}
 
 	payload := map[string]interface{}{
@@ -870,28 +954,39 @@ func (c *Client) FindInvoiceByExternalId(ctx context.Context, externalId string)
 
 	res, err := c.request(ctx, "invoices", "find", payload)
 	if err != nil {
-		return "", fmt.Errorf("find invoice by external id %s: %w", externalId, err)
+		return nil, fmt.Errorf("find invoice by external id %s: %w", externalId, err)
 	}
 
 	var resp InvoiceFindResponse
 	if err := json.Unmarshal(res, &resp); err != nil {
-		return "", fmt.Errorf("parse find response: %w", err)
+		return nil, fmt.Errorf("parse find response: %w", err)
 	}
 	if resp.Status.Code == "ERROR" {
 		msg := resp.Status.Message
 		if msg == "" {
 			msg = resp.Status.Code
 		}
-		return "", fmt.Errorf("wfirma find invoice by external id %s: %s", externalId, msg)
+		return nil, fmt.Errorf("wfirma find invoice by external id %s: %s", externalId, msg)
 	}
 
 	// The invoices map also carries a non-invoice "parameters" entry (Id == ""), skipped here.
+	var ids []string
 	for _, w := range resp.Invoices {
 		if w.Invoice.Id != "" && isFakturaType(w.Invoice.Type) {
-			return w.Invoice.Id, nil
+			ids = append(ids, w.Invoice.Id)
 		}
 	}
-	return "", nil
+	// The response is a map, so iteration order is random; sort numerically to restore
+	// creation order (wFirma ids are ascending integers).
+	sort.Slice(ids, func(i, j int) bool {
+		a, errA := strconv.ParseInt(ids[i], 10, 64)
+		b, errB := strconv.ParseInt(ids[j], 10, 64)
+		if errA != nil || errB != nil {
+			return ids[i] < ids[j]
+		}
+		return a < b
+	})
+	return ids, nil
 }
 
 // DeleteProforma removes a proforma document from wFirma via invoices/delete/{id}.

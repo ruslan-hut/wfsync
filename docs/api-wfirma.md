@@ -81,6 +81,9 @@ If the order already records an invoice ID, the service verifies that the invoic
 - Existence could not be determined (wFirma error) → the request fails with a 400
   rather than risk creating a duplicate. Retry once wFirma is reachable.
 
+Independently of the recorded reference, invoice creation itself is guarded — see
+[Duplicate prevention](#duplicate-prevention) below.
+
 #### Response
 
 Returns `CheckoutParams` object with the created invoice ID:
@@ -904,6 +907,42 @@ curl -OJ "https://api.example.com/v1/wf/list?from=2025-01-01&to=2025-01-31&forma
 | 401 | Unauthorized |
 | 403 | User lacks `WFirmaAllowInvoice` permission |
 | 500 | Wfirma service not connected |
+
+---
+
+## Duplicate prevention
+
+One order must end up with exactly one faktura, no matter which source registers it.
+A faktura can be triggered from six places — the Stripe webhook, the capture API, the
+payment reconciler, the retry queue, `GET /v1/wf/order/{id}` / `GET /v1/wf/file/invoice/{id}`,
+and the payload endpoints `POST /v1/wf/invoice` / `POST /v1/b2b/invoice` — so the guard
+lives at the single point they all pass through: invoice creation in the wFirma client.
+
+Before creating anything, the client asks wFirma for existing documents whose `id_external`
+matches the order's external reference (`ExternalRef`: the order id for OpenCart, the order
+UID for B2B). Rules:
+
+- **A faktura exists** → nothing is created; the existing document's id is returned and
+  written back to the order. This also self-heals an order whose invoice id failed to save
+  locally after a successful registration.
+- **None exists** → the invoice is created as usual.
+- **The lookup fails** → the operation aborts with an error. An unknown state is never a
+  licence to create, since a duplicate faktura cannot be deleted.
+
+Only `normal` and `normal_draft` documents count. A **proforma carries the same
+`id_external`** and is deliberately ignored — proformas are re-issued on demand and never
+block a faktura.
+
+Concurrent triggers for the same order are serialized in-process for the duration of the
+check-and-create, so two of them cannot both observe "no faktura yet". The guarantee is
+per-instance, matching the single-service deployment.
+
+**Split orders.** An order over the item limit becomes several wFirma parts sharing one
+`id_external`. Existing parts are matched positionally against the parts the order requires,
+so a split that failed part-way **resumes at the first missing part** instead of being
+treated as fully invoiced. The failure is reported with the number of parts already
+registered, and re-running the request (or letting the retry queue re-run it) completes the
+rest without duplicating the earlier ones.
 
 ---
 
