@@ -514,7 +514,7 @@ func (c *Client) submitInvoice(ctx context.Context, log *slog.Logger, inv *Invoi
 	}
 
 	if addResp.Status.Code == "ERROR" {
-		errMsg := extractInvoiceErrors(&addResp)
+		errMsg := extractInvoiceErrors(&addResp, addRes)
 
 		stockErrIdxs := extractStockErrorIndices(&addResp)
 		if len(stockErrIdxs) > 0 {
@@ -550,7 +550,7 @@ func (c *Client) submitInvoice(ctx context.Context, log *slog.Logger, inv *Invoi
 			}
 
 			if addResp.Status.Code == "ERROR" {
-				retryErrMsg := extractInvoiceErrors(&addResp)
+				retryErrMsg := extractInvoiceErrors(&addResp, addRes)
 				log.With(
 					slog.String("error", retryErrMsg),
 					slog.String("response", truncateBody(string(addRes))),
@@ -639,7 +639,7 @@ func (c *Client) submitDraftFallback(ctx context.Context, log *slog.Logger, inv 
 	}
 
 	if resp.Status.Code == "ERROR" {
-		draftErrMsg := extractInvoiceErrors(&resp)
+		draftErrMsg := extractInvoiceErrors(&resp, res)
 		log.With(
 			slog.String("ksef_error", origErr),
 			slog.String("draft_error", draftErrMsg),
@@ -718,7 +718,7 @@ func truncateBody(s string) string {
 // vat_moss_detail-level validation errors. Every node the request sends must be
 // covered here — an error on an unread node degrades to "unknown error", which is
 // indistinguishable from a response that carried no diagnosis at all.
-func extractInvoiceErrors(resp *InvoiceResponse) string {
+func extractInvoiceErrors(resp *InvoiceResponse, raw []byte) string {
 	var msgs []string
 	for _, ew := range resp.Errors {
 		msgs = append(msgs, fmt.Sprintf("%s: %s", ew.Error.Field, ew.Error.Message))
@@ -741,12 +741,18 @@ func extractInvoiceErrors(resp *InvoiceResponse) string {
 		}
 		if inv.VatMossDetails != nil {
 			for _, d := range inv.VatMossDetails.Details {
-				for _, ew := range d.Errors {
-					msgs = append(msgs, fmt.Sprintf("vat_moss_detail[%s]: %s: %s",
-						d.Type, ew.Error.Field, ew.Error.Message))
-				}
+				msgs = append(msgs, vatMossErrors(d)...)
 			}
 		}
+		if inv.VatMossDetail != nil {
+			msgs = append(msgs, vatMossErrors(*inv.VatMossDetail)...)
+		}
+	}
+	// Last resort before giving up: sweep the raw response for any error object, wherever
+	// wFirma chose to hang it. The typed nodes above are the ones we know about — this is
+	// what keeps the next unknown node from degrading to "unknown error" again.
+	if len(msgs) == 0 {
+		msgs = extractRawErrors(raw)
 	}
 	if len(msgs) == 0 && resp.Status.Message != "" {
 		return resp.Status.Message
@@ -755,6 +761,75 @@ func extractInvoiceErrors(resp *InvoiceResponse) string {
 		return "unknown error"
 	}
 	return strings.Join(msgs, "; ")
+}
+
+// vatMossErrors renders the validation errors of one OSS evidence entry.
+func vatMossErrors(d VatMossDetailResp) []string {
+	var msgs []string
+	for _, ew := range d.Errors {
+		msgs = append(msgs, fmt.Sprintf("vat_moss_detail[%s]: %s: %s",
+			d.Type, ew.Error.Field, ew.Error.Message))
+	}
+	return msgs
+}
+
+// extractRawErrors walks a raw response and reports every {"error": {...}} object it
+// contains, labelled with its JSON path. It is the untyped fallback for extractInvoiceErrors:
+// wFirma attaches validation errors to nodes that are not always the ones it was given
+// (OSS errors, for instance, come back on a `vat_moss_detail` sibling of the `vat_moss_details`
+// that was submitted), and a missing node used to render as "unknown error" — a diagnosis
+// that reads like the API said nothing when in fact it said exactly what was wrong.
+func extractRawErrors(raw []byte) []string {
+	var root interface{}
+	if err := json.Unmarshal(raw, &root); err != nil {
+		return nil
+	}
+
+	var msgs []string
+	var walk func(path string, node interface{})
+	walk = func(path string, node interface{}) {
+		switch n := node.(type) {
+		case map[string]interface{}:
+			if detail, ok := n["error"].(map[string]interface{}); ok {
+				field, _ := detail["field"].(string)
+				message, _ := detail["message"].(string)
+				if message != "" {
+					msgs = append(msgs, fmt.Sprintf("%s %s: %s", path, field, message))
+					return
+				}
+			}
+			for _, key := range sortedKeys(n) {
+				walk(joinPath(path, key), n[key])
+			}
+		case []interface{}:
+			for i, v := range n {
+				walk(fmt.Sprintf("%s[%d]", path, i), v)
+			}
+		}
+	}
+	walk("", root)
+	return msgs
+}
+
+// sortedKeys returns a map's keys in order, so a walk over a decoded JSON object
+// produces the same message order on every run.
+func sortedKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// joinPath appends a segment to a JSON path, dropping the noise every path in an
+// invoice response shares ("invoices.0.invoice.").
+func joinPath(path, key string) string {
+	if path == "" {
+		return key
+	}
+	joined := path + "." + key
+	return strings.TrimPrefix(joined, "invoices.0.invoice.")
 }
 
 // stockErrorPhrases are the wFirma error message fragments that indicate a
@@ -796,15 +871,19 @@ func isStockError(msg string) bool {
 	return false
 }
 
-// ossSaleTypeGoods is the wFirma OSS "rodzaj sprzedaży" code for intra-EU
-// distance selling of goods (WSTO — wewnątrzwspólnotowa sprzedaż towarów na
-// odległość), which is what we ship.
+// ossSaleTypeGoods is the wFirma OSS "rodzaj sprzedaży" code for intra-EU distance
+// selling of goods (WSTO — wewnątrzwspólnotowa sprzedaż towarów na odległość), which
+// is what we ship.
 //
-// Do not use the legacy MOSS letter codes here: they classify *services* only
-// (SA–SE electronic, TA–TK telecom, BA/BB broadcasting). "BA" in particular is
-// radio/TV broadcasting, not goods — it was used here by mistake and made
-// wFirma show "BA - programy radiowe lub telewizyjne…" on the OSS tab.
-const ossSaleTypeGoods = "WSTO"
+// The field is a closed enum; wFirma rejects anything else with "Nieprawidłowy kod typu
+// usługi. Dopuszczalne wartości to WO, SA, SB, SC, SD, SE, TA, TB, TC, TD, TE, TF, TG,
+// TH, TJ, TK, BA, BB, INNE." Spelling it "WSTO" is what failed order 17104 for a full day.
+//
+// "WO" is the goods code. The letter pairs are the legacy MOSS taxonomy and classify
+// *services* only (SA–SE electronic, TA–TK telecom, BA/BB broadcasting) — "BA" in
+// particular is radio/TV broadcasting, and using it made wFirma label the invoice's OSS
+// tab "BA - programy radiowe lub telewizyjne…", which is wrong for shipped goods.
+const ossSaleTypeGoods = "WO"
 
 // buildVatMossDetails constructs the OSS evidence wrapper for an invoice.
 // Uses the customer's address as evidence type A and the delivery country as evidence type F.

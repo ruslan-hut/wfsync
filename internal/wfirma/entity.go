@@ -28,23 +28,23 @@ package wfirma
 
 // Invoice represents a wFirma invoice payload for the invoices/add API action.
 type Invoice struct {
-	Id             string                  `json:"id,omitempty" bson:"id"`
-	Number         string                  `json:"fullnumber,omitempty" bson:"number"`
-	Contractor     *Contractor             `json:"contractor" bson:"contractor"`
-	Type           string                  `json:"type" bson:"type"`                   // "normal" or "proforma"
-	PriceType      string                  `json:"price_type" bson:"price_type"`       // "brutto" (gross) or "netto" (net)
-	PaymentMethod  string                  `json:"paymentmethod" bson:"paymentmethod"` // e.g. "transfer", "cash", "payment_card"
-	PaymentDate    string                  `json:"paymentdate" bson:"paymentdate"`     // payment due date, format "YYYY-MM-DD"
-	DisposalDate   string                  `json:"disposaldate" bson:"disposaldate"`   // date of sale/service, format "YYYY-MM-DD"
-	Total          float64                 `json:"total" bson:"total"`                 // informational; API recomputes from contents
-	IdExternal     string                  `json:"id_external" bson:"id_external"`
-	Description    string                  `json:"description" bson:"description"`
-	Date           string                  `json:"date" bson:"date"`                                     // invoice issue date, format "YYYY-MM-DD"
-	Currency       string                  `json:"currency" bson:"currency"`                             // uppercase ISO 4217: "PLN", "EUR"
-	Contents       []*ContentLine          `json:"invoicecontents" bson:"invoicecontents"`
-	VatMossDetails *VatMossDetailWrapper   `json:"vat_moss_details,omitempty" bson:"vat_moss_details,omitempty"`
-	CompanyAccount *CompanyAccountRef      `json:"company_account,omitempty" bson:"company_account,omitempty"`
-	Errors         ErrorsMap               `json:"errors,omitempty" bson:"errors,omitempty"`
+	Id             string                `json:"id,omitempty" bson:"id"`
+	Number         string                `json:"fullnumber,omitempty" bson:"number"`
+	Contractor     *Contractor           `json:"contractor" bson:"contractor"`
+	Type           string                `json:"type" bson:"type"`                   // "normal" or "proforma"
+	PriceType      string                `json:"price_type" bson:"price_type"`       // "brutto" (gross) or "netto" (net)
+	PaymentMethod  string                `json:"paymentmethod" bson:"paymentmethod"` // e.g. "transfer", "cash", "payment_card"
+	PaymentDate    string                `json:"paymentdate" bson:"paymentdate"`     // payment due date, format "YYYY-MM-DD"
+	DisposalDate   string                `json:"disposaldate" bson:"disposaldate"`   // date of sale/service, format "YYYY-MM-DD"
+	Total          float64               `json:"total" bson:"total"`                 // informational; API recomputes from contents
+	IdExternal     string                `json:"id_external" bson:"id_external"`
+	Description    string                `json:"description" bson:"description"`
+	Date           string                `json:"date" bson:"date"`         // invoice issue date, format "YYYY-MM-DD"
+	Currency       string                `json:"currency" bson:"currency"` // uppercase ISO 4217: "PLN", "EUR"
+	Contents       []*ContentLine        `json:"invoicecontents" bson:"invoicecontents"`
+	VatMossDetails *VatMossDetailWrapper `json:"vat_moss_details,omitempty" bson:"vat_moss_details,omitempty"`
+	CompanyAccount *CompanyAccountRef    `json:"company_account,omitempty" bson:"company_account,omitempty"`
+	Errors         ErrorsMap             `json:"errors,omitempty" bson:"errors,omitempty"`
 }
 
 // CompanyAccountRef references a wFirma company (bank) account by its internal ID.
@@ -63,7 +63,7 @@ type VatMossDetailWrapper struct {
 // VatMossDetail represents OSS evidence attached to an invoice.
 // Required when using foreign vat_code IDs — the API validates all fields are non-empty.
 type VatMossDetail struct {
-	Type                 string `json:"type" bson:"type"`                                   // sale type: "WSTO" (distance selling of goods), "TBE"/legacy MOSS letter codes for services
+	Type                 string `json:"type" bson:"type"`                                   // sale type, closed enum: "WO" (distance selling of goods), SA-SE/TA-TK/BA/BB (legacy MOSS service codes), "INNE"
 	Evidence1Type        string `json:"evidence1_type" bson:"evidence1_type"`               // "A" (address), "B" (IP), "C" (bank), "D" (SIM), "E" (landline), "F" (other)
 	Evidence1Description string `json:"evidence1_description" bson:"evidence1_description"` // e.g. customer's address
 	Evidence2Type        string `json:"evidence2_type" bson:"evidence2_type"`               // same codes as above
@@ -106,4 +106,3 @@ type GoodRef struct {
 type ContentLine struct {
 	Content *Content `json:"invoicecontent" bson:"invoicecontent"`
 }
-

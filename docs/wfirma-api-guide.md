@@ -401,7 +401,7 @@ This is a **one-to-one relation** (`"pelny, pojedynczy"` in the API docs), not o
 ```json
 "vat_moss_details": {
   "vat_moss_detail": {
-    "type": "WSTO",
+    "type": "WO",
     "evidence1_type": "A",
     "evidence1_description": "Customer Street, 12345, City, DE",
     "evidence2_type": "F",
@@ -412,17 +412,23 @@ This is a **one-to-one relation** (`"pelny, pojedynczy"` in the API docs), not o
 
 #### Type codes
 
+Closed enum. Anything outside it is rejected with:
+
+> `Nieprawidłowy kod typu usługi. Dopuszczalne wartości to WO, SA, SB, SC, SD, SE, TA, TB, TC, TD, TE, TF, TG, TH, TJ, TK, BA, BB, INNE.`
+
 | Code | Description |
 |---|---|
-| `WSTO` | Intra-EU distance selling of goods (wewnątrzwspólnotowa sprzedaż towarów na odległość) |
-| `TBE` | Telecom / broadcasting / electronic services |
+| `WO` | Intra-EU distance selling of goods (WSTO — wewnątrzwspólnotowa sprzedaż towarów na odległość) |
 | `SA`–`SE` | Legacy MOSS codes for electronic services |
 | `TA`–`TK` | Legacy MOSS codes for telecommunication services |
 | `BA`, `BB` | Legacy MOSS codes for broadcasting services (`BA` = radio/TV programmes transmitted over a radio/TV network) |
+| `INNE` | Other |
 
-For e-commerce goods, use `"WSTO"`. The letter codes come from the pre-2021 MOSS
+For e-commerce goods, use `"WO"`. The letter codes come from the pre-2021 MOSS
 taxonomy and cover **services only** — using `BA` for goods makes wFirma label the
 invoice's OSS tab "BA - programy radiowe lub telewizyjne…", which is wrong for shipped goods.
+Do not spell the code `"WSTO"`: it is the name of the transaction, not an accepted value,
+and it fails validation.
 
 #### Evidence type codes
 
@@ -453,7 +459,7 @@ Two pieces of evidence are required to prove the buyer's location:
         "contractor": { "id": 56789 },
         "vat_moss_details": {
           "vat_moss_detail": {
-            "type": "WSTO",
+            "type": "WO",
             "evidence1_type": "A",
             "evidence1_description": "Kungsgatan 5, 11143, Stockholm, SE",
             "evidence2_type": "F",

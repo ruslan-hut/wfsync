@@ -270,7 +270,11 @@ type InvoiceData struct {
 	Contractor      *ContractorErrors                    `json:"contractor,omitempty" bson:"contractor,omitempty"`
 	InvoiceContents map[string]InvoiceContentRespWrapper `json:"invoicecontents,omitempty"`
 	VatMossDetails  *VatMossDetailsResp                  `json:"vat_moss_details,omitempty"`
-	Errors          ErrorsMap                            `json:"errors,omitempty" bson:"errors,omitempty"`
+	// VatMossDetail is where wFirma actually reports OSS validation errors: a singular
+	// sibling of vat_moss_details, not a child of it. The echoed vat_moss_details node
+	// carries the submitted values and no errors at all.
+	VatMossDetail *VatMossDetailResp `json:"vat_moss_detail,omitempty"`
+	Errors        ErrorsMap          `json:"errors,omitempty" bson:"errors,omitempty"`
 }
 
 // VatMossDetailsResp captures the OSS evidence node echoed back in an invoice response.

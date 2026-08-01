@@ -154,6 +154,25 @@ func TestExtractInvoiceErrorsNodes(t *testing.T) {
 			want: `vat_moss_detail[WSTO]: type: Invalid value.`,
 		},
 		{
+			// The shape wFirma actually returned for order 17104: the errors hang off a
+			// vat_moss_detail sibling, while the vat_moss_details node it was given is
+			// echoed back clean.
+			name: "vat_moss_detail error as a sibling of vat_moss_details",
+			body: `{"invoices":{"0":{"invoice":{
+				"vat_moss_details":{"vat_moss_detail":{"type":"WSTO","evidence1_type":"A"}},
+				"vat_moss_detail":{"errors":{"0":{"error":{"field":"type","message":"Nieprawidłowy kod typu usługi."}}}}}}},
+				"status":{"code":"ERROR"}}`,
+			want: `vat_moss_detail[]: type: Nieprawidłowy kod typu usługi.`,
+		},
+		{
+			// Nothing typed matches, so the raw sweep has to find it. This is the guard
+			// against the next unknown node silently reading as "unknown error".
+			name: "error on an unknown node found by the raw sweep",
+			body: `{"invoices":{"0":{"invoice":{"some_future_node":{"errors":{"0":{"error":{
+				"field":"code","message":"Invalid value."}}}}}}},"status":{"code":"ERROR"}}`,
+			want: `some_future_node.errors.0 code: Invalid value.`,
+		},
+		{
 			name: "request-level error outside the invoices node",
 			body: `{"errors":{"0":{"error":{"field":"invoice","message":"Rejected."}}},"status":{"code":"ERROR"}}`,
 			want: `invoice: Rejected.`,
@@ -179,10 +198,11 @@ func TestExtractInvoiceErrorsNodes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var resp InvoiceResponse
-			if err := json.Unmarshal([]byte(tc.body), &resp); err != nil {
+			body := []byte(tc.body)
+			if err := json.Unmarshal(body, &resp); err != nil {
 				t.Fatalf("unmarshal: %v", err)
 			}
-			if got := extractInvoiceErrors(&resp); got != tc.want {
+			if got := extractInvoiceErrors(&resp, body); got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
