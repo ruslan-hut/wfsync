@@ -136,6 +136,9 @@ func main() {
 		retryQueue.SetInvoiceService(wfirmaClient)
 		retryQueue.SetOpencart(oc)
 		handler.SetRetryQueue(retryQueue)
+		if tgBot != nil {
+			tgBot.SetRetryQueue(retryQueue)
+		}
 		retryQueue.Start()
 		log.Info("retry queue started",
 			slog.Int("interval_min", conf.RetryQueue.IntervalMin),

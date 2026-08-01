@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 	"wfsync/entity"
 	"wfsync/lib/sl"
@@ -17,6 +18,7 @@ import (
 type RetryDatabase interface {
 	SaveRetryJob(job *entity.RetryJob) error
 	GetPendingRetryJobs() ([]*entity.RetryJob, error)
+	GetRetryJobsByOrderId(orderId string) ([]*entity.RetryJob, error)
 	UpdateRetryJob(job *entity.RetryJob) error
 	GetRetryJobByEventId(eventId string) (*entity.RetryJob, error)
 	GetCheckoutParamsForEvent(eventId string) (*entity.CheckoutParams, error)
@@ -35,6 +37,10 @@ type RetryQueue struct {
 	maxOrderAge time.Duration
 	done        chan struct{}
 	stopped     chan struct{}
+	// processing serializes the polling loop against operator-triggered retries, so the
+	// same job cannot be attempted twice at once. The wFirma layer would catch the
+	// duplicate anyway, but only after the work — and the log — has been done twice.
+	processing sync.Mutex
 }
 
 // NewRetryQueue creates a retry queue. Call Start() to begin background processing.
@@ -158,20 +164,92 @@ func (rq *RetryQueue) processJobs() {
 		return
 	}
 
+	rq.processing.Lock()
+	defer rq.processing.Unlock()
+
 	rq.log.Info("processing retry jobs", slog.Int("count", len(jobs)))
 	for _, job := range jobs {
-		rq.processOneJob(job)
+		rq.processOneJob(job, false)
 	}
+}
+
+// RetryNow runs an order's retry job immediately, ignoring the backoff schedule, and
+// returns the job in its post-attempt state so the caller can report the outcome.
+//
+// It is the operator escape hatch behind the Telegram /retry command, so it deliberately
+// overrides the automation's two give-up rules: a job that exhausted MaxAttempts is granted
+// one more, and the max-order-age guard is skipped. Both exist to stop the queue grinding on
+// hopeless jobs unattended — neither should block a human who has just fixed the cause.
+//
+// A job that already completed is returned untouched: re-running it would only re-confirm
+// the invoice exists, and returning it lets the caller say so.
+func (rq *RetryQueue) RetryNow(orderId string) (*entity.RetryJob, error) {
+	if rq.db == nil {
+		return nil, fmt.Errorf("no database configured")
+	}
+	if orderId == "" {
+		return nil, fmt.Errorf("no order id")
+	}
+
+	jobs, err := rq.db.GetRetryJobsByOrderId(orderId)
+	if err != nil {
+		return nil, fmt.Errorf("look up retry jobs: %w", err)
+	}
+	job := pickRetryJob(jobs)
+	if job == nil {
+		return nil, fmt.Errorf("no retry job for order %s", orderId)
+	}
+	if job.Status == entity.RetryJobCompleted {
+		return job, nil
+	}
+
+	rq.processing.Lock()
+	defer rq.processing.Unlock()
+
+	job.Status = entity.RetryJobPending
+	if job.Attempts >= job.MaxAttempts {
+		job.MaxAttempts = job.Attempts + 1
+	}
+
+	rq.log.With(
+		slog.String("event_id", job.EventId),
+		slog.String("order_id", job.OrderId),
+		slog.Int("attempts", job.Attempts),
+	).Info("manual retry requested")
+
+	rq.processOneJob(job, true)
+	return job, nil
+}
+
+// pickRetryJob selects the job to act on for an order. An order normally has exactly one
+// (jobs are keyed by Stripe event id), but a re-paid or re-captured order can accumulate
+// several: prefer a completed one — it means the invoice exists and nothing should be
+// retried — then the most recent unfinished one (the slice is newest-first).
+func pickRetryJob(jobs []*entity.RetryJob) *entity.RetryJob {
+	var candidate *entity.RetryJob
+	for _, job := range jobs {
+		if job.Status == entity.RetryJobCompleted {
+			return job
+		}
+		if candidate == nil {
+			candidate = job
+		}
+	}
+	return candidate
 }
 
 // processOneJob attempts to register an invoice for a single retry job.
 // On success, it saves the result to OpenCart and marks the job completed.
 // On failure, it applies exponential backoff or marks the job as failed.
-func (rq *RetryQueue) processOneJob(job *entity.RetryJob) {
+//
+// manual marks an operator-triggered attempt (see RetryNow) and exempts the job from the
+// max-order-age guard. Callers must hold rq.processing.
+func (rq *RetryQueue) processOneJob(job *entity.RetryJob, manual bool) {
 	log := rq.log.With(
 		slog.String("event_id", job.EventId),
 		slog.String("order_id", job.OrderId),
 		slog.Int("attempt", job.Attempts+1),
+		slog.Bool("manual", manual),
 	)
 
 	// Load the original checkout params from the database
@@ -191,7 +269,7 @@ func (rq *RetryQueue) processOneJob(job *entity.RetryJob) {
 	// be young (e.g. re-enqueued by a manual re-run or the reconciler), so age is measured
 	// from the order/payment date in the stored params, falling back to the job creation
 	// time when that is unset.
-	if rq.maxOrderAge > 0 {
+	if rq.maxOrderAge > 0 && !manual {
 		orderDate := params.Created
 		if orderDate.IsZero() {
 			orderDate = job.CreatedAt

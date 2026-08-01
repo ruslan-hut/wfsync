@@ -61,6 +61,12 @@ type Database interface {
 	GetAllPendingRetryJobs() ([]*entity.RetryJob, error)
 }
 
+// RetryRunner triggers an immediate retry of an order's invoice registration,
+// bypassing the queue's backoff schedule. Implemented by core.RetryQueue.
+type RetryRunner interface {
+	RetryNow(orderId string) (*entity.RetryJob, error)
+}
+
 // TgBot is the central Telegram bot instance.
 // It caches all users in memory (refreshed on every state change) and routes
 // notifications through the level → topic → tier pipeline.
@@ -68,13 +74,32 @@ type TgBot struct {
 	log         *slog.Logger
 	api         *tgbotapi.Bot
 	db          Database
-	mu          sync.RWMutex           // guards users and adminIds
+	mu          sync.RWMutex           // guards users, adminIds and retryQueue
 	users       map[int64]*entity.User // telegram_id → User; includes all roles
 	minLogLevel slog.Level
 	updater     *ext.Updater
 	digest      *DigestBuffer
 	adminIds    []int64 // cached admin telegram IDs for quick notification
 	config      BotConfig
+	// retryQueue is wired after the bot is already polling (the queue is built later in
+	// startup), so it is guarded by mu like the rest of the mutable state, and may
+	// legitimately be nil — both while starting up and when the queue is disabled.
+	retryQueue RetryRunner
+}
+
+// SetRetryQueue wires the retry runner behind the /retry command. Safe to call while
+// the bot is running; leaving it unset simply disables the command.
+func (t *TgBot) SetRetryQueue(r RetryRunner) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.retryQueue = r
+}
+
+// retryRunner returns the configured runner, or nil when none is wired.
+func (t *TgBot) retryRunner() RetryRunner {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.retryQueue
 }
 
 func NewTgBot(apiKey string, db Database, log *slog.Logger, cfg BotConfig) (*TgBot, error) {
@@ -138,6 +163,7 @@ func (t *TgBot) Start() error {
 	dispatcher.AddHandler(handlers.NewCommand("admin", t.adminCmd))
 	dispatcher.AddHandler(handlers.NewCommand("invite", t.invite))
 	dispatcher.AddHandler(handlers.NewCommand("retries", t.retries))
+	dispatcher.AddHandler(handlers.NewCommand("retry", t.retry))
 
 	// Callback query handlers
 	dispatcher.AddHandler(handlers.NewCallback(callbackquery.Prefix(cbTopicToggle), t.onTopicCallback))

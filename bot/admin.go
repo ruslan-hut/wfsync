@@ -321,6 +321,59 @@ func (t *TgBot) retries(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	return nil
 }
 
+// retry runs an order's queued invoice registration immediately instead of waiting for
+// its next scheduled attempt, and reports the outcome. Usage: /retry <order_id>.
+//
+// The attempt runs inline, so the command blocks for as long as the wFirma call takes —
+// acceptable for a hand-typed command, and it is what lets the reply carry the real result
+// rather than "queued". Admin only: it issues a legal document.
+func (t *TgBot) retry(_ *tgbotapi.Bot, ctx *ext.Context) error {
+	chatId := ctx.EffectiveUser.Id
+	if !t.requireAdmin(chatId) {
+		t.plainResponse(chatId, "Admin access required\\.")
+		return nil
+	}
+
+	runner := t.retryRunner()
+	if runner == nil {
+		t.plainResponse(chatId, "Retry queue is not available\\.")
+		return nil
+	}
+
+	args := strings.Fields(ctx.EffectiveMessage.Text)
+	if len(args) < 2 {
+		t.plainResponse(chatId, "Usage: `/retry <order_id>`\nSee `/retries` for pending jobs\\.")
+		return nil
+	}
+	orderId := args[1]
+
+	job, err := runner.RetryNow(orderId)
+	if err != nil {
+		t.plainResponse(chatId, fmt.Sprintf("Retry failed for order `%s`:\n```\n%s\n```",
+			Sanitize(orderId), escapeCodeBlock(err.Error())))
+		return nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("*Retry* `%s`\n", Sanitize(job.OrderId)))
+	sb.WriteString(fmt.Sprintf("Status: `%s`\n", Sanitize(string(job.Status))))
+	sb.WriteString(fmt.Sprintf("Attempts: %d/%d\n", job.Attempts, job.MaxAttempts))
+	switch job.Status {
+	case entity.RetryJobCompleted:
+		sb.WriteString("Invoice registered\\.")
+	case entity.RetryJobPending:
+		sb.WriteString(fmt.Sprintf("Next retry: %s\n", Sanitize(job.NextRetryAt.Format(retryJobTimeFormat))))
+	}
+	if job.LastError != "" {
+		sb.WriteString("```\n")
+		sb.WriteString(escapeCodeBlock(job.LastError))
+		sb.WriteString("\n```")
+	}
+
+	t.plainResponse(chatId, sb.String())
+	return nil
+}
+
 // escapeCodeBlock escapes the characters Telegram MarkdownV2 requires inside a
 // pre/code entity (backslash and backtick), so arbitrary error text — which may
 // itself contain backticks — cannot break out of the fenced block.

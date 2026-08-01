@@ -403,6 +403,7 @@ func (t *TgBot) help(_ *tgbotapi.Bot, ctx *ext.Context) error {
 		sb.WriteString("`/admin <id|@user>` \\- Promote to admin\n")
 		sb.WriteString("`/invite` \\- Generate invite code\n")
 		sb.WriteString("`/retries` \\- List pending invoice retry jobs\n")
+		sb.WriteString("`/retry <order_id>` \\- Retry an order's invoice now\n")
 	}
 
 	t.plainResponse(chatId, sb.String())

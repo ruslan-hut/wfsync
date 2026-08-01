@@ -37,6 +37,7 @@ var commandsAdmin = []tgbotapi.BotCommand{
 	{Command: "admin", Description: "Promote user to admin"},
 	{Command: "invite", Description: "Generate invite code"},
 	{Command: "retries", Description: "List pending invoice retry jobs"},
+	{Command: "retry", Description: "Retry an order's invoice now"},
 	{Command: "help", Description: "Show available commands"},
 }
 

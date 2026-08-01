@@ -926,6 +926,37 @@ func (m *MongoDB) GetAllPendingRetryJobs() ([]*entity.RetryJob, error) {
 	return jobs, nil
 }
 
+// GetRetryJobsByOrderId returns every retry job recorded for an order, newest first,
+// regardless of status. Status is deliberately not filtered: an operator triggering a
+// manual retry is usually looking at a job that already exhausted its attempts and is
+// therefore no longer pending.
+func (m *MongoDB) GetRetryJobsByOrderId(orderId string) ([]*entity.RetryJob, error) {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionRetryJobs)
+	filter := bson.D{{"order_id", orderId}}
+	opts := options.Find().SetSort(bson.D{{"created_at", -1}})
+	cursor, err := collection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer func(cursor *mongo.Cursor, ctx context.Context) {
+		_ = cursor.Close(ctx)
+	}(cursor, ctx)
+
+	var jobs []*entity.RetryJob
+	if err = cursor.All(ctx, &jobs); err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
 // UpdateRetryJob replaces a retry job document by _id.
 func (m *MongoDB) UpdateRetryJob(job *entity.RetryJob) error {
 	ctx, cancel := m.opCtx()
