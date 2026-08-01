@@ -38,17 +38,29 @@ type Contractor struct {
 // or a JSON boolean `false` (when no errors). This type handles both.
 type ErrorsMap map[string]ErrorWrapper
 
-// UnmarshalJSON accepts a JSON object as a normal map, or `false`/`null` as nil.
+// UnmarshalJSON accepts a JSON object as a normal map, `false`/`null` as nil, or a
+// JSON array (keyed by position). An unparsable shape yields nil rather than an error:
+// losing one error list must not fail the whole response and hide everything else.
 func (em *ErrorsMap) UnmarshalJSON(data []byte) error {
 	if string(data) == "false" || string(data) == "null" {
 		*em = nil
 		return nil
 	}
 	var m map[string]ErrorWrapper
-	if err := json.Unmarshal(data, &m); err != nil {
-		return err
+	if err := json.Unmarshal(data, &m); err == nil {
+		*em = m
+		return nil
 	}
-	*em = m
+	var a []ErrorWrapper
+	if err := json.Unmarshal(data, &a); err == nil {
+		m = make(map[string]ErrorWrapper, len(a))
+		for i, ew := range a {
+			m[strconv.Itoa(i)] = ew
+		}
+		*em = m
+		return nil
+	}
+	*em = nil
 	return nil
 }
 
@@ -75,8 +87,13 @@ type Status struct {
 }
 
 // InvoiceResponse is the top-level response for invoices/add action.
+//
+// Errors is the request-level error list, returned outside the invoices node when the
+// payload is rejected as a whole rather than per field. Without it such a rejection
+// reads as "unknown error".
 type InvoiceResponse struct {
 	Invoices InvoicesWrapper `json:"invoices"`
+	Errors   ErrorsMap       `json:"errors,omitempty"`
 	Status   Status          `json:"status"`
 }
 
@@ -252,7 +269,53 @@ type InvoiceData struct {
 	Currency        string                               `json:"currency" bson:"currency"`
 	Contractor      *ContractorErrors                    `json:"contractor,omitempty" bson:"contractor,omitempty"`
 	InvoiceContents map[string]InvoiceContentRespWrapper `json:"invoicecontents,omitempty"`
+	VatMossDetails  *VatMossDetailsResp                  `json:"vat_moss_details,omitempty"`
 	Errors          ErrorsMap                            `json:"errors,omitempty" bson:"errors,omitempty"`
+}
+
+// VatMossDetailsResp captures the OSS evidence node echoed back in an invoice response.
+// It exists to surface validation errors on that node: it is sent nested inside the
+// invoice, so its errors come back nested too and are invisible to a parser that only
+// reads the invoice, contractor and content levels.
+type VatMossDetailsResp struct {
+	Details []VatMossDetailResp
+}
+
+// VatMossDetailResp is a single OSS evidence entry with its validation errors.
+type VatMossDetailResp struct {
+	Type   string    `json:"type"`
+	Errors ErrorsMap `json:"errors,omitempty"`
+}
+
+// UnmarshalJSON accepts both shapes wFirma uses for this node: the singular relation
+// we send ({"vat_moss_detail": {...}}) and the indexed form it may echo back
+// ({"0": {"vat_moss_detail": {...}}}). Unrecognized shapes yield no details rather
+// than an error, so a response still parses and its other errors stay readable.
+func (v *VatMossDetailsResp) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	appendDetail := func(r json.RawMessage) {
+		var d VatMossDetailResp
+		if err := json.Unmarshal(r, &d); err == nil {
+			v.Details = append(v.Details, d)
+		}
+	}
+	if d, ok := raw["vat_moss_detail"]; ok {
+		appendDetail(d)
+		return nil
+	}
+	for _, entry := range raw {
+		var wrapper map[string]json.RawMessage
+		if err := json.Unmarshal(entry, &wrapper); err != nil {
+			continue
+		}
+		if d, ok := wrapper["vat_moss_detail"]; ok {
+			appendDetail(d)
+		}
+	}
+	return nil
 }
 
 // InvoiceContentRespWrapper wraps a single invoice content item in the API response.

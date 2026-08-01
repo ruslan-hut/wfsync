@@ -503,8 +503,10 @@ func (c *Client) submitInvoice(ctx context.Context, log *slog.Logger, inv *Invoi
 	}
 
 	// On retry-queue attempts, keep failures local: the original error was already
-	// reported to Telegram when the job was enqueued, so per-attempt alerts and
-	// full-response dumps are just noise. tgAttr toggles the dispatch accordingly.
+	// reported to Telegram when the job was enqueued, so per-attempt alerts are just
+	// noise. tgAttr toggles the dispatch accordingly. The (truncated) response body is
+	// logged on every attempt, retry included: a failure that only ever recurs on retries
+	// is otherwise undiagnosable, which is exactly when the body is needed most.
 	isRetry := entity.IsRetry(ctx)
 	tgAttr := slog.String("tg_topic", entity.TopicError)
 	if isRetry {
@@ -549,11 +551,11 @@ func (c *Client) submitInvoice(ctx context.Context, log *slog.Logger, inv *Invoi
 
 			if addResp.Status.Code == "ERROR" {
 				retryErrMsg := extractInvoiceErrors(&addResp)
-				rl := log.With(slog.String("error", retryErrMsg), tgAttr)
-				if !isRetry {
-					rl = rl.With(slog.String("response", truncateBody(string(addRes))))
-				}
-				rl.Warn("retry invoice creation error")
+				log.With(
+					slog.String("error", retryErrMsg),
+					slog.String("response", truncateBody(string(addRes))),
+					tgAttr,
+				).Warn("retry invoice creation error")
 				return nil, fmt.Errorf("wFirma error (retry): %s", retryErrMsg)
 			}
 		} else if c.draftFallback && isKSefAuthError(errMsg) && inv.Type == string(invoiceNormal) {
@@ -567,11 +569,11 @@ func (c *Client) submitInvoice(ctx context.Context, log *slog.Logger, inv *Invoi
 			}
 			return draftInv, nil
 		} else {
-			el := log.With(slog.String("error", errMsg), tgAttr)
-			if !isRetry {
-				el = el.With(slog.String("response", truncateBody(string(addRes))))
-			}
-			el.Warn("invoice creation error")
+			log.With(
+				slog.String("error", errMsg),
+				slog.String("response", truncateBody(string(addRes))),
+				tgAttr,
+			).Warn("invoice creation error")
 			return nil, fmt.Errorf("wFirma error: %s", errMsg)
 		}
 	}
@@ -694,19 +696,33 @@ func chunkContents(contents []*ContentLine, size, softLimit int) [][]*ContentLin
 	return chunks
 }
 
-// truncateBody shortens a response body for logging. If the body exceeds 500 chars,
-// only the first 100 and last 100 chars are kept.
+// truncateBody shortens a response body for logging, keeping the head and tail.
+//
+// The budget is generous because a wFirma error response echoes the whole submitted
+// invoice and buries the field errors among the line items: a tight window drops the
+// only part worth logging.
+const (
+	truncateBodyLimit = 4000
+	truncateBodyEdge  = 1500
+)
+
 func truncateBody(s string) string {
-	if len(s) <= 500 {
+	if len(s) <= truncateBodyLimit {
 		return s
 	}
-	return s[:100] + " ... [truncated] ... " + s[len(s)-100:]
+	return s[:truncateBodyEdge] + " ... [truncated] ... " + s[len(s)-truncateBodyEdge:]
 }
 
-// extractInvoiceErrors collects all error messages from the invoice response,
-// including contractor-level and invoicecontent-level validation errors.
+// extractInvoiceErrors collects all error messages from the invoice response:
+// request-level, invoice-level, contractor-level, invoicecontent-level and
+// vat_moss_detail-level validation errors. Every node the request sends must be
+// covered here — an error on an unread node degrades to "unknown error", which is
+// indistinguishable from a response that carried no diagnosis at all.
 func extractInvoiceErrors(resp *InvoiceResponse) string {
 	var msgs []string
+	for _, ew := range resp.Errors {
+		msgs = append(msgs, fmt.Sprintf("%s: %s", ew.Error.Field, ew.Error.Message))
+	}
 	for _, wrapper := range resp.Invoices {
 		inv := wrapper.Invoice
 		for _, ew := range inv.Errors {
@@ -721,6 +737,14 @@ func extractInvoiceErrors(resp *InvoiceResponse) string {
 			for _, ew := range cw.InvoiceContent.Errors {
 				msgs = append(msgs, fmt.Sprintf("invoicecontent[%s] %q: %s: %s",
 					idx, cw.InvoiceContent.Name, ew.Error.Field, ew.Error.Message))
+			}
+		}
+		if inv.VatMossDetails != nil {
+			for _, d := range inv.VatMossDetails.Details {
+				for _, ew := range d.Errors {
+					msgs = append(msgs, fmt.Sprintf("vat_moss_detail[%s]: %s: %s",
+						d.Type, ew.Error.Field, ew.Error.Message))
+				}
 			}
 		}
 	}
@@ -806,7 +830,7 @@ func buildVatMossDetails(client *entity.ClientDetails, countryCode string) *VatM
 	return &VatMossDetailWrapper{
 		Detail: &VatMossDetail{
 			Type:                 ossSaleTypeGoods,
-			Evidence1Type:        "A",  // billing/shipping address
+			Evidence1Type:        "A", // billing/shipping address
 			Evidence1Description: evidence1Desc,
 			Evidence2Type:        "F", // other commercially relevant info
 			Evidence2Description: "Order delivery address: " + countryCode,

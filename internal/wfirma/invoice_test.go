@@ -129,3 +129,62 @@ func TestRawJSONString(t *testing.T) {
 		}
 	}
 }
+
+// TestExtractInvoiceErrorsNodes covers the response nodes that carry validation errors.
+// A node the extractor does not read degrades to "unknown error", which is how an OSS
+// rejection on vat_moss_details became undiagnosable — so each node is pinned here.
+func TestExtractInvoiceErrorsNodes(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "vat_moss_detail error (singular relation)",
+			body: `{"invoices":{"0":{"invoice":{"vat_moss_details":{"vat_moss_detail":{"type":"WSTO",
+				"errors":{"0":{"error":{"field":"type","message":"Invalid value."}}}}}}}},
+				"status":{"code":"ERROR"}}`,
+			want: `vat_moss_detail[WSTO]: type: Invalid value.`,
+		},
+		{
+			name: "vat_moss_detail error (indexed form)",
+			body: `{"invoices":{"0":{"invoice":{"vat_moss_details":{"0":{"vat_moss_detail":{"type":"WSTO",
+				"errors":{"0":{"error":{"field":"type","message":"Invalid value."}}}}}}}}},
+				"status":{"code":"ERROR"}}`,
+			want: `vat_moss_detail[WSTO]: type: Invalid value.`,
+		},
+		{
+			name: "request-level error outside the invoices node",
+			body: `{"errors":{"0":{"error":{"field":"invoice","message":"Rejected."}}},"status":{"code":"ERROR"}}`,
+			want: `invoice: Rejected.`,
+		},
+		{
+			name: "errors as a json array",
+			body: `{"invoices":{"0":{"invoice":{"errors":[{"error":{"field":"date","message":"Required."}}]}}},
+				"status":{"code":"ERROR"}}`,
+			want: `date: Required.`,
+		},
+		{
+			name: "no errors anywhere falls back to status message",
+			body: `{"invoices":{"0":{"invoice":{"errors":false}}},"status":{"code":"ERROR","message":"NOT FOUND"}}`,
+			want: `NOT FOUND`,
+		},
+		{
+			name: "nothing at all",
+			body: `{"status":{"code":"ERROR"}}`,
+			want: `unknown error`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var resp InvoiceResponse
+			if err := json.Unmarshal([]byte(tc.body), &resp); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if got := extractInvoiceErrors(&resp); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
