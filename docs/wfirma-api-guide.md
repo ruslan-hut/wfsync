@@ -199,11 +199,20 @@ POST /contractors/add?inputFormat=json&outputFormat=json
 | `name` | string | Company or person name |
 | `email` | string | Email address |
 | `nip` | string | Tax identification number |
-| `tax_id_type` | string | `"none"` (no tax ID) or `"custom"` (has tax ID) |
+| `tax_id_type` | string | `"none"` (no tax ID), `"nip"` (Polish NIP in the `nip` field) or `"custom"` (foreign EU VAT-UE number, country-prefixed) |
 | `zip` | string | Postal code |
 | `city` | string | City |
 | `street` | string | Street address |
 | `country` | string | Country name |
+
+> **KSeF**: `tax_id_type` decides how wFirma identifies the buyer in the KSeF FA(2) XML.
+> `"custom"` means "not a NIP", so wFirma exports the value as an EU VAT number
+> (`KodUE` + `NrVatUE`) and takes `KodUE` from the country prefix on the number itself.
+> A bare national number stored as `"custom"` therefore produces an empty `KodUE` and
+> the invoice is rejected with *"Pole KodUE posiada niepoprawną wartość"*. `resolveTaxId`
+> (`internal/wfirma/vat.go`) picks the pair: bare digits + `"nip"` for a valid Polish NIP,
+> a country-prefixed number + `"custom"` for a foreign EU buyer, and `"none"` for anything
+> that fits neither (dropped with a Telegram alert).
 
 #### Finding contractors
 

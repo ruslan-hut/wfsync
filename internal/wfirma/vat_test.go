@@ -67,31 +67,48 @@ func TestExpectedB2BVATRate(t *testing.T) {
 	}
 }
 
-// TestNormalizeEUVatNumber is the regression for the PL-290 incident: a Czech B2B
-// buyer's bare national number must gain its "CZ" prefix so wFirma accepts the
-// 0% WDT invoice, while already-prefixed, non-EU, and domestic numbers are left
-// untouched.
-func TestNormalizeEUVatNumber(t *testing.T) {
+// TestResolveTaxId covers both incidents this helper exists for: a Czech B2B buyer's
+// bare national number must gain its "CZ" prefix so wFirma accepts the 0% WDT invoice
+// (PL-290), and a Polish buyer's number must go out as a NIP rather than as a prefixless
+// "custom" identifier, which KSeF rejects with "Pole KodUE posiada niepoprawną wartość"
+// (order 17240, whose buyer typed a nine-digit NIP).
+func TestResolveTaxId(t *testing.T) {
+	// A valid Polish NIP: checksum verified, used wherever the test needs a good one.
+	const validNIP = "1234563218"
+
 	cases := []struct {
-		name    string
-		country string
-		taxId   string
-		want    string
+		name        string
+		country     string
+		taxId       string
+		wantNip     string
+		wantType    string
+		wantDropped bool
 	}{
-		{"bare CZ number gets prefix", "CZ", "28982711", "CZ28982711"},
-		{"already prefixed left as-is", "CZ", "CZ28982711", "CZ28982711"},
-		{"whitespace trimmed then prefixed", "CZ", "  28982711 ", "CZ28982711"},
-		{"Greece uses EL prefix", "GR", "123456789", "EL123456789"},
-		{"Greek EL already present", "GR", "EL123456789", "EL123456789"},
-		{"Polish NIP untouched (not in EU map)", "PL", "1234567890", "1234567890"},
-		{"non-EU country untouched", "US", "123456789", "123456789"},
-		{"empty tax id untouched", "CZ", "", ""},
-		{"empty country untouched", "", "28982711", "28982711"},
+		{"bare CZ number gets prefix", "CZ", "28982711", "CZ28982711", taxIdTypeCustom, false},
+		{"already prefixed left as-is", "CZ", "CZ28982711", "CZ28982711", taxIdTypeCustom, false},
+		{"separators stripped then prefixed", "CZ", "  289-827 11 ", "CZ28982711", taxIdTypeCustom, false},
+		{"Greece uses EL prefix", "GR", "123456789", "EL123456789", taxIdTypeCustom, false},
+		{"Greek EL already present", "GR", "EL123456789", "EL123456789", taxIdTypeCustom, false},
+		{"prefix on the number wins over the address country", "DE", "CZ28982711", "CZ28982711", taxIdTypeCustom, false},
+		{"valid Polish NIP goes out as a NIP", "PL", validNIP, validNIP, taxIdTypeNip, false},
+		{"Polish NIP with separators", "PL", "123-456-32-18", validNIP, taxIdTypeNip, false},
+		{"PL-prefixed Polish NIP loses the prefix", "PL", "PL" + validNIP, validNIP, taxIdTypeNip, false},
+		{"nine-digit Polish NIP is dropped", "PL", "822855342", "", taxIdTypeNone, true},
+		{"Polish NIP failing the checksum is dropped", "PL", "1234567890", "", taxIdTypeNone, true},
+		{"non-EU country is dropped", "US", "123456789", "", taxIdTypeNone, true},
+		{"no country to derive a prefix from is dropped", "", "28982711", "", taxIdTypeNone, true},
+		{"empty tax id is not a failure", "CZ", "", "", taxIdTypeNone, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := normalizeEUVatNumber(tc.country, tc.taxId); got != tc.want {
-				t.Errorf("normalizeEUVatNumber(%q, %q) = %q, want %q", tc.country, tc.taxId, got, tc.want)
+			nip, taxIdType, reason := resolveTaxId(tc.country, tc.taxId)
+			if nip != tc.wantNip || taxIdType != tc.wantType {
+				t.Errorf("resolveTaxId(%q, %q) = (%q, %q), want (%q, %q)",
+					tc.country, tc.taxId, nip, taxIdType, tc.wantNip, tc.wantType)
+			}
+			if dropped := reason != ""; dropped != tc.wantDropped {
+				t.Errorf("resolveTaxId(%q, %q) reason = %q, want dropped=%t",
+					tc.country, tc.taxId, reason, tc.wantDropped)
 			}
 		})
 	}

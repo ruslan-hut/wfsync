@@ -22,14 +22,18 @@ type ContractorWrapper struct {
 // Contractor is used both as a request field (inside Invoice, with only ID set)
 // and as a response field (with all fields populated).
 type Contractor struct {
-	ID        string    `json:"id"`
-	City      string    `json:"city,omitempty" bson:"city,omitempty"`
-	Country   string    `json:"country,omitempty" bson:"country,omitempty"`
-	Email     string    `json:"email,omitempty" bson:"email,omitempty"`
-	Name      string    `json:"name,omitempty" bson:"name,omitempty"`
-	Street    string    `json:"street,omitempty" bson:"street,omitempty"`
-	Zip       string    `json:"zip,omitempty" bson:"zip,omitempty"`
-	Nip       string    `json:"nip,omitempty" bson:"nip,omitempty"`
+	ID      string `json:"id"`
+	City    string `json:"city,omitempty" bson:"city,omitempty"`
+	Country string `json:"country,omitempty" bson:"country,omitempty"`
+	Email   string `json:"email,omitempty" bson:"email,omitempty"`
+	Name    string `json:"name,omitempty" bson:"name,omitempty"`
+	Street  string `json:"street,omitempty" bson:"street,omitempty"`
+	Zip     string `json:"zip,omitempty" bson:"zip,omitempty"`
+	Nip     string `json:"nip,omitempty" bson:"nip,omitempty"`
+	// TaxIdType is how wFirma identifies the buyer ("none"/"nip"/"custom"). It is read
+	// back so syncContractor can repair a record typed "custom" for what is really a
+	// NIP — the type alone decides what the KSeF XML carries. See resolveTaxId.
+	TaxIdType string    `json:"tax_id_type,omitempty" bson:"tax_id_type,omitempty"`
 	ErrorsRaw ErrorsMap `json:"errors,omitempty" bson:"errors,omitempty"`
 }
 

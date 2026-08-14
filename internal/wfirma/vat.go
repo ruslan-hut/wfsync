@@ -146,32 +146,131 @@ var euVatPrefixes = map[string]string{
 	"GR": "EL",
 }
 
-// normalizeEUVatNumber ensures an EU contractor's tax ID carries the country
-// prefix that wFirma requires for 0% WDT (intra-community delivery) and EU
-// reverse-charge invoices. wFirma validates the buyer's VAT-UE number and
-// rejects a bare national number (e.g. "28982711" instead of "CZ28982711") with
-// "Nieprawidłowy prefiks kraju Unii Europejskiej".
+// wFirma contractor tax_id_type values. The type decides how wFirma identifies the
+// buyer in the KSeF XML: "nip" emits Podmiot2/DaneIdentyfikacyjne/NIP, "custom"
+// emits KodUE + NrVatUE (which is why a custom id without a resolvable EU country
+// prefix produces an empty KodUE and a KSeF XML rejection), "none" emits BrakID.
+const (
+	taxIdTypeNone   = "none"
+	taxIdTypeNip    = "nip"
+	taxIdTypeCustom = "custom"
+)
+
+// resolveTaxId turns a buyer's raw tax ID into the (nip, tax_id_type) pair to send
+// to wFirma, and a reason string when the ID had to be dropped.
 //
-// It is a no-op when the tax ID is empty, the country is not a foreign EU member
-// (euCountries excludes Poland, so domestic NIPs are left untouched), or the tax
-// ID already starts with a two-letter alphabetic prefix (assumed to be the
-// country code already).
-func normalizeEUVatNumber(countryCode, taxId string) string {
-	taxId = strings.TrimSpace(taxId)
-	if taxId == "" || !euCountries[countryCode] {
-		return taxId
+// The pair matters beyond wFirma's own validation: wFirma builds the KSeF FA(2)
+// buyer identification from it. "custom" means "not a NIP", so wFirma exports the
+// value as an EU VAT number (KodUE + NrVatUE) and derives KodUE from the country
+// prefix on the number itself. A bare national number stored as "custom" therefore
+// yields an empty KodUE and KSeF rejects the XML with "Pole KodUE posiada
+// niepoprawną wartość". Hence: a Polish NIP goes out as taxIdTypeNip with bare
+// digits, a foreign EU number as taxIdTypeCustom with its prefix guaranteed, and
+// anything that fits neither is dropped (taxIdTypeNone) rather than shipped as an
+// identifier wFirma cannot map to a country.
+//
+// countryCode is the buyer's address country (ISO alpha-2) and is used only when
+// the tax ID carries no prefix of its own.
+func resolveTaxId(countryCode, taxId string) (nip, taxIdType, reason string) {
+	// Strip separators so wFirma receives a compact number (e.g. "DE 362-155" → "DE362155").
+	taxId = strings.ToUpper(strings.NewReplacer(" ", "", "-", "", ".", "").Replace(strings.TrimSpace(taxId)))
+	if taxId == "" {
+		return "", taxIdTypeNone, ""
 	}
-	// Strip separators so wFirma receives a compact VAT-UE number (e.g. "DE 362-155" → "DE362155").
-	taxId = strings.NewReplacer(" ", "", "-", "").Replace(taxId)
-	isLetter := func(b byte) bool { return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') }
-	if len(taxId) >= 2 && isLetter(taxId[0]) && isLetter(taxId[1]) {
-		return taxId
+
+	// A prefix on the number wins over the address country: a buyer registered for
+	// VAT abroad may well have a billing address elsewhere.
+	prefix, rest := splitVatPrefix(taxId)
+	if prefix == "" {
+		rest = taxId
+		prefix = vatPrefixForCountry(strings.ToUpper(strings.TrimSpace(countryCode)))
 	}
-	prefix := countryCode
+
+	switch {
+	case prefix == "PL":
+		if !isValidPolishNIP(rest) {
+			return "", taxIdTypeNone, "not a valid Polish NIP (10 digits + checksum)"
+		}
+		return rest, taxIdTypeNip, ""
+	case prefix != "":
+		return prefix + rest, taxIdTypeCustom, ""
+	default:
+		return "", taxIdTypeNone, "no EU country prefix on the tax ID and no EU billing country to derive one from"
+	}
+}
+
+// splitVatPrefix separates a leading EU VAT country prefix from the rest of the
+// number. It returns an empty prefix when the number does not start with a known
+// one, so a national number that happens to begin with two letters is not mistaken
+// for a prefixed VAT-UE number.
+func splitVatPrefix(taxId string) (prefix, rest string) {
+	if len(taxId) < 3 {
+		return "", taxId
+	}
+	if p := taxId[:2]; euVatNumberPrefixes[p] {
+		return p, taxId[2:]
+	}
+	return "", taxId
+}
+
+// vatPrefixForCountry returns the EU VAT prefix for an ISO country code, or "" for
+// a non-EU country. Poland maps to itself even though euCountries excludes it —
+// this is about identification, not about foreign VAT rates.
+func vatPrefixForCountry(countryCode string) string {
+	if countryCode == "PL" {
+		return "PL"
+	}
+	if !euCountries[countryCode] {
+		return ""
+	}
 	if alt, ok := euVatPrefixes[countryCode]; ok {
-		prefix = alt
+		return alt
 	}
-	return prefix + taxId
+	return countryCode
+}
+
+// euVatNumberPrefixes is the set of prefixes that may legitimately open a VAT-UE
+// number: the EU country codes, Poland, "EL" for Greece and "XI" for Northern
+// Ireland. It matches the value list KSeF accepts for the KodUE field.
+var euVatNumberPrefixes = buildEUVatNumberPrefixes()
+
+func buildEUVatNumberPrefixes() map[string]bool {
+	m := map[string]bool{"PL": true, "XI": true}
+	for code := range euCountries {
+		if alt, ok := euVatPrefixes[code]; ok {
+			m[alt] = true
+			continue
+		}
+		m[code] = true
+	}
+	return m
+}
+
+// isValidPolishNIP reports whether s is a syntactically valid Polish NIP: exactly
+// ten digits whose weighted checksum matches the last one. Buyers regularly mistype
+// it (a nine-digit value is the common case) and wFirma accepts the bad number as a
+// "custom" identifier, so the check has to happen here — the rejection only surfaces
+// later, as an unhelpful KSeF XML error.
+func isValidPolishNIP(s string) bool {
+	if len(s) != 10 {
+		return false
+	}
+	weights := [9]int{6, 5, 7, 2, 3, 4, 5, 6, 7}
+	sum := 0
+	for i := 0; i < 9; i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+		sum += int(s[i]-'0') * weights[i]
+	}
+	if s[9] < '0' || s[9] > '9' {
+		return false
+	}
+	check := sum % 11
+	if check == 10 {
+		return false
+	}
+	return check == int(s[9]-'0')
 }
 
 // IsB2BCustomerGroup returns true if the given customer group ID is a B2B group.

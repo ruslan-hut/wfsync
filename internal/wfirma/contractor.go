@@ -16,8 +16,9 @@ import (
 // The function defaults name to "Kontrahent <email>", zip to "01-001", city to "Warszawa".
 //
 // Optional fields sent: email, country (ISO 3166 alpha-2), street, nip, tax_id_type.
-// tax_id_type: "none" = no tax ID provided, "custom" = tax ID present in the nip field.
-// Using "none"/"custom" (instead of "other") allows wFirma to accept custom VAT rates on invoices.
+// The nip/tax_id_type pair comes from resolveTaxId, which decides how wFirma will
+// identify the buyer in the KSeF XML; an unusable tax ID is dropped there rather
+// than shipped as an identifier wFirma cannot map to a country.
 func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDetails) (string, error) {
 	if customer == nil {
 		return "", fmt.Errorf("no customer")
@@ -31,18 +32,14 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 	if customer.City == "" {
 		customer.City = "Warszawa"
 	}
-	taxIdType := "none"
-	if customer.TaxId != "" {
-		taxIdType = "custom"
-	}
-
 	countryCode := customer.CountryCode()
 	if countryCode == "PL" {
 		customer.ZipCode = customer.NormalizeZipCode()
 	}
-	// Foreign EU buyers need the country prefix on their VAT-UE number or wFirma
-	// rejects 0% WDT / EU reverse-charge invoices (contractor.nip validation).
-	nip := normalizeEUVatNumber(countryCode, customer.TaxId)
+	nip, taxIdType, dropReason := resolveTaxId(countryCode, customer.TaxId)
+	if dropReason != "" {
+		logDroppedTaxId(c.log, customer, countryCode, dropReason)
+	}
 
 	// If not found, create a new contractor.
 	payload := map[string]interface{}{
@@ -122,25 +119,42 @@ func (c *Client) syncContractor(ctx context.Context, stored *Contractor, custome
 	if countryCode == "PL" && zip != "" {
 		zip = customer.NormalizeZipCode()
 	}
-	// Foreign EU buyers need the country prefix on their VAT-UE number or wFirma
-	// rejects 0% WDT / EU reverse-charge invoices (contractor.nip validation).
-	nip := normalizeEUVatNumber(countryCode, customer.TaxId)
+	nip, _, dropReason := resolveTaxId(countryCode, customer.TaxId)
+	if dropReason != "" {
+		logDroppedTaxId(c.log, customer, countryCode, dropReason)
+	}
+	// The stored number goes through resolveTaxId too, not just the incoming one: a
+	// contractor created before this normalization existed holds a bare or malformed
+	// value with tax_id_type "custom", and that record is exactly what makes wFirma
+	// emit an invalid KSeF KodUE. Re-resolving repairs it on the next order.
+	effectiveNip, taxIdType, storedDropReason := resolveTaxId(
+		firstNonEmpty(countryCode, stored.Country),
+		firstNonEmpty(nip, stored.Nip),
+	)
+	if storedDropReason != "" && dropReason == "" {
+		logDroppedTaxId(c.log, customer, countryCode, "stored tax ID "+storedDropReason)
+	}
 
+	// tax_id_type is compared like any other field: a contractor whose number is
+	// already correct but is still typed "custom" needs the edit too, since the type
+	// alone decides whether KSeF gets a NIP or a KodUE it cannot resolve.
 	fields := map[string]string{
-		"name":    firstNonEmpty(customer.Name, stored.Name),
-		"country": firstNonEmpty(countryCode, stored.Country),
-		"zip":     firstNonEmpty(zip, stored.Zip),
-		"city":    firstNonEmpty(customer.City, stored.City),
-		"street":  firstNonEmpty(customer.Street, stored.Street),
-		"nip":     firstNonEmpty(nip, stored.Nip),
+		"name":        firstNonEmpty(customer.Name, stored.Name),
+		"country":     firstNonEmpty(countryCode, stored.Country),
+		"zip":         firstNonEmpty(zip, stored.Zip),
+		"city":        firstNonEmpty(customer.City, stored.City),
+		"street":      firstNonEmpty(customer.Street, stored.Street),
+		"nip":         effectiveNip,
+		"tax_id_type": taxIdType,
 	}
 	current := map[string]string{
-		"name":    stored.Name,
-		"country": stored.Country,
-		"zip":     stored.Zip,
-		"city":    stored.City,
-		"street":  stored.Street,
-		"nip":     stored.Nip,
+		"name":        stored.Name,
+		"country":     stored.Country,
+		"zip":         stored.Zip,
+		"city":        stored.City,
+		"street":      stored.Street,
+		"nip":         stored.Nip,
+		"tax_id_type": stored.TaxIdType,
 	}
 
 	var changed []string
@@ -156,11 +170,6 @@ func (c *Client) syncContractor(ctx context.Context, stored *Contractor, custome
 	contractor := map[string]interface{}{"id": stored.ID}
 	for field, value := range fields {
 		contractor[field] = value
-	}
-	// tax_id_type: "none" = no tax ID, "custom" = tax ID present in the nip field.
-	contractor["tax_id_type"] = "none"
-	if fields["nip"] != "" {
-		contractor["tax_id_type"] = "custom"
 	}
 
 	payload := map[string]interface{}{
@@ -192,6 +201,22 @@ func (c *Client) syncContractor(ctx context.Context, stored *Contractor, custome
 		slog.String("email", customer.Email),
 		slog.String("fields", strings.Join(changed, ",")))
 	return nil
+}
+
+// logDroppedTaxId raises a Telegram alert when a buyer's tax ID cannot be sent to
+// wFirma. The invoice still gets issued — without the number, i.e. as a consumer
+// document — so the alert is the only trace that someone has to correct the buyer's
+// data and reissue. It carries the rejected value: the usual cause is a mistyped NIP,
+// and the digits are what makes that diagnosable.
+func logDroppedTaxId(log *slog.Logger, customer *entity.ClientDetails, countryCode, reason string) {
+	log.With(
+		slog.String("email", customer.Email),
+		slog.String("name", customer.Name),
+		slog.String("country", countryCode),
+		slog.String("tax_id", customer.TaxId),
+		slog.String("reason", reason),
+		slog.String("tg_topic", entity.TopicError),
+	).Warn("buyer tax ID dropped, invoice will be issued without it")
 }
 
 // firstNonEmpty returns the first non-empty value, ignoring surrounding whitespace.
