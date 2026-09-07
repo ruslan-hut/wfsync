@@ -331,6 +331,8 @@ Country is EU, customer is B2C?
 
 For B2B EU transactions, validate the customer's VAT number against [VIES](https://ec.europa.eu/taxation_customs/vies/). A failed validation means the transaction falls back to domestic (Polish) VAT rates. We treat VIES as non-blocking — log the result but don't fail the invoice if the service is down.
 
+Member states throttle bursts with transient `userError` codes (`MS_MAX_CONCURRENT_REQ` is the usual one), which are *not* a verdict on the number. A throttled answer is retried `vies.attempts` times (default 3) with an exponential, jittered backoff starting at `vies.retry_delay_ms` (default 1000ms); if every attempt is throttled, a previously cached verdict is used, and only failing that is the result inconclusive.
+
 A **definitive `valid` verdict also promotes the order to B2B** (`customer_group` → `-1`) even when it arrived in a B2C group, so an EU company buying through a retail group gets 0% WDT instead of a destination-rate OSS invoice. Only a confirmed `valid` promotes: an `invalid` number, or an inconclusive check because VIES was unavailable, leaves the order B2C — an unverified VAT number must never zero-rate an invoice.
 
 ## WFSync API VAT Defaults

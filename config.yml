@@ -49,3 +49,5 @@ telegram:
 vies:
   enabled: false
   cache_hours: 720
+  attempts: 3
+  retry_delay_ms: 1000

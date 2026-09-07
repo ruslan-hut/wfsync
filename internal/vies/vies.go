@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -91,10 +92,13 @@ func boolToResult(valid bool) entity.VIESResult {
 
 // Service validates EU VAT numbers via the VIES API with MongoDB caching.
 type Service struct {
-	hc       *http.Client
-	log      *slog.Logger
-	db       Database
-	cacheAge time.Duration
+	hc         *http.Client
+	log        *slog.Logger
+	db         Database
+	cacheAge   time.Duration
+	attempts   int
+	retryDelay time.Duration
+	baseURL    string // format string with country and number placeholders; overridden in tests
 }
 
 // New creates a VIES validation service.
@@ -103,10 +107,21 @@ func New(conf *config.Config, log *slog.Logger) *Service {
 	if hours <= 0 {
 		hours = 720
 	}
+	attempts := conf.VIES.Attempts
+	if attempts <= 0 {
+		attempts = 3
+	}
+	delay := time.Duration(conf.VIES.RetryDelayMs) * time.Millisecond
+	if delay <= 0 {
+		delay = time.Second
+	}
 	return &Service{
-		hc:       &http.Client{Timeout: 20 * time.Second},
-		log:      log.With(sl.Module("vies")),
-		cacheAge: time.Duration(hours) * time.Hour,
+		hc:         &http.Client{Timeout: 20 * time.Second},
+		log:        log.With(sl.Module("vies")),
+		cacheAge:   time.Duration(hours) * time.Hour,
+		attempts:   attempts,
+		retryDelay: delay,
+		baseURL:    baseURL,
 	}
 }
 
@@ -155,13 +170,9 @@ func (s *Service) ValidateTaxId(taxId, fallbackCountry string) entity.VIESResult
 		}
 	}
 
-	// Call VIES API
-	resp, err := s.checkVATNumber(countryCode, vatNumber)
-	if err != nil {
-		s.log.Warn("VIES API call failed",
-			slog.String("country", countryCode),
-			slog.String("vat_number", vatNumber),
-			sl.Err(err))
+	// Call the VIES API, retrying while the answer is not a verdict.
+	resp := s.checkWithRetry(countryCode, vatNumber)
+	if resp == nil {
 		return s.staleOr(countryCode, vatNumber, "API failure")
 	}
 
@@ -171,10 +182,13 @@ func (s *Service) ValidateTaxId(taxId, fallbackCountry string) entity.VIESResult
 	// may well be valid. Do not cache it and do not report it as invalid — fall back to a
 	// prior definitive result if we have one, otherwise report inconclusive.
 	if result == entity.VIESInconclusive {
-		s.log.Warn("VIES validation inconclusive",
+		s.log.With(
 			slog.String("country", countryCode),
 			slog.String("vat_number", vatNumber),
-			slog.String("user_error", resp.UserError))
+			slog.String("user_error", resp.UserError),
+			slog.Int("attempts", s.attempts),
+			slog.String("tg_topic", entity.TopicError),
+		).Warn("VIES validation inconclusive after retries")
 		return s.staleOr(countryCode, vatNumber, "inconclusive result")
 	}
 
@@ -206,6 +220,53 @@ func (s *Service) ValidateTaxId(taxId, fallbackCountry string) entity.VIESResult
 	return result
 }
 
+// checkWithRetry calls VIES until it produces a verdict or the attempt budget runs out.
+//
+// Member states answer bursts with transient userError codes — MS_MAX_CONCURRENT_REQ is
+// the common one — and the REST API offers no way to tell "the number is bad" from "ask
+// me again later" other than that code. Since an inconclusive answer costs an EU company
+// its 0% WDT rate (the order stays B2C and is invoiced under OSS at the destination
+// rate), a retryable answer is worth a short wait inside the invoice path.
+//
+// Backoff doubles from retryDelay and carries up to 50% jitter so that several orders
+// validating at once do not retry in lockstep and re-trigger the same throttle.
+//
+// Returns the response carrying a definitive verdict, the last inconclusive response when
+// every attempt was throttled, or nil when no attempt produced a response at all.
+func (s *Service) checkWithRetry(countryCode, vatNumber string) *viesResponse {
+	var last *viesResponse
+	delay := s.retryDelay
+
+	for attempt := 1; attempt <= s.attempts; attempt++ {
+		resp, err := s.checkVATNumber(countryCode, vatNumber)
+		switch {
+		case err != nil:
+			s.log.Warn("VIES API call failed",
+				slog.String("country", countryCode),
+				slog.String("vat_number", vatNumber),
+				slog.Int("attempt", attempt),
+				sl.Err(err))
+		case resp.result() != entity.VIESInconclusive:
+			return resp
+		default:
+			last = resp
+			s.log.Debug("VIES answer not a verdict, retrying",
+				slog.String("country", countryCode),
+				slog.String("vat_number", vatNumber),
+				slog.String("user_error", resp.UserError),
+				slog.Int("attempt", attempt))
+		}
+
+		if attempt == s.attempts {
+			break
+		}
+		time.Sleep(delay + time.Duration(rand.Int63n(int64(delay/2)+1)))
+		delay *= 2
+	}
+
+	return last
+}
+
 // staleOr returns a cached definitive verdict when the live check could not produce one,
 // or VIESInconclusive if no cached result exists. reason is used only for logging.
 func (s *Service) staleOr(countryCode, vatNumber, reason string) entity.VIESResult {
@@ -223,7 +284,7 @@ func (s *Service) staleOr(countryCode, vatNumber, reason string) entity.VIESResu
 
 // checkVATNumber sends a GET request to the VIES REST API.
 func (s *Service) checkVATNumber(countryCode, vatNumber string) (*viesResponse, error) {
-	url := fmt.Sprintf(baseURL, countryCode, vatNumber)
+	url := fmt.Sprintf(s.baseURL, countryCode, vatNumber)
 
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {

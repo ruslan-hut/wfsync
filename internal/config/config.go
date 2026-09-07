@@ -90,6 +90,14 @@ type VATRates struct {
 type VIES struct {
 	Enabled    bool `yaml:"enabled" env-default:"false"`
 	CacheHours int  `yaml:"cache_hours" env-default:"720"`
+	// Attempts is the total number of VIES calls per validation. Member states
+	// throttle with transient userError codes (MS_MAX_CONCURRENT_REQ and friends),
+	// and a single throttled reply would otherwise cost a B2B customer their 0% WDT
+	// rate, so a retryable answer is retried up to this many times.
+	Attempts int `yaml:"attempts" env-default:"3"`
+	// RetryDelayMs is the delay before the second attempt; it doubles for each
+	// further one and carries jitter, so bursts from concurrent orders spread out.
+	RetryDelayMs int `yaml:"retry_delay_ms" env-default:"1000"`
 }
 
 type RetryQueue struct {

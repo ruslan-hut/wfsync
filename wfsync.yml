@@ -37,6 +37,8 @@ vatrates:
 vies:
   enabled: true
   cache_hours: 720
+  attempts: 3
+  retry_delay_ms: 1000
 mongo:
   enabled: true
   host: ${MONGO_HOST}
