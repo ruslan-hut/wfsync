@@ -132,7 +132,11 @@ func (c *Client) ExpectedB2BVATRate(countryCode string, hasTaxId bool) int {
 }
 
 // SetVIESProvider injects a VIES VAT number validator.
-// When set, invoice creation logs a warning if a B2B TaxId fails VIES validation.
+//
+// It is not purely diagnostic: a confirmed-valid number promotes the order to B2B
+// (0% WDT for an EU buyer) even when it came in under a B2C customer group, while an
+// invalid one only logs a warning. Without a provider no promotion happens and the
+// customer group alone decides B2B vs B2C.
 func (c *Client) SetVIESProvider(vp VIESProvider) {
 	c.vies = vp
 }

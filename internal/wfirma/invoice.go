@@ -155,13 +155,30 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	opencartRate := params.TaxRate()
 
 	// VIES validation: check the TaxId against the EU VIES service.
-	// Non-blocking — the result is logged but does not change hasTaxId or prevent invoice creation.
+	// Non-blocking — an invalid or inconclusive result is logged but never blocks the
+	// invoice. A *valid* result does have one effect: it promotes the order to B2B (see
+	// below), so the check is the only thing standing between a typed-in VAT number and
+	// a zero-rated WDT invoice.
 	if hasTaxId && c.vies != nil {
 		switch c.vies.ValidateTaxId(params.ClientDetails.TaxId, countryCode) {
 		case entity.VIESValid:
 			log.Debug("VIES validation passed",
 				slog.String("tax_id", params.ClientDetails.TaxId),
 				slog.String("country", countryCode))
+			// Promote to B2B on a confirmed VAT number regardless of the customer group.
+			// OpenCart's group is otherwise the sole authority (processInvoice overwrites
+			// whatever Bind guessed), so a company ordering through a retail group would
+			// be invoiced under OSS with destination VAT instead of WDT 0%. Only a
+			// definitive VIES "valid" triggers this — an unverified or unreachable number
+			// must never zero-rate an invoice.
+			if !isB2B {
+				isB2B = true
+				params.CustomerGroup = -1
+				log.Info("promoted to B2B on VIES-valid tax id",
+					slog.String("tax_id", params.ClientDetails.TaxId),
+					slog.String("country", countryCode),
+					slog.String("email", params.ClientDetails.Email))
+			}
 		case entity.VIESInvalid:
 			log.With(
 				slog.String("tax_id", params.ClientDetails.TaxId),

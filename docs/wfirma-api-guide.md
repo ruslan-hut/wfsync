@@ -331,6 +331,8 @@ Country is EU, customer is B2C?
 
 For B2B EU transactions, validate the customer's VAT number against [VIES](https://ec.europa.eu/taxation_customs/vies/). A failed validation means the transaction falls back to domestic (Polish) VAT rates. We treat VIES as non-blocking — log the result but don't fail the invoice if the service is down.
 
+A **definitive `valid` verdict also promotes the order to B2B** (`customer_group` → `-1`) even when it arrived in a B2C group, so an EU company buying through a retail group gets 0% WDT instead of a destination-rate OSS invoice. Only a confirmed `valid` promotes: an `invalid` number, or an inconclusive check because VIES was unavailable, leaves the order B2C — an unverified VAT number must never zero-rate an invoice.
+
 ## WFSync API VAT Defaults
 
 When using the WFSync payload endpoints (`POST /v1/wf/invoice`, `POST /v1/wf/proforma`), the caller may not know or provide the exact tax amount. The system handles this automatically:
@@ -342,6 +344,8 @@ The `customer_group` field controls B2B vs B2C treatment:
 - **`-1`** — explicit B2B flag for API callers (no OpenCart dependency)
 - **`0`** (or omit) — B2C (default)
 - **`6, 7, 16, 18, 19`** — OpenCart B2B groups (used internally)
+
+The group is not the only input: a VIES-valid `tax_id` promotes any group to B2B at invoice time (see [VIES validation](#vies-validation)).
 
 ### VAT rate when `tax_value` is not provided
 

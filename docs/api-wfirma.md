@@ -968,7 +968,9 @@ Use `customer_group` to control B2B vs B2C treatment:
 | `-1` | **B2B** — explicit B2B flag for API callers |
 | `0` (or omit) | **B2C** — default, consumer invoice |
 
-B2B affects VAT handling for EU customers: B2B + valid `tax_id` gets 0% WDT (intra-community delivery), B2B without `tax_id` gets 23% Polish rate. B2C always uses the destination-country rate (OSS scheme).
+B2B affects VAT handling for EU customers: B2B + valid `tax_id` gets 0% WDT (intra-community delivery), B2B without `tax_id` gets 23% Polish rate. B2C uses the destination-country rate (OSS scheme).
+
+**Automatic promotion to B2B.** A `tax_id` that VIES confirms as valid promotes the order to B2B regardless of the `customer_group` it was sent with, so an EU company is invoiced at 0% WDT rather than the destination rate. An invalid number, or a check that could not be completed because VIES was unavailable, leaves the order B2C.
 
 ### VAT rate auto-detection
 
