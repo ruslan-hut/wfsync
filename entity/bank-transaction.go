@@ -14,6 +14,16 @@ const (
 	DirectionDebit  = "DBIT" // money out
 )
 
+// Match state of a bank transaction. Stored on the statement row so the review queue is
+// a plain query rather than a diff against payment facts.
+const (
+	BankMatchUnmatched = "unmatched"
+	BankMatchMatched   = "matched"
+	// BankMatchIgnored marks an entry that is not a customer payment at all — a Stripe
+	// payout, a fee, a tax transfer — so it never reaches the review queue.
+	BankMatchIgnored = "ignored"
+)
+
 // Source of a bank transaction. The matcher is source-agnostic: a statement fetched
 // over PSD2 and one imported from a bank's own export must reach it in the same shape.
 const (
@@ -66,6 +76,12 @@ type BankTransaction struct {
 	BankCode string `json:"bank_code,omitempty" bson:"bank_code,omitempty"`
 
 	Source string `json:"source" bson:"source"`
+
+	// MatchStatus and MatchedRef are written by the matcher, never by the poller: the
+	// sliding window re-delivers stored entries on every run, and re-writing the whole
+	// row would erase the match.
+	MatchStatus string `json:"match_status,omitempty" bson:"match_status,omitempty"`
+	MatchedRef  string `json:"matched_ref,omitempty" bson:"matched_ref,omitempty"`
 	// Raw is the source record as received, so a disputed match can be re-examined
 	// without going back to the bank.
 	Raw string `json:"-" bson:"raw,omitempty"`

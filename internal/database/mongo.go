@@ -26,6 +26,7 @@ const (
 	collectionBankAccounts    = "wfirma_bank_accounts"
 	collectionBankSessions    = "bank_sessions"
 	collectionBankTx          = "bank_transactions"
+	collectionPaymentFacts    = "payment_facts"
 )
 
 type MongoDB struct {
@@ -1338,9 +1339,12 @@ func (m *MongoDB) SaveBankTransactions(txs []*entity.BankTransaction) (int, erro
 		if t == nil || t.Key == "" {
 			continue
 		}
+		// $setOnInsert, not $set: a booked entry never changes, but the matcher writes
+		// match_status onto the same row — and the sliding window re-delivers that row
+		// on every poll, so an unconditional write would erase the match every cycle.
 		models = append(models, mongo.NewUpdateOneModel().
 			SetFilter(bson.D{{Key: "key", Value: t.Key}}).
-			SetUpdate(bson.D{{Key: "$set", Value: t}}).
+			SetUpdate(bson.D{{Key: "$setOnInsert", Value: t}}).
 			SetUpsert(true))
 	}
 	if len(models) == 0 {
@@ -1430,4 +1434,230 @@ func (m *MongoDB) setBankSessionFields(state string, fields bson.D) error {
 		bson.D{{Key: "state", Value: state}},
 		bson.D{{Key: "$set", Value: fields}})
 	return err
+}
+
+// GetInvoicesByNumbers loads documents by their wFirma number, with no date bound.
+//
+// Deliberately unbounded in time: customers pay invoices months after they were issued —
+// the August statement settled documents numbered from earlier in the year — so a date
+// window here would drop correct matches. The number identifies one document on its own.
+func (m *MongoDB) GetInvoicesByNumbers(numbers []string) ([]*entity.LocalInvoice, error) {
+	if len(numbers) == 0 {
+		return nil, nil
+	}
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionInvoice)
+	filter := bson.D{{Key: "number", Value: bson.D{{Key: "$in", Value: numbers}}}}
+	cursor, err := collection.Find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+
+	var invoices []*entity.LocalInvoice
+	if err := cursor.All(ctx, &invoices); err != nil {
+		return nil, err
+	}
+	return invoices, nil
+}
+
+// GetInvoicesByExternalRefs loads documents by the order reference wFirma stores in
+// id_external. Used when a payment names an order number rather than a document number.
+func (m *MongoDB) GetInvoicesByExternalRefs(refs []string) ([]*entity.LocalInvoice, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionInvoice)
+	filter := bson.D{{Key: "id_external", Value: bson.D{{Key: "$in", Value: refs}}}}
+	cursor, err := collection.Find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+
+	var invoices []*entity.LocalInvoice
+	if err := cursor.All(ctx, &invoices); err != nil {
+		return nil, err
+	}
+	return invoices, nil
+}
+
+// GetUnmatchedBankTransactions returns incoming payments the matcher has not resolved,
+// oldest first. Only credits are considered: money leaving the account settles nothing.
+func (m *MongoDB) GetUnmatchedBankTransactions(limit int) ([]*entity.BankTransaction, error) {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionBankTx)
+	filter := bson.D{
+		{Key: "direction", Value: entity.DirectionCredit},
+		{Key: "$or", Value: []bson.D{
+			{{Key: "match_status", Value: entity.BankMatchUnmatched}},
+			{{Key: "match_status", Value: bson.D{{Key: "$exists", Value: false}}}},
+		}},
+	}
+	opts := options.Find().SetSort(bson.D{{Key: "booking_date", Value: 1}})
+	if limit > 0 {
+		opts.SetLimit(int64(limit))
+	}
+	cursor, err := collection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+
+	var txs []*entity.BankTransaction
+	if err := cursor.All(ctx, &txs); err != nil {
+		return nil, err
+	}
+	return txs, nil
+}
+
+// GetBankTransactionByKey loads one statement entry.
+func (m *MongoDB) GetBankTransactionByKey(key string) (*entity.BankTransaction, error) {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionBankTx)
+	var tx entity.BankTransaction
+	if err := collection.FindOne(ctx, bson.D{{Key: "key", Value: key}}).Decode(&tx); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &tx, nil
+}
+
+// SetBankTransactionMatch records the outcome of matching one entry. It touches only the
+// match fields, leaving the statement record as the bank reported it.
+func (m *MongoDB) SetBankTransactionMatch(key, status, ref string) error {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionBankTx)
+	_, err = collection.UpdateOne(ctx,
+		bson.D{{Key: "key", Value: key}},
+		bson.D{{Key: "$set", Value: bson.D{
+			{Key: "match_status", Value: status},
+			{Key: "matched_ref", Value: ref},
+		}}})
+	return err
+}
+
+// SavePaymentFact upserts the settlement record for one order, keyed by its external ref.
+func (m *MongoDB) SavePaymentFact(fact *entity.PaymentFact) error {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionPaymentFacts)
+	if err := m.ensurePaymentFactIndex(ctx, collection); err != nil {
+		return fmt.Errorf("ensure payment fact index: %w", err)
+	}
+	_, err = collection.UpdateOne(ctx,
+		bson.D{{Key: "external_ref", Value: fact.ExternalRef}},
+		bson.D{{Key: "$set", Value: fact}},
+		options.Update().SetUpsert(true))
+	return err
+}
+
+// ensurePaymentFactIndex enforces one settlement record per order. Idempotent.
+func (m *MongoDB) ensurePaymentFactIndex(ctx context.Context, collection *mongo.Collection) error {
+	_, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "external_ref", Value: 1}},
+		Options: options.Index().SetName("uniq_external_ref").SetUnique(true),
+	})
+	return err
+}
+
+// GetPaymentFactsByRefs returns settlement records for the given orders. This is what the
+// B2B portal reads: it asks about the orders it knows, in one request rather than one per
+// order.
+func (m *MongoDB) GetPaymentFactsByRefs(refs []string) ([]*entity.PaymentFact, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionPaymentFacts)
+	filter := bson.D{{Key: "external_ref", Value: bson.D{{Key: "$in", Value: refs}}}}
+	cursor, err := collection.Find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+
+	var facts []*entity.PaymentFact
+	if err := cursor.All(ctx, &facts); err != nil {
+		return nil, err
+	}
+	return facts, nil
+}
+
+// GetPaymentFactsByDateRange returns settlement records whose payment landed within
+// [from, to]. Used by the ERP feed.
+func (m *MongoDB) GetPaymentFactsByDateRange(from, to time.Time) ([]*entity.PaymentFact, error) {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionPaymentFacts)
+	filter := bson.D{{Key: "paid_at", Value: bson.D{{Key: "$gte", Value: from}, {Key: "$lte", Value: to}}}}
+	opts := options.Find().SetSort(bson.D{{Key: "paid_at", Value: 1}})
+	cursor, err := collection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+
+	var facts []*entity.PaymentFact
+	if err := cursor.All(ctx, &facts); err != nil {
+		return nil, err
+	}
+	return facts, nil
 }

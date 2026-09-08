@@ -50,18 +50,19 @@ type PaymentDatabase interface {
 }
 
 type Core struct {
-	sc         *stripeclient.StripeClient
-	oc         *occlient.Opencart
-	inv        InvoiceService
-	db         PaymentDatabase
-	auth       AuthService
-	eb         *enablebanking.Client
-	bankDb     BankSessionDatabase
-	bankTxDb   BankTransactionDatabase
-	retryQueue *RetryQueue
-	filePath   string
-	fileUrl    string
-	log        *slog.Logger
+	sc          *stripeclient.StripeClient
+	oc          *occlient.Opencart
+	inv         InvoiceService
+	db          PaymentDatabase
+	auth        AuthService
+	eb          *enablebanking.Client
+	bankDb      BankSessionDatabase
+	bankTxDb    BankTransactionDatabase
+	bankMatchDb BankMatchDatabase
+	retryQueue  *RetryQueue
+	filePath    string
+	fileUrl     string
+	log         *slog.Logger
 }
 
 func New(conf *config.Config, log *slog.Logger) Core {

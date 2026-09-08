@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"strconv"
 	"time"
 
 	"wfsync/entity"
@@ -31,6 +32,8 @@ type Core interface {
 	BankCompleteAuthorization(ctx context.Context, state, code string) (*entity.BankSession, error)
 	BankSessionStatus() (*entity.BankSession, error)
 	BankTransactions(ctx context.Context, from, to string) ([]*entity.BankTransaction, error)
+	UnmatchedBankPayments(limit int) ([]*entity.BankTransaction, error)
+	MatchBankPaymentManually(ctx context.Context, txKey, documentNumber string) error
 }
 
 // datePattern guards the range parameters; the stored dates are "YYYY-MM-DD" strings and
@@ -170,6 +173,97 @@ type transactionsResponse struct {
 	To    string                    `json:"to"`
 	Count int                       `json:"count"`
 	Items []*entity.BankTransaction `json:"items"`
+}
+
+// Unmatched handles GET /v1/bank/unmatched — incoming payments no document could be
+// found for. This is the review queue: without somewhere to see and resolve these, the
+// unresolved ones would only accumulate silently.
+func Unmatched(logger *slog.Logger, handler Core) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log := logger.With(
+			sl.Module("http.handlers.bank"),
+			slog.String("request_id", middleware.GetReqID(r.Context())),
+		)
+
+		if handler == nil {
+			render.Status(r, http.StatusServiceUnavailable)
+			render.JSON(w, r, response.Error("Bank service not available"))
+			return
+		}
+
+		limit := 100
+		if v := r.URL.Query().Get("limit"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 1000 {
+				limit = n
+			}
+		}
+
+		txs, err := handler.UnmatchedBankPayments(limit)
+		if err != nil {
+			log.Error("unmatched bank payments", sl.Err(err))
+			render.JSON(w, r, response.Error(fmt.Sprintf("Unmatched: %v", err)))
+			return
+		}
+
+		render.JSON(w, r, response.Ok(unmatchedResponse{Count: len(txs), Items: txs}))
+	}
+}
+
+type unmatchedResponse struct {
+	Count int                       `json:"count"`
+	Items []*entity.BankTransaction `json:"items"`
+}
+
+// matchRequest links one statement entry to a document by hand.
+type matchRequest struct {
+	// TransactionKey is the entry's idempotency key, as returned by /v1/bank/unmatched.
+	TransactionKey string `json:"transaction_key"`
+	// DocumentNumber is the wFirma number, e.g. "PROF 745/2026".
+	DocumentNumber string `json:"document_number"`
+}
+
+func (m *matchRequest) Bind(_ *http.Request) error {
+	if m.TransactionKey == "" {
+		return fmt.Errorf("transaction_key is required")
+	}
+	if m.DocumentNumber == "" {
+		return fmt.Errorf("document_number is required")
+	}
+	return nil
+}
+
+// Match handles POST /v1/bank/match — resolve a queued payment by naming its document.
+func Match(logger *slog.Logger, handler Core) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log := logger.With(
+			sl.Module("http.handlers.bank"),
+			slog.String("request_id", middleware.GetReqID(r.Context())),
+		)
+
+		if handler == nil {
+			render.Status(r, http.StatusServiceUnavailable)
+			render.JSON(w, r, response.Error("Bank service not available"))
+			return
+		}
+
+		var req matchRequest
+		if err := render.Bind(r, &req); err != nil {
+			render.Status(r, http.StatusBadRequest)
+			render.JSON(w, r, response.Error(fmt.Sprintf("Invalid request: %v", err)))
+			return
+		}
+
+		if err := handler.MatchBankPaymentManually(r.Context(), req.TransactionKey, req.DocumentNumber); err != nil {
+			log.Error("manual bank match", sl.Err(err),
+				slog.String("document", req.DocumentNumber))
+			render.Status(r, http.StatusBadRequest)
+			render.JSON(w, r, response.Error(fmt.Sprintf("Match: %v", err)))
+			return
+		}
+
+		log.Info("payment matched manually", slog.String("document", req.DocumentNumber))
+		render.JSON(w, r, response.Ok(map[string]string{"document_number": req.DocumentNumber}))
+	}
 }
 
 // Callback handles GET /bank/callback — where the bank returns the account holder.

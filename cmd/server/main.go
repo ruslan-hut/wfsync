@@ -143,6 +143,7 @@ func main() {
 			handler.SetEnableBanking(ebClient)
 			handler.SetBankSessionDatabase(mongo)
 			handler.SetBankTransactionDatabase(mongo)
+			handler.SetBankMatchDatabase(mongo)
 
 			bankPoller = core.NewBankPoller(ebClient, log,
 				conf.EnableBanking.PollIntervalMin,
@@ -150,6 +151,7 @@ func main() {
 				conf.EnableBanking.ReauthWarnDays,
 				conf.EnableBanking.IBANs)
 			bankPoller.SetDatabase(mongo)
+			bankPoller.SetMatcher(&handler)
 			bankPoller.Start()
 			log.Info("bank poller started",
 				slog.Int("interval_min", conf.EnableBanking.PollIntervalMin),

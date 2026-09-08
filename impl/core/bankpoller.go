@@ -42,6 +42,13 @@ type BankStatementFetcher interface {
 	BankTransactions(ctx context.Context, acc enablebanking.Account, from, to string) ([]*entity.BankTransaction, error)
 }
 
+// PaymentMatcher resolves newly stored payments against issued documents. Optional: a
+// poller without one still collects statements, it just leaves matching to be triggered
+// elsewhere.
+type PaymentMatcher interface {
+	MatchBankPayments(ctx context.Context) (*BankMatchResult, error)
+}
+
 // BankPollDatabase defines the persistence the poller needs.
 type BankPollDatabase interface {
 	GetActiveBankSession() (*entity.BankSession, error)
@@ -59,6 +66,7 @@ type BankPoller struct {
 	interval time.Duration
 	lookback int
 	warnDays int
+	matcher  PaymentMatcher
 	// ibans limits polling to specific accounts; empty means every account the
 	// consent covers.
 	ibans   map[string]bool
@@ -95,6 +103,9 @@ func NewBankPoller(eb BankStatementFetcher, log *slog.Logger, intervalMin, lookb
 
 // SetDatabase injects persistence.
 func (p *BankPoller) SetDatabase(db BankPollDatabase) { p.db = db }
+
+// SetMatcher injects the payment matcher, run after a poll that brought in new entries.
+func (p *BankPoller) SetMatcher(m PaymentMatcher) { p.matcher = m }
 
 // Start launches the background polling goroutine.
 func (p *BankPoller) Start() {
@@ -201,6 +212,15 @@ func (p *BankPoller) poll() {
 		slog.Int("fetched", fetched),
 		slog.String("from", from),
 		slog.String("to", to))
+
+	// Match straight away: the point of polling is to learn that an order was paid, and
+	// a statement nobody has matched answers nothing.
+	if p.matcher != nil {
+		if _, err := p.matcher.MatchBankPayments(ctx); err != nil {
+			p.log.With(slog.String("tg_topic", entity.TopicError)).
+				Error("match bank payments", sl.Err(err))
+		}
+	}
 }
 
 // pollAccount fetches and stores one account's window, returning how many entries were

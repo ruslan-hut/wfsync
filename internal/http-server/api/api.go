@@ -81,6 +81,8 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 			bankRouter.Post("/auth", bank.StartAuth(log, handler))
 			bankRouter.Get("/status", bank.Status(log, handler))
 			bankRouter.Get("/transactions", bank.Transactions(log, handler))
+			bankRouter.Get("/unmatched", bank.Unmatched(log, handler))
+			bankRouter.Post("/match", bank.Match(log, handler))
 		})
 		rootApi.Route("/b2b", func(b2bRouter chi.Router) {
 			b2bRouter.Post("/proforma", b2b.CreateProforma(log, handler))
