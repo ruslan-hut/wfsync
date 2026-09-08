@@ -57,6 +57,7 @@ type Core struct {
 	auth       AuthService
 	eb         *enablebanking.Client
 	bankDb     BankSessionDatabase
+	bankTxDb   BankTransactionDatabase
 	retryQueue *RetryQueue
 	filePath   string
 	fileUrl    string

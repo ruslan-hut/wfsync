@@ -14,6 +14,7 @@ import (
 	"html"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"time"
 
 	"wfsync/entity"
@@ -29,7 +30,12 @@ type Core interface {
 	BankStartAuthorization(ctx context.Context) (string, error)
 	BankCompleteAuthorization(ctx context.Context, state, code string) (*entity.BankSession, error)
 	BankSessionStatus() (*entity.BankSession, error)
+	BankTransactions(ctx context.Context, from, to string) ([]*entity.BankTransaction, error)
 }
+
+// datePattern guards the range parameters; the stored dates are "YYYY-MM-DD" strings and
+// are compared as such, so a differently shaped value would silently match nothing.
+var datePattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 // authResponse carries the URL the account holder has to open.
 type authResponse struct {
@@ -116,6 +122,54 @@ func Status(logger *slog.Logger, handler Core) http.HandlerFunc {
 			Accounts:   session.Accounts,
 		}))
 	}
+}
+
+// Transactions handles GET /v1/bank/transactions?from=&to= — the raw statement feed
+// consumed by the ERP. It reports what the bank booked, with no matching applied.
+func Transactions(logger *slog.Logger, handler Core) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log := logger.With(
+			sl.Module("http.handlers.bank"),
+			slog.String("request_id", middleware.GetReqID(r.Context())),
+		)
+
+		if handler == nil {
+			render.Status(r, http.StatusServiceUnavailable)
+			render.JSON(w, r, response.Error("Bank service not available"))
+			return
+		}
+
+		from := r.URL.Query().Get("from")
+		to := r.URL.Query().Get("to")
+		if !datePattern.MatchString(from) || !datePattern.MatchString(to) {
+			render.Status(r, http.StatusBadRequest)
+			render.JSON(w, r, response.Error("Invalid date format, expected YYYY-MM-DD"))
+			return
+		}
+
+		txs, err := handler.BankTransactions(r.Context(), from, to)
+		if err != nil {
+			log.Error("bank transactions", sl.Err(err))
+			render.JSON(w, r, response.Error(fmt.Sprintf("Transactions: %v", err)))
+			return
+		}
+
+		render.JSON(w, r, response.Ok(transactionsResponse{
+			From:  from,
+			To:    to,
+			Count: len(txs),
+			Items: txs,
+		}))
+	}
+}
+
+// transactionsResponse wraps the statement feed with the range it covers, so a consumer
+// can tell an empty range from a failed one.
+type transactionsResponse struct {
+	From  string                    `json:"from"`
+	To    string                    `json:"to"`
+	Count int                       `json:"count"`
+	Items []*entity.BankTransaction `json:"items"`
 }
 
 // Callback handles GET /bank/callback — where the bank returns the account holder.

@@ -196,3 +196,23 @@ func randomState() (string, error) {
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
+
+// BankTransactionDatabase defines read access to stored account movements.
+type BankTransactionDatabase interface {
+	GetBankTransactionsByDateRange(from, to string) ([]*entity.BankTransaction, error)
+}
+
+// SetBankTransactionDatabase injects statement storage.
+func (c *Core) SetBankTransactionDatabase(db BankTransactionDatabase) {
+	c.bankTxDb = db
+}
+
+// BankTransactions returns stored account movements booked within [from, to].
+// This is the raw statement feed the ERP consumes; matching payments to documents is a
+// separate concern and does not filter this view.
+func (c *Core) BankTransactions(_ context.Context, from, to string) ([]*entity.BankTransaction, error) {
+	if c.bankTxDb == nil {
+		return nil, fmt.Errorf("bank statement storage is not available")
+	}
+	return c.bankTxDb.GetBankTransactionsByDateRange(from, to)
+}

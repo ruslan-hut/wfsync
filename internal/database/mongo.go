@@ -25,6 +25,7 @@ const (
 	collectionRetryJobs       = "retry_jobs"
 	collectionBankAccounts    = "wfirma_bank_accounts"
 	collectionBankSessions    = "bank_sessions"
+	collectionBankTx          = "bank_transactions"
 )
 
 type MongoDB struct {
@@ -1304,5 +1305,129 @@ func (m *MongoDB) SupersedeBankSessions(keepState string) error {
 	}
 	update := bson.D{{Key: "$set", Value: bson.D{{Key: "status", Value: entity.BankSessionRevoked}}}}
 	_, err = collection.UpdateMany(ctx, filter, update)
+	return err
+}
+
+// SaveBankTransactions stores a fetched window of account movements, returning how many
+// were new.
+//
+// Writes are upserts keyed by BankTransaction.Key: every poll re-reads a sliding window
+// and therefore re-delivers entries already stored, because banks can book entries with
+// a back-date and polling "since the last one seen" would silently miss them. The unique
+// index makes that safe rather than merely tidy — two pollers, or a retried poll, cannot
+// double-insert.
+func (m *MongoDB) SaveBankTransactions(txs []*entity.BankTransaction) (int, error) {
+	if len(txs) == 0 {
+		return 0, nil
+	}
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionBankTx)
+	if err := m.ensureBankTxIndex(ctx, collection); err != nil {
+		return 0, fmt.Errorf("ensure bank tx index: %w", err)
+	}
+
+	models := make([]mongo.WriteModel, 0, len(txs))
+	for _, t := range txs {
+		if t == nil || t.Key == "" {
+			continue
+		}
+		models = append(models, mongo.NewUpdateOneModel().
+			SetFilter(bson.D{{Key: "key", Value: t.Key}}).
+			SetUpdate(bson.D{{Key: "$set", Value: t}}).
+			SetUpsert(true))
+	}
+	if len(models) == 0 {
+		return 0, nil
+	}
+
+	// Unordered so one rejected entry does not abandon the rest of the window.
+	res, err := collection.BulkWrite(ctx, models, options.BulkWrite().SetOrdered(false))
+	if err != nil {
+		return 0, err
+	}
+	return int(res.UpsertedCount), nil
+}
+
+// ensureBankTxIndex creates the unique index on the idempotency key. Idempotent.
+func (m *MongoDB) ensureBankTxIndex(ctx context.Context, collection *mongo.Collection) error {
+	_, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "key", Value: 1}},
+		Options: options.Index().
+			SetName("uniq_key").
+			SetUnique(true),
+	})
+	return err
+}
+
+// GetBankTransactionsByDateRange returns stored movements booked within [from, to],
+// oldest first. Dates are "YYYY-MM-DD", which sorts correctly as a string.
+func (m *MongoDB) GetBankTransactionsByDateRange(from, to string) ([]*entity.BankTransaction, error) {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionBankTx)
+	filter := bson.D{
+		{Key: "booking_date", Value: bson.D{{Key: "$gte", Value: from}, {Key: "$lte", Value: to}}},
+	}
+	opts := options.Find().SetSort(bson.D{{Key: "booking_date", Value: 1}})
+	cursor, err := collection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+
+	var txs []*entity.BankTransaction
+	if err := cursor.All(ctx, &txs); err != nil {
+		return nil, err
+	}
+	return txs, nil
+}
+
+// MarkBankSessionPolled records a successful poll, so the session view shows whether
+// statements are actually flowing rather than only that a consent exists.
+func (m *MongoDB) MarkBankSessionPolled(state string, at time.Time) error {
+	return m.setBankSessionFields(state, bson.D{{Key: "last_polled_at", Value: at}})
+}
+
+// MarkBankSessionExpired flags a session whose consent the bank has stopped honouring.
+// Polling stops until the account holder authorizes again — there is no refresh.
+func (m *MongoDB) MarkBankSessionExpired(state, reason string) error {
+	return m.setBankSessionFields(state, bson.D{
+		{Key: "status", Value: entity.BankSessionExpired},
+		{Key: "failure_reason", Value: reason},
+	})
+}
+
+// MarkBankSessionWarned records when an expiry warning was last sent, so the reminder
+// repeats daily instead of on every poll.
+func (m *MongoDB) MarkBankSessionWarned(state string, at time.Time) error {
+	return m.setBankSessionFields(state, bson.D{{Key: "last_warned_at", Value: at}})
+}
+
+func (m *MongoDB) setBankSessionFields(state string, fields bson.D) error {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionBankSessions)
+	_, err = collection.UpdateOne(ctx,
+		bson.D{{Key: "state", Value: state}},
+		bson.D{{Key: "$set", Value: fields}})
 	return err
 }

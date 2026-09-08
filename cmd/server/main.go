@@ -130,6 +130,7 @@ func main() {
 	}
 	handler.SetOpencart(oc)
 
+	var bankPoller *core.BankPoller
 	if conf.EnableBanking.Enabled {
 		// Statement polling needs somewhere to keep the session: the consent is granted
 		// by a person, lasts at most 180 days and cannot be refreshed, so losing it on
@@ -141,6 +142,18 @@ func main() {
 		} else {
 			handler.SetEnableBanking(ebClient)
 			handler.SetBankSessionDatabase(mongo)
+			handler.SetBankTransactionDatabase(mongo)
+
+			bankPoller = core.NewBankPoller(ebClient, log,
+				conf.EnableBanking.PollIntervalMin,
+				conf.EnableBanking.LookbackDays,
+				conf.EnableBanking.ReauthWarnDays,
+				conf.EnableBanking.IBANs)
+			bankPoller.SetDatabase(mongo)
+			bankPoller.Start()
+			log.Info("bank poller started",
+				slog.Int("interval_min", conf.EnableBanking.PollIntervalMin),
+				slog.Int("lookback_days", conf.EnableBanking.LookbackDays))
 		}
 	}
 
@@ -204,6 +217,10 @@ func main() {
 
 	if retryQueue != nil {
 		retryQueue.Stop()
+	}
+
+	if bankPoller != nil {
+		bankPoller.Stop()
 	}
 
 	if vatService != nil {
