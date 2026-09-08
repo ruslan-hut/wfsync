@@ -38,6 +38,7 @@ type Handler interface {
 	wfsync.Core
 	payment.Core
 	b2b.Core
+	b2b.PaymentStatusCore
 	bank.Core
 }
 
@@ -81,12 +82,15 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 			bankRouter.Post("/auth", bank.StartAuth(log, handler))
 			bankRouter.Get("/status", bank.Status(log, handler))
 			bankRouter.Get("/transactions", bank.Transactions(log, handler))
+			bankRouter.Get("/payments", bank.Payments(log, handler))
 			bankRouter.Get("/unmatched", bank.Unmatched(log, handler))
 			bankRouter.Post("/match", bank.Match(log, handler))
 		})
 		rootApi.Route("/b2b", func(b2bRouter chi.Router) {
 			b2bRouter.Post("/proforma", b2b.CreateProforma(log, handler))
 			b2bRouter.Post("/invoice", b2b.CreateInvoice(log, handler))
+			b2bRouter.Get("/status/{order_uid}", b2b.PaymentStatus(log, handler))
+			b2bRouter.Post("/status", b2b.PaymentStatusBatch(log, handler))
 		})
 	})
 	router.Route("/webhook", func(rootWH chi.Router) {

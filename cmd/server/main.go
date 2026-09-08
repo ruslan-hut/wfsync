@@ -144,6 +144,8 @@ func main() {
 			handler.SetBankSessionDatabase(mongo)
 			handler.SetBankTransactionDatabase(mongo)
 			handler.SetBankMatchDatabase(mongo)
+			handler.SetBankFactDatabase(mongo)
+			handler.SetOpenCartPaidStatus(conf.OpenCart.StatusBankPaid)
 
 			bankPoller = core.NewBankPoller(ebClient, log,
 				conf.EnableBanking.PollIntervalMin,

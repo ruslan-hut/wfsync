@@ -43,6 +43,9 @@ opencart:
   status_url_result: 0
   status_proforma_request: 0
   status_proforma_result: 0
+  # OpenCart status set when a bank transfer settles an order in full.
+  # Instance-specific; 0 leaves order statuses untouched.
+  status_bank_paid: 0
 telegram:
   enabled: true
   api_key: your-telegram-api-key

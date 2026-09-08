@@ -34,6 +34,7 @@ type Core interface {
 	BankTransactions(ctx context.Context, from, to string) ([]*entity.BankTransaction, error)
 	UnmatchedBankPayments(limit int) ([]*entity.BankTransaction, error)
 	MatchBankPaymentManually(ctx context.Context, txKey, documentNumber string) error
+	PaymentFactsByDateRange(from, to time.Time) ([]*entity.PaymentFact, error)
 }
 
 // datePattern guards the range parameters; the stored dates are "YYYY-MM-DD" strings and
@@ -173,6 +174,58 @@ type transactionsResponse struct {
 	To    string                    `json:"to"`
 	Count int                       `json:"count"`
 	Items []*entity.BankTransaction `json:"items"`
+}
+
+// Payments handles GET /v1/bank/payments?from=&to= — settlement records, i.e. which
+// orders were paid and by how much. This is the ERP's second feed: /v1/bank/transactions
+// reports what the bank booked, this reports what it settled.
+func Payments(logger *slog.Logger, handler Core) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log := logger.With(
+			sl.Module("http.handlers.bank"),
+			slog.String("request_id", middleware.GetReqID(r.Context())),
+		)
+
+		if handler == nil {
+			render.Status(r, http.StatusServiceUnavailable)
+			render.JSON(w, r, response.Error("Bank service not available"))
+			return
+		}
+
+		from := r.URL.Query().Get("from")
+		to := r.URL.Query().Get("to")
+		if !datePattern.MatchString(from) || !datePattern.MatchString(to) {
+			render.Status(r, http.StatusBadRequest)
+			render.JSON(w, r, response.Error("Invalid date format, expected YYYY-MM-DD"))
+			return
+		}
+		fromT, _ := time.Parse(time.DateOnly, from)
+		// The range is inclusive of the closing day, so it extends to its last moment
+		// rather than to midnight, which would drop everything booked that day.
+		toT, _ := time.Parse(time.DateOnly, to)
+		toT = toT.Add(24*time.Hour - time.Nanosecond)
+
+		facts, err := handler.PaymentFactsByDateRange(fromT, toT)
+		if err != nil {
+			log.Error("payment facts", sl.Err(err))
+			render.JSON(w, r, response.Error(fmt.Sprintf("Payments: %v", err)))
+			return
+		}
+
+		render.JSON(w, r, response.Ok(paymentsResponse{
+			From:  from,
+			To:    to,
+			Count: len(facts),
+			Items: facts,
+		}))
+	}
+}
+
+type paymentsResponse struct {
+	From  string                `json:"from"`
+	To    string                `json:"to"`
+	Count int                   `json:"count"`
+	Items []*entity.PaymentFact `json:"items"`
 }
 
 // Unmatched handles GET /v1/bank/unmatched — incoming payments no document could be

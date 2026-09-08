@@ -61,8 +61,20 @@ type BankMatchDatabase interface {
 	GetPaymentFactsByRefs(refs []string) ([]*entity.PaymentFact, error)
 }
 
+// BankFactDatabase provides read access to settlement records for the ERP feed.
+type BankFactDatabase interface {
+	GetPaymentFactsByDateRange(from, to time.Time) ([]*entity.PaymentFact, error)
+}
+
 // SetBankMatchDatabase injects the matcher's persistence.
 func (c *Core) SetBankMatchDatabase(db BankMatchDatabase) { c.bankMatchDb = db }
+
+// SetBankFactDatabase injects settlement-record reads.
+func (c *Core) SetBankFactDatabase(db BankFactDatabase) { c.bankFactDb = db }
+
+// SetOpenCartPaidStatus sets the order status applied when a bank transfer settles a
+// shop order. Zero disables the update.
+func (c *Core) SetOpenCartPaidStatus(status int) { c.ocPaidStatus = status }
 
 // BankMatchResult summarises one matching pass.
 type BankMatchResult struct {
@@ -274,6 +286,8 @@ func (c *Core) recordPayment(_ context.Context, tx *entity.BankTransaction, doc 
 		return fmt.Errorf("mark transaction matched: %w", err)
 	}
 
+	c.reflectInOpenCart(fact)
+
 	c.log.Debug("payment matched",
 		slog.String("document", doc.Number),
 		slog.String("external_ref", ref),
@@ -364,4 +378,57 @@ func keysOf(set map[string]bool) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// PaymentFactsByDateRange returns settlement records whose payment landed within the
+// range. This is the ERP feed: the fact that an order was paid, as opposed to the raw
+// statement served by BankTransactions.
+func (c *Core) PaymentFactsByDateRange(from, to time.Time) ([]*entity.PaymentFact, error) {
+	if c.bankFactDb == nil {
+		return nil, fmt.Errorf("bank match storage is not available")
+	}
+	return c.bankFactDb.GetPaymentFactsByDateRange(from, to)
+}
+
+// reflectInOpenCart moves a shop order to the paid status once a transfer settles it.
+//
+// Guarded three ways, because moving the wrong order is worse than moving none. Only a
+// fully settled order qualifies, only an exact or manual match (a probable one is a
+// guess), and only a numeric reference — the shop's order ids are numeric while the B2B
+// portal's are opaque UIDs, so anything else belongs to a system OpenCart knows nothing
+// about.
+func (c *Core) reflectInOpenCart(fact *entity.PaymentFact) {
+	if c.oc == nil || c.ocPaidStatus <= 0 {
+		return
+	}
+	if !fact.Settled() || !isNumericRef(fact.ExternalRef) {
+		return
+	}
+
+	comment := fmt.Sprintf("Bank transfer received: %d %s (%s)",
+		fact.AmountPaid, fact.CurrencyPaid, fact.DocumentNumber)
+	if err := c.oc.ChangeOrderStatus(fact.ExternalRef, c.ocPaidStatus, comment); err != nil {
+		c.log.With(
+			sl.Err(err),
+			slog.String("order_id", fact.ExternalRef),
+		).Error("change order status after bank payment")
+		return
+	}
+	c.log.Info("order marked paid by bank transfer",
+		slog.String("order_id", fact.ExternalRef),
+		slog.String("document", fact.DocumentNumber))
+}
+
+// isNumericRef reports whether the external reference is a shop order id rather than a
+// B2B order UID.
+func isNumericRef(ref string) bool {
+	if ref == "" {
+		return false
+	}
+	for _, r := range ref {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }

@@ -70,6 +70,11 @@ type OpenCart struct {
 	StatusInvoiceRequest  string `yaml:"status_invoice_request" env-default:""`
 	StatusInvoiceResult   string `yaml:"status_invoice_result" env-default:""`
 	CustomFieldNIP        string `yaml:"custom_field_nip" env-default:""`
+
+	// StatusBankPaid is the OpenCart order status set when a bank transfer settles the
+	// order in full. The value is specific to the shop's status list, so there is no
+	// sensible default: 0 leaves order statuses untouched.
+	StatusBankPaid int `yaml:"status_bank_paid" env-default:"0"`
 }
 
 type Telegram struct {
