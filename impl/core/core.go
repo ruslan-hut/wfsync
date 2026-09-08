@@ -60,13 +60,10 @@ type Core struct {
 	bankTxDb    BankTransactionDatabase
 	bankMatchDb BankMatchDatabase
 	bankFactDb  BankFactDatabase
-	// ocPaidStatus is the OpenCart status applied when a bank transfer settles an
-	// order; zero leaves order statuses untouched.
-	ocPaidStatus int
-	retryQueue   *RetryQueue
-	filePath     string
-	fileUrl      string
-	log          *slog.Logger
+	retryQueue  *RetryQueue
+	filePath    string
+	fileUrl     string
+	log         *slog.Logger
 }
 
 func New(conf *config.Config, log *slog.Logger) Core {

@@ -63,9 +63,6 @@ opencart:
   status_proforma_request: 24
   status_proforma_result: 25
   custom_field_nip: 2
-  # OpenCart status set when a bank transfer settles an order in full.
-  # Instance-specific; 0 leaves order statuses untouched.
-  status_bank_paid: 0
 telegram:
   enabled: true
   api_key: ${TELEGRAM_API_KEY}
