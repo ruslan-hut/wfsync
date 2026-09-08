@@ -66,3 +66,26 @@ opencart:
 telegram:
   enabled: true
   api_key: ${TELEGRAM_API_KEY}
+enable_banking:
+  # Enabled, but reaching real PKO accounts additionally requires a production
+  # application, which Enable Banking issues only once the agreement is signed. Until
+  # then a sandbox application authorizes against sandbox connectors only.
+  enabled: true
+  base_url: https://api.enablebanking.com
+  app_id: ${EB_APP_ID}
+  # PEM-encoded RSA private key, mode 0600, owned by the service user. Never in git.
+  private_key_path: /etc/conf/enablebanking.pem
+  # Must match a redirect URL registered for the application.
+  redirect_url: https://api.darkbyrior.com/bank/callback
+  aspsp_name: PKO
+  aspsp_country: PL
+  psu_type: business
+  # Empty means poll every account the consent covers.
+  ibans: []
+  # PSD2 allows as few as 4 requests per account per day without the account holder
+  # present. Until PKO's actual limit is confirmed, a shorter interval may simply be
+  # refused by the bank.
+  poll_interval_min: 30
+  lookback_days: 7
+  reauth_warn_days: 30
+  request_timeout_sec: 30
