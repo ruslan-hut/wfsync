@@ -13,6 +13,7 @@ import (
 	"wfsync/impl/core"
 	"wfsync/internal/config"
 	"wfsync/internal/database"
+	"wfsync/internal/enablebanking"
 	"wfsync/internal/http-server/api"
 	"wfsync/internal/stripeclient"
 	"wfsync/internal/vatrates"
@@ -128,6 +129,20 @@ func main() {
 		handler.SetPaymentDatabase(mongo)
 	}
 	handler.SetOpencart(oc)
+
+	if conf.EnableBanking.Enabled {
+		// Statement polling needs somewhere to keep the session: the consent is granted
+		// by a person, lasts at most 180 days and cannot be refreshed, so losing it on
+		// restart would mean asking them to authorize again early.
+		if mongo == nil {
+			log.Error("enable banking requires mongo; bank integration disabled")
+		} else if ebClient, err := enablebanking.New(conf, log); err != nil {
+			log.Error("enable banking client", sl.Err(err))
+		} else {
+			handler.SetEnableBanking(ebClient)
+			handler.SetBankSessionDatabase(mongo)
+		}
+	}
 
 	var retryQueue *core.RetryQueue
 	if conf.RetryQueue.Enabled && mongo != nil {

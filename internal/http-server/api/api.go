@@ -9,6 +9,7 @@ import (
 	"time"
 	"wfsync/internal/config"
 	"wfsync/internal/http-server/handlers/b2b"
+	"wfsync/internal/http-server/handlers/bank"
 	"wfsync/internal/http-server/handlers/errors"
 	"wfsync/internal/http-server/handlers/payment"
 	"wfsync/internal/http-server/handlers/stripehandler"
@@ -37,6 +38,7 @@ type Handler interface {
 	wfsync.Core
 	payment.Core
 	b2b.Core
+	bank.Core
 }
 
 func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error) {
@@ -75,6 +77,10 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 			st.Get("/status/{id}", payment.Status(log, handler))
 			st.Get("/queue", payment.Queue(log, handler))
 		})
+		rootApi.Route("/bank", func(bankRouter chi.Router) {
+			bankRouter.Post("/auth", bank.StartAuth(log, handler))
+			bankRouter.Get("/status", bank.Status(log, handler))
+		})
 		rootApi.Route("/b2b", func(b2bRouter chi.Router) {
 			b2bRouter.Post("/proforma", b2b.CreateProforma(log, handler))
 			b2bRouter.Post("/invoice", b2b.CreateInvoice(log, handler))
@@ -83,6 +89,9 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 	router.Route("/webhook", func(rootWH chi.Router) {
 		rootWH.Post("/event", stripehandler.Event(log, handler))
 	})
+	// The bank redirects the account holder here in their own browser, with no bearer
+	// token of ours, so it cannot live under /v1. The state parameter authenticates it.
+	router.Get("/bank/callback", bank.Callback(log, handler))
 
 	httpLog := slog.NewLogLogger(log.Handler(), slog.LevelError)
 	server.httpServer = &http.Server{

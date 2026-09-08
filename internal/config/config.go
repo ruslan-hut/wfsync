@@ -108,6 +108,49 @@ type RetryQueue struct {
 	MaxOrderAgeDays int  `yaml:"max_order_age_days" env-default:"60"`
 }
 
+// EnableBanking configures access to the Enable Banking PSD2 aggregation API, which
+// supplies bank account statements used to match incoming transfers against issued
+// documents. Requests are authorized with an RS256 JWT signed by PrivateKeyPath and
+// keyed by AppID, so the private key never leaves this service.
+type EnableBanking struct {
+	Enabled bool   `yaml:"enabled" env-default:"false"`
+	BaseURL string `yaml:"base_url" env-default:"https://api.enablebanking.com"`
+
+	// AppID is the Enable Banking application id. It doubles as the JWT "kid".
+	AppID string `yaml:"app_id" env-default:""`
+	// PrivateKeyPath points to the PEM-encoded RSA private key whose public certificate
+	// is registered with the application. Keep it outside the repository, mode 0600.
+	PrivateKeyPath string `yaml:"private_key_path" env-default:""`
+	// RedirectURL must exactly match one of the redirect URLs registered for the
+	// application; the bank sends the account holder back to it after authorization.
+	RedirectURL string `yaml:"redirect_url" env-default:""`
+
+	// ASPSPName and ASPSPCountry select the bank connector (e.g. "PKO" / "PL").
+	ASPSPName    string `yaml:"aspsp_name" env-default:""`
+	ASPSPCountry string `yaml:"aspsp_country" env-default:"PL"`
+	// PSUType is "business" for company accounts, "personal" otherwise.
+	PSUType string `yaml:"psu_type" env-default:"business"`
+
+	// IBANs limits which of the authorized accounts are polled. Empty means all of them.
+	IBANs []string `yaml:"ibans"`
+
+	// PollIntervalMin is how often booked transactions are fetched. Mind that PSD2
+	// allows only a limited number of daily requests without the account holder
+	// present (4 per day is the regulatory floor), so a short interval may be refused
+	// by the bank regardless of what is configured here.
+	PollIntervalMin int `yaml:"poll_interval_min" env-default:"30"`
+	// LookbackDays sizes the sliding window re-read on every poll. Banks can book or
+	// amend entries with a back-date, so polling "since the last seen transaction"
+	// would silently miss them.
+	LookbackDays int `yaml:"lookback_days" env-default:"7"`
+	// ReauthWarnDays is how long before a session expires the service starts warning.
+	// Sessions cannot be renewed — only re-authorized by the account holder in person.
+	ReauthWarnDays int `yaml:"reauth_warn_days" env-default:"30"`
+
+	// RequestTimeoutSec bounds a single Enable Banking API call.
+	RequestTimeoutSec int `yaml:"request_timeout_sec" env-default:"30"`
+}
+
 // PaymentReconciler configures the periodic job that reconciles held Stripe payments
 // against their live status (invoicing captured holds, reflecting cancellations).
 type PaymentReconciler struct {
@@ -126,6 +169,7 @@ type Config struct {
 	VIES              VIES              `yaml:"vies"`
 	RetryQueue        RetryQueue        `yaml:"retry_queue"`
 	PaymentReconciler PaymentReconciler `yaml:"payment_reconciler"`
+	EnableBanking     EnableBanking     `yaml:"enable_banking"`
 	Env               string            `yaml:"env" env-default:"local"`
 	Log               string            `yaml:"log"`
 	Location          string            `yaml:"location" env-default:"UTC"`
