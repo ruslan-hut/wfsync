@@ -24,7 +24,7 @@ jobs:
           fi
 
           missing=""
-          for var in $(grep -o '${[A-Z0-9_]\+}' wfsync.yml | tr -d '${}' | sort -u); do
+          for var in $(grep -oE '\$\{[A-Z0-9_]+\}' wfsync.yml | tr -d '${}' | sort -u); do
             if [ -z "${!var:-}" ]; then
               missing="$missing $var"
             fi
@@ -35,6 +35,15 @@ jobs:
           fi
 
           envsubst < wfsync.yml > wfsync.yml.rendered && mv wfsync.yml.rendered wfsync.yml
+
+          # Belt and braces: a placeholder surviving substitution means the
+          # pre-check missed it, and the service would start with a literal
+          # ${VAR} it cannot detect.
+          if grep -qE '\$\{[A-Z0-9_]+\}' wfsync.yml; then
+            echo "::error::Unsubstituted placeholders remain in wfsync.yml"
+            grep -oE '\$\{[A-Z0-9_]+\}' wfsync.yml | sort -u
+            exit 1
+          fi
         env:
           STRIPE_API_KEY: ${{ secrets.STRIPE_API_KEY }}
           STRIPE_TEST_KEY: ${{ secrets.STRIPE_TEST_KEY }}

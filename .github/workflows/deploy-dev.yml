@@ -24,7 +24,7 @@ jobs:
           fi
 
           missing=""
-          for var in $(grep -o '${[A-Z0-9_]\+}' wfsync-dev.yml | tr -d '${}' | sort -u); do
+          for var in $(grep -oE '\$\{[A-Z0-9_]+\}' wfsync-dev.yml | tr -d '${}' | sort -u); do
             if [ -z "${!var:-}" ]; then
               missing="$missing $var"
             fi
@@ -35,6 +35,15 @@ jobs:
           fi
 
           envsubst < wfsync-dev.yml > wfsync-dev.yml.rendered && mv wfsync-dev.yml.rendered wfsync-dev.yml
+
+          # Belt and braces: a placeholder surviving substitution means the
+          # pre-check missed it, and the service would start with a literal
+          # ${VAR} it cannot detect.
+          if grep -qE '\$\{[A-Z0-9_]+\}' wfsync-dev.yml; then
+            echo "::error::Unsubstituted placeholders remain in wfsync-dev.yml"
+            grep -oE '\$\{[A-Z0-9_]+\}' wfsync-dev.yml | sort -u
+            exit 1
+          fi
         env:
           STRIPE_API_KEY: ${{ secrets.STRIPE_API_KEY }}
           STRIPE_TEST_KEY: ${{ secrets.STRIPE_TEST_KEY }}
@@ -53,6 +62,7 @@ jobs:
           SQL_PASSWORD: ${{ secrets.SQL_PASSWORD }}
           SQL_DATABASE: ${{ secrets.SQL_DATABASE }}
           FILE_PATH: ${{ secrets.FILE_PATH }}
+          FILE_URL: ${{ secrets.FILE_URL }}
           TELEGRAM_API_KEY: ${{ secrets.TELEGRAM_API_KEY }}
 
       - name: Copy Configuration to Server
