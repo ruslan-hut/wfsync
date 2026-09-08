@@ -24,6 +24,7 @@ const (
 	collectionVIESValidations = "vies_validations"
 	collectionRetryJobs       = "retry_jobs"
 	collectionBankAccounts    = "wfirma_bank_accounts"
+	collectionBankSessions    = "bank_sessions"
 )
 
 type MongoDB struct {
@@ -1215,4 +1216,93 @@ func fillIfEmpty(dst *string, src string) {
 	if *dst == "" && src != "" {
 		*dst = src
 	}
+}
+
+// SaveBankSession upserts a bank authorization session, keyed by its state value.
+func (m *MongoDB) SaveBankSession(session *entity.BankSession) error {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionBankSessions)
+	filter := bson.D{{Key: "state", Value: session.State}}
+	update := bson.D{{Key: "$set", Value: session}}
+	opts := options.Update().SetUpsert(true)
+	_, err = collection.UpdateOne(ctx, filter, update, opts)
+	return err
+}
+
+// GetBankSessionByState loads the session started under the given state value.
+// It returns nil without error when no such authorization was started, so a stray
+// callback is rejected rather than treated as a failure.
+func (m *MongoDB) GetBankSessionByState(state string) (*entity.BankSession, error) {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionBankSessions)
+	filter := bson.D{{Key: "state", Value: state}}
+	var session entity.BankSession
+	if err := collection.FindOne(ctx, filter).Decode(&session); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &session, nil
+}
+
+// GetActiveBankSession returns the authorized session with the latest expiry, which is
+// the one polling should use. It returns nil without error when no account has been
+// authorized yet.
+func (m *MongoDB) GetActiveBankSession() (*entity.BankSession, error) {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionBankSessions)
+	filter := bson.D{{Key: "status", Value: entity.BankSessionActive}}
+	opts := options.FindOne().SetSort(bson.D{{Key: "valid_until", Value: -1}})
+	var session entity.BankSession
+	if err := collection.FindOne(ctx, filter, opts).Decode(&session); err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &session, nil
+}
+
+// SupersedeBankSessions marks every active session other than keepState as revoked.
+// Called after a fresh authorization so that polling never has two live consents to
+// choose between.
+func (m *MongoDB) SupersedeBankSessions(keepState string) error {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionBankSessions)
+	filter := bson.D{
+		{Key: "status", Value: entity.BankSessionActive},
+		{Key: "state", Value: bson.D{{Key: "$ne", Value: keepState}}},
+	}
+	update := bson.D{{Key: "$set", Value: bson.D{{Key: "status", Value: entity.BankSessionRevoked}}}}
+	_, err = collection.UpdateMany(ctx, filter, update)
+	return err
 }

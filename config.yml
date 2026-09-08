@@ -51,3 +51,18 @@ vies:
   cache_hours: 720
   attempts: 3
   retry_delay_ms: 1000
+enable_banking:
+  enabled: false
+  base_url: https://api.enablebanking.com
+  app_id: your-enable-banking-app-id
+  private_key_path: /path/to/enablebanking/private.pem
+  redirect_url: http://localhost:8080/bank/callback
+  # Sandbox has no PKO connector: use Mock ASPSP or Bank Millennium for local work.
+  aspsp_name: Mock ASPSP
+  aspsp_country: PL
+  psu_type: business
+  ibans: []
+  poll_interval_min: 30
+  lookback_days: 7
+  reauth_warn_days: 30
+  request_timeout_sec: 30

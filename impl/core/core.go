@@ -12,6 +12,7 @@ import (
 	"time"
 	"wfsync/entity"
 	"wfsync/internal/config"
+	"wfsync/internal/enablebanking"
 	"wfsync/internal/stripeclient"
 	"wfsync/lib/sl"
 	occlient "wfsync/opencart/oc-client"
@@ -54,6 +55,8 @@ type Core struct {
 	inv        InvoiceService
 	db         PaymentDatabase
 	auth       AuthService
+	eb         *enablebanking.Client
+	bankDb     BankSessionDatabase
 	retryQueue *RetryQueue
 	filePath   string
 	fileUrl    string
