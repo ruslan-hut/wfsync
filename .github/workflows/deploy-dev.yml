@@ -16,25 +16,25 @@ jobs:
 
       - name: Prepare configuration file
         run: |
-          sed -i 's|${STRIPE_API_KEY}|'"$STRIPE_API_KEY"'|g' wfsync-dev.yml
-          sed -i 's|${STRIPE_TEST_KEY}|'"$STRIPE_TEST_KEY"'|g' wfsync-dev.yml
-          sed -i 's|${STRIPE_WH_SECRET}|'"$STRIPE_WH_SECRET"'|g' wfsync-dev.yml
-          sed -i 's|${STRIPE_TEST_WH_SECRET}|'"$STRIPE_TEST_WH_SECRET"'|g' wfsync-dev.yml
-          sed -i 's|${STRIPE_SUCCESS_URL}|'"$STRIPE_SUCCESS_URL"'|g' wfsync-dev.yml
-          sed -i 's|${WF_ACCESS_KEY}|'"$WF_ACCESS_KEY"'|g' wfsync-dev.yml
-          sed -i 's|${WF_SECRET_KEY}|'"$WF_SECRET_KEY"'|g' wfsync-dev.yml
-          sed -i 's|${WF_APP_ID}|'"$WF_APP_ID"'|g' wfsync-dev.yml
-          sed -i 's|${MONGO_HOST}|'"$MONGO_HOST"'|g' wfsync-dev.yml
-          sed -i 's|${MONGO_PORT}|'"$MONGO_PORT"'|g' wfsync-dev.yml
-          sed -i 's|${MONGO_USER}|'"$MONGO_USER"'|g' wfsync-dev.yml
-          sed -i 's|${MONGO_PASSWORD}|'"$MONGO_PASSWORD"'|g' wfsync-dev.yml
-          sed -i 's|${MONGO_DATABASE}|'"$MONGO_DATABASE"'|g' wfsync-dev.yml
-          sed -i 's|${SQL_USERNAME}|'"$SQL_USERNAME"'|g' wfsync-dev.yml
-          sed -i 's|${SQL_PASSWORD}|'"$SQL_PASSWORD"'|g' wfsync-dev.yml
-          sed -i 's|${SQL_DATABASE}|'"$SQL_DATABASE"'|g' wfsync-dev.yml
-          sed -i 's|${FILE_PATH}|'"$FILE_PATH"'|g' wfsync-dev.yml
-          sed -i 's|${TELEGRAM_API_KEY}|'"$TELEGRAM_API_KEY"'|g' wfsync-dev.yml
+          # Substitute every ${VAR} placeholder found in the template. Values come from
+          # the env block below; a placeholder without a value fails the deploy here
+          # rather than reaching the server empty, which the service cannot detect.
+          if ! command -v envsubst >/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq gettext-base
+          fi
 
+          missing=""
+          for var in $(grep -o '${[A-Z0-9_]\+}' wfsync-dev.yml | tr -d '${}' | sort -u); do
+            if [ -z "${!var:-}" ]; then
+              missing="$missing $var"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::No value for placeholders in wfsync-dev.yml:$missing (add the secret and map it in the env block)"
+            exit 1
+          fi
+
+          envsubst < wfsync-dev.yml > wfsync-dev.yml.rendered && mv wfsync-dev.yml.rendered wfsync-dev.yml
         env:
           STRIPE_API_KEY: ${{ secrets.STRIPE_API_KEY }}
           STRIPE_TEST_KEY: ${{ secrets.STRIPE_TEST_KEY }}
