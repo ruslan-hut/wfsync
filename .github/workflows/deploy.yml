@@ -35,6 +35,7 @@ jobs:
           sed -i 's|${FILE_PATH}|'"$FILE_PATH"'|g' wfsync.yml
           sed -i 's|${FILE_URL}|'"$FILE_URL"'|g' wfsync.yml
           sed -i 's|${TELEGRAM_API_KEY}|'"$TELEGRAM_API_KEY"'|g' wfsync.yml
+          sed -i 's|${EB_APP_ID}|'"$EB_APP_ID"'|g' wfsync.yml
 
         env:
           STRIPE_API_KEY: ${{ secrets.STRIPE_API_KEY }}
@@ -56,6 +57,7 @@ jobs:
           FILE_PATH: ${{ secrets.FILE_PATH }}
           FILE_URL: ${{ secrets.FILE_URL }}
           TELEGRAM_API_KEY: ${{ secrets.TELEGRAM_API_KEY }}
+          EB_APP_ID: ${{ secrets.EB_APP_ID }}
 
       - name: Copy Configuration to Server
         uses: appleboy/scp-action@master
