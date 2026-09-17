@@ -85,6 +85,13 @@ const (
 // multiple invoices, each annotated with a part number in the description.
 func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entity.CheckoutParams) (payment *entity.Payment, err error) {
 	log := c.log.With(slog.String("session_id", params.SessionId), slog.String("order_id", params.OrderId))
+	// Detach from the caller's deadline and cancellation: once issuance starts, a split
+	// order must not stop between parts because an HTTP request timed out or its client
+	// hung up — that leaves the order partly invoiced until someone re-runs it, and an
+	// invoices/add cut off mid-flight may still have been registered by wFirma. Every
+	// wFirma call stays bounded by the HTTP client's own timeout. Context values (the
+	// retry flag) are kept.
+	ctx = context.WithoutCancel(ctx)
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error("panic recovered in RegisterInvoice", slog.Any("panic", r))

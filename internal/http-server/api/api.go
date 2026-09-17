@@ -42,6 +42,13 @@ type Handler interface {
 	bank.Core
 }
 
+// Request deadlines. documentRequestTimeout covers the worst case of a split order: four
+// parts, each an invoices/add that can be resubmitted once after a stock error.
+const (
+	defaultRequestTimeout  = 60 * time.Second
+	documentRequestTimeout = 5 * time.Minute
+)
+
 func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error) {
 	server := &Server{
 		conf: conf,
@@ -49,7 +56,6 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 	}
 
 	router := chi.NewRouter()
-	router.Use(timeout.Timeout(60 * time.Second)) // wfirma requests need long timeouts
 	router.Use(middleware.RequestID)
 	router.Use(middleware.Recoverer)
 	router.Use(render.SetContentType(render.ContentTypeJSON))
@@ -57,20 +63,35 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 	router.NotFound(errors.NotFound(log))
 	router.MethodNotAllowed(errors.NotAllowed(log))
 
+	// Routes that issue wFirma documents get a longer deadline than the rest: a split order
+	// is one invoices/add call per part, each able to take tens of seconds (twice over when
+	// a stock error forces a resubmit), so four parts overrun defaultRequestTimeout. A nested
+	// middleware cannot extend a deadline set further up, so the timeout is applied per
+	// group instead of once on the root router.
+	defaultTimeout := timeout.Timeout(defaultRequestTimeout)
+	documentTimeout := timeout.Timeout(documentRequestTimeout)
+
 	router.Route("/v1", func(rootApi chi.Router) {
 		rootApi.Use(authenticate.New(log, handler))
 		rootApi.Route("/wf", func(wf chi.Router) {
-			wf.Get("/invoice/{id}", wfinvoice.Download(log, handler))
-			wf.Get("/order/{id}", wfinvoice.OrderToInvoice(log, handler))
-			wf.Get("/file/proforma/{id}", wfinvoice.FileProforma(log, handler))
-			wf.Get("/file/invoice/{id}", wfinvoice.FileInvoice(log, handler))
-			wf.Post("/proforma", wfinvoice.CreateProforma(log, handler))
-			wf.Post("/invoice", wfinvoice.CreateInvoice(log, handler))
-			wf.Post("/sync/pull", wfsync.SyncFromRemote(log, handler))
-			wf.Post("/sync/push", wfsync.SyncToRemote(log, handler))
-			wf.Get("/list", wfsync.InvoiceList(log, handler))
+			wf.Group(func(docs chi.Router) {
+				docs.Use(documentTimeout)
+				docs.Get("/order/{id}", wfinvoice.OrderToInvoice(log, handler))
+				docs.Get("/file/proforma/{id}", wfinvoice.FileProforma(log, handler))
+				docs.Get("/file/invoice/{id}", wfinvoice.FileInvoice(log, handler))
+				docs.Post("/proforma", wfinvoice.CreateProforma(log, handler))
+				docs.Post("/invoice", wfinvoice.CreateInvoice(log, handler))
+			})
+			wf.Group(func(rest chi.Router) {
+				rest.Use(defaultTimeout)
+				rest.Get("/invoice/{id}", wfinvoice.Download(log, handler))
+				rest.Post("/sync/pull", wfsync.SyncFromRemote(log, handler))
+				rest.Post("/sync/push", wfsync.SyncToRemote(log, handler))
+				rest.Get("/list", wfsync.InvoiceList(log, handler))
+			})
 		})
 		rootApi.Route("/st", func(st chi.Router) {
+			st.Use(defaultTimeout)
 			st.Post("/hold", payment.Hold(log, handler))
 			st.Post("/pay", payment.Pay(log, handler))
 			st.Post("/capture/{id}", payment.Capture(log, handler))
@@ -79,6 +100,7 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 			st.Get("/queue", payment.Queue(log, handler))
 		})
 		rootApi.Route("/bank", func(bankRouter chi.Router) {
+			bankRouter.Use(defaultTimeout)
 			bankRouter.Post("/auth", bank.StartAuth(log, handler))
 			bankRouter.Get("/status", bank.Status(log, handler))
 			bankRouter.Get("/transactions", bank.Transactions(log, handler))
@@ -87,25 +109,32 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 			bankRouter.Post("/match", bank.Match(log, handler))
 		})
 		rootApi.Route("/b2b", func(b2bRouter chi.Router) {
-			b2bRouter.Post("/proforma", b2b.CreateProforma(log, handler))
-			b2bRouter.Post("/invoice", b2b.CreateInvoice(log, handler))
-			b2bRouter.Get("/status/{order_uid}", b2b.PaymentStatus(log, handler))
-			b2bRouter.Post("/status", b2b.PaymentStatusBatch(log, handler))
+			b2bRouter.Group(func(docs chi.Router) {
+				docs.Use(documentTimeout)
+				docs.Post("/proforma", b2b.CreateProforma(log, handler))
+				docs.Post("/invoice", b2b.CreateInvoice(log, handler))
+			})
+			b2bRouter.Group(func(rest chi.Router) {
+				rest.Use(defaultTimeout)
+				rest.Get("/status/{order_uid}", b2b.PaymentStatus(log, handler))
+				rest.Post("/status", b2b.PaymentStatusBatch(log, handler))
+			})
 		})
 	})
 	router.Route("/webhook", func(rootWH chi.Router) {
+		rootWH.Use(defaultTimeout)
 		rootWH.Post("/event", stripehandler.Event(log, handler))
 	})
 	// The bank redirects the account holder here in their own browser, with no bearer
 	// token of ours, so it cannot live under /v1. The state parameter authenticates it.
-	router.Get("/bank/callback", bank.Callback(log, handler))
+	router.With(defaultTimeout).Get("/bank/callback", bank.Callback(log, handler))
 
 	httpLog := slog.NewLogLogger(log.Handler(), slog.LevelError)
 	server.httpServer = &http.Server{
 		Handler:      router,
 		ErrorLog:     httpLog,
 		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 65 * time.Second, // must exceed the context deadline (60s) to avoid premature connection close
+		WriteTimeout: documentRequestTimeout + 5*time.Second, // must exceed the longest context deadline to avoid premature connection close
 		IdleTimeout:  60 * time.Second,
 	}
 
