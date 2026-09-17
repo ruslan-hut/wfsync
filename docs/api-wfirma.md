@@ -944,7 +944,9 @@ per-instance, matching the single-service deployment.
 so a split that failed part-way **resumes at the first missing part** instead of being
 treated as fully invoiced. The failure is reported with the number of parts already
 registered, and re-running the request (or letting the retry queue re-run it) completes the
-rest without duplicating the earlier ones.
+rest without duplicating the earlier ones. A repeated request for a fully invoiced split
+order returns **every** part (all URLs in `urls` for `POST /v1/b2b/invoice`), not just the
+first.
 
 Because chunking is deterministic for the same order, part *n* always carries the same
 amount. That amount is cross-checked against each already-registered document; a mismatch,

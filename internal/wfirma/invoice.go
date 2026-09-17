@@ -1045,31 +1045,6 @@ func isFakturaType(t string) bool {
 	return t == string(invoiceNormal) || t == string(invoiceNormalDraft)
 }
 
-// FindInvoiceByExternalId returns the wFirma id of an existing faktura whose id_external
-// matches externalId, or "" when none exists yet. Every invoice created here stamps
-// id_external from params.ExternalRef() (order id for OpenCart, order UID for B2B — see
-// invoice(), IdExternal), so this is the order-level dedup key.
-//
-// It is the idempotency guard for flows that hold no stored invoice id to verify with
-// InvoiceExists — POST /v1/wf/invoice, POST /v1/b2b/invoice, and the retry queue. The
-// wFirma-side conditions filter narrows to id_external only; the type is checked in Go rather
-// than in the query because (a) a proforma for the same order shares the id_external and must
-// not count, and (b) the result set for a single order is tiny. A split order yields several
-// faktura parts sharing the id_external — any one blocks re-creation, so the first is returned.
-//
-// Callers must treat a non-nil error as "state unknown" and abort rather than risk a
-// duplicate, mirroring InvoiceExists.
-func (c *Client) FindInvoiceByExternalId(ctx context.Context, externalId string) (string, error) {
-	existing, err := c.findFakturasByExternalId(ctx, externalId)
-	if err != nil {
-		return "", err
-	}
-	if len(existing) == 0 {
-		return "", nil
-	}
-	return existing[0].Id, nil
-}
-
 // existingFaktura is a faktura already registered for an order: enough to decide whether
 // a part still needs creating (Id) and whether the documents look like the parts of this
 // order or like duplicates (Total).

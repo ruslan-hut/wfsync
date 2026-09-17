@@ -290,41 +290,10 @@ func (rq *RetryQueue) processOneJob(job *entity.RetryJob, manual bool) {
 	// the original error was already reported to Telegram when the job was enqueued.
 	ctx := entity.WithRetry(context.Background())
 
-	// Order-level idempotency: a capture / webhook / reconciler may have issued the faktura
-	// for this order already. The job holds no invoice id to verify with InvoiceExists, so
-	// match on the order via id_external (ExternalRef) before creating. On a lookup error,
-	// reschedule rather than create — proceeding blind could produce a duplicate faktura.
-	if params.ExternalRef() != "" {
-		existingId, findErr := rq.inv.FindInvoiceByExternalId(ctx, params.ExternalRef())
-		if findErr != nil {
-			job.Attempts++
-			job.UpdatedAt = time.Now()
-			log.Warn("check existing invoice before retry", sl.Err(findErr))
-			rq.retryLater(job, log, "check existing invoice: "+findErr.Error())
-			return
-		}
-		if existingId != "" {
-			job.Attempts++
-			job.UpdatedAt = time.Now()
-			if rq.oc != nil {
-				if ocErr := rq.oc.SaveInvoiceId(params.OrderId, existingId, ""); ocErr != nil {
-					log.Error("save existing invoice id to opencart", sl.Err(ocErr))
-				}
-			}
-			job.Status = entity.RetryJobCompleted
-			job.LastError = ""
-			if dbErr := rq.db.UpdateRetryJob(job); dbErr != nil {
-				log.Error("update retry job after dedup", sl.Err(dbErr))
-			}
-			log.With(
-				slog.String("invoice_id", existingId),
-				slog.String("tg_topic", entity.TopicPayment),
-			).Info("retry job resolved: faktura already exists for order")
-			return
-		}
-	}
-
-	// Attempt to register the invoice.
+	// Attempt to register the invoice. RegisterInvoice is order-level idempotent: a faktura
+	// a capture / webhook / reconciler already issued is reused (matched on id_external),
+	// and a split order that failed part-way resumes at its first missing part. A lookup
+	// error surfaces as err and reschedules the job rather than risking a duplicate.
 	payment, err := rq.inv.RegisterInvoice(ctx, params)
 	job.Attempts++
 	job.UpdatedAt = time.Now()

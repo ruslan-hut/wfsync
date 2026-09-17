@@ -38,7 +38,6 @@ type InvoiceService interface {
 	SyncToRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
 	FindInvoices(ctx context.Context, from, to string) ([]*entity.LocalInvoice, error)
 	InvoiceExists(ctx context.Context, invoiceID string) (bool, error)
-	FindInvoiceByExternalId(ctx context.Context, externalId string) (string, error)
 	ExpectedB2BVATRate(countryCode string, hasTaxId bool) int
 }
 
@@ -457,30 +456,14 @@ func (c *Core) WFirmaRegisterInvoice(ctx context.Context, params *entity.Checkou
 	var payment *entity.Payment
 	var err error
 
-	// when the invoice was already registered, we will get InvoiceId in CheckoutParams
-	// in this case we need only to download a file
-
-	// Order-level idempotency for flows that arrive without a stored invoice id (direct
-	// POST /v1/wf/invoice and /v1/b2b/invoice build params from the request body). Ask
-	// wFirma whether a faktura already exists for this order (matched on id_external, i.e.
-	// ExternalRef — order id for OpenCart, order UID for B2B) and reuse it instead of
-	// issuing a second one. An error means the state is unknown, so abort rather than
-	// risk a duplicate.
-	if params.InvoiceId == "" && params.ExternalRef() != "" {
-		existingId, findErr := c.inv.FindInvoiceByExternalId(ctx, params.ExternalRef())
-		if findErr != nil {
-			return nil, fmt.Errorf("check existing invoice for order %s: %w", params.OrderId, findErr)
-		}
-		if existingId != "" {
-			c.log.With(
-				slog.String("invoice_id", existingId),
-				slog.String("order_id", params.OrderId),
-				slog.String("external_id", params.ExternalRef()),
-			).Info("faktura already exists for order, skipping creation")
-			params.InvoiceId = existingId
-		}
-	}
-
+	// When the invoice was already registered, params carry its InvoiceId and only the
+	// file needs downloading.
+	//
+	// Otherwise RegisterInvoice is the idempotency guard: it looks up fakturas already
+	// registered for the order (id_external = ExternalRef) and creates only the parts still
+	// missing, returning every part. Do not short-circuit it with a single-id lookup here —
+	// a split order would come back as its first part only, and a part-way failure would
+	// never get its remaining parts created.
 	if params.InvoiceId == "" {
 		payment, err = c.inv.RegisterInvoice(ctx, params)
 		if err != nil {
