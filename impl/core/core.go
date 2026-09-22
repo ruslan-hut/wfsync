@@ -236,6 +236,16 @@ func (c *Core) processInvoice(ctx context.Context, params *entity.CheckoutParams
 		params.TaxTitle = order.TaxTitle
 		params.SubTotal = order.SubTotal
 		params.CustomerGroup = order.CustomerGroup
+		// The Stripe session only carries what the payment page collected (often just
+		// name and country), while OpenCart holds the full billing address and the NIP
+		// parsed from custom_field. wFirma prints the invoice header from the contractor
+		// record, so the order data has to win here.
+		if order.ClientDetails != nil {
+			if order.ClientDetails.Email == "" && params.ClientDetails != nil {
+				order.ClientDetails.Email = params.ClientDetails.Email
+			}
+			params.ClientDetails = order.ClientDetails
+		}
 	}
 
 	if params.InvoiceId != "" && params.OrderId != "" {
