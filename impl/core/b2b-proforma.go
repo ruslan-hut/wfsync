@@ -60,12 +60,14 @@ func (c *Core) B2BCreateProforma(ctx context.Context, order *entity.B2BOrder) (*
 
 	record := c.proformaRecord(ref, log)
 	if record != nil && record.Fingerprint == fingerprint && slices.Equal(record.DocumentIds(), registeredIds) {
+		// The documents are valid and may already be with the client; a failed PDF
+		// download is a reason to retry, never to replace them under new numbers.
 		payment, err := c.reuseProforma(ctx, record.Payment)
-		if err == nil {
-			log.With(slog.Int("documents", len(registeredIds))).Info("proforma unchanged, reusing issued documents")
-			return payment, nil
+		if err != nil {
+			return nil, fmt.Errorf("reuse issued proforma: %w", err)
 		}
-		log.Warn("reuse proforma files, issuing anew", sl.Err(err))
+		log.With(slog.Int("documents", len(registeredIds))).Info("proforma unchanged, reusing issued documents")
+		return payment, nil
 	}
 
 	if err := c.discardProformas(ctx, ref, registeredIds, record, log); err != nil {

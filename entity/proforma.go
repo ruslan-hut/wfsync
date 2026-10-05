@@ -57,6 +57,7 @@ func (c *CheckoutParams) ProformaFingerprint() string {
 	}
 	field(strings.ToUpper(c.Currency))
 	field(c.Total)
+	field(c.SubTotal)
 	field(c.TaxValue)
 	field(c.Shipping)
 	for _, item := range c.LineItems {

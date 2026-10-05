@@ -17,14 +17,15 @@ import (
 // issues parts documents, mirroring how a large order is split.
 type proformaInvoiceService struct {
 	InvoiceService
-	dir        string
-	parts      int
-	nextId     int
-	registered []string
-	registers  int
-	downloads  int
-	findErr    error
-	deleteErr  error
+	dir         string
+	parts       int
+	nextId      int
+	registered  []string
+	registers   int
+	downloads   int
+	findErr     error
+	deleteErr   error
+	downloadErr error
 }
 
 func (s *proformaInvoiceService) ExpectedB2BVATRate(_ string, _ bool) int { return 0 }
@@ -61,6 +62,9 @@ func (s *proformaInvoiceService) RegisterProforma(_ context.Context, params *ent
 }
 
 func (s *proformaInvoiceService) DownloadInvoice(_ context.Context, id string) (string, *entity.FileMeta, error) {
+	if s.downloadErr != nil {
+		return "", nil, s.downloadErr
+	}
 	s.downloads++
 	name := "proforma-" + id + ".pdf"
 	if err := os.WriteFile(filepath.Join(s.dir, name), []byte("pdf"), 0o644); err != nil {
@@ -236,6 +240,29 @@ func TestB2BCreateProformaReissuesWhenDocumentGone(t *testing.T) {
 	}
 	if len(inv.registered) != 2 {
 		t.Errorf("wFirma holds %v, want one fresh set of 2", inv.registered)
+	}
+}
+
+// A failed re-download of a missing PDF fails the request but leaves the issued
+// documents alone: they are valid and may already be with the client.
+func TestB2BCreateProformaKeepsDocumentsWhenDownloadFails(t *testing.T) {
+	c, inv, _ := proformaTestCore(t, 2)
+	ctx := context.Background()
+
+	first, err := c.B2BCreateProforma(ctx, testB2BOrder())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(c.filePath, first.Parts[1].InvoiceFile)); err != nil {
+		t.Fatal(err)
+	}
+	inv.downloadErr = errors.New("timeout")
+
+	if _, err := c.B2BCreateProforma(ctx, testB2BOrder()); err == nil {
+		t.Fatal("expected an error")
+	}
+	if inv.registers != 1 || !slices.Equal(inv.registered, paymentIds(first)) {
+		t.Errorf("documents changed: registrations %d, wFirma holds %v", inv.registers, inv.registered)
 	}
 }
 
