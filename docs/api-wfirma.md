@@ -444,6 +444,12 @@ Returns `Payment` object:
 
 Creates a proforma invoice in Wfirma from a B2B order payload. The order is converted to `CheckoutParams` internally with B2B customer group and then processed through the standard proforma creation flow.
 
+The request is idempotent per `order_uid`:
+
+- The issued set (document ids, PDF files) is remembered together with a fingerprint of everything printed on it — order number, client, billing address, currency, totals and every line (SKU, name, quantity, price). A repeated request with the same fingerprint, while wFirma still holds exactly those documents, returns them without issuing new ones (a missing PDF is downloaded again).
+- When anything changed, or the documents in wFirma do not match the remembered set, every proforma registered under the order's `id_external` is deleted first, then a new set is issued. If the lookup or a delete fails the request fails and nothing new is issued, so an order never carries two sets.
+- Requests for the same order are serialized, and issuance runs detached from the HTTP request: a caller that timed out and retries waits for the running issuance and gets its result.
+
 ```
 POST /v1/b2b/proforma
 ```

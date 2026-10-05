@@ -27,6 +27,7 @@ const (
 	collectionBankSessions    = "bank_sessions"
 	collectionBankTx          = "bank_transactions"
 	collectionPaymentFacts    = "payment_facts"
+	collectionProformas       = "b2b_proformas"
 )
 
 type MongoDB struct {
@@ -467,6 +468,56 @@ func (m *MongoDB) SaveProduct(product *entity.Product) error {
 	update := bson.D{{"$set", product}}
 	opts := options.Update().SetUpsert(true)
 	_, err = collection.UpdateOne(ctx, filter, update, opts)
+	return err
+}
+
+// GetProformaRecord returns the proforma set remembered for an order, nil when none is.
+func (m *MongoDB) GetProformaRecord(externalId string) (*entity.ProformaRecord, error) {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionProformas)
+	var record entity.ProformaRecord
+	if err = collection.FindOne(ctx, bson.D{{"external_id", externalId}}).Decode(&record); err != nil {
+		return nil, m.findError(err)
+	}
+	return &record, nil
+}
+
+// SaveProformaRecord stores the proforma set issued for an order, replacing any earlier one.
+func (m *MongoDB) SaveProformaRecord(record *entity.ProformaRecord) error {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionProformas)
+	filter := bson.D{{"external_id", record.ExternalId}}
+	opts := options.Replace().SetUpsert(true)
+	_, err = collection.ReplaceOne(ctx, filter, record, opts)
+	return err
+}
+
+// DeleteProformaRecord forgets the proforma set remembered for an order.
+func (m *MongoDB) DeleteProformaRecord(externalId string) error {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionProformas)
+	_, err = collection.DeleteOne(ctx, bson.D{{"external_id", externalId}})
 	return err
 }
 

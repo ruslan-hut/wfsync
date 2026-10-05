@@ -127,6 +127,7 @@ func main() {
 	handler.SetInvoiceService(wfirmaClient)
 	if mongo != nil {
 		handler.SetPaymentDatabase(mongo)
+		handler.SetProformaDatabase(mongo)
 	}
 	handler.SetOpencart(oc)
 

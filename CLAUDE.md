@@ -82,7 +82,7 @@ All `/v1/*` endpoints require `Authorization: Bearer TOKEN`
 - `GET /v1/wf/list` - Invoice registration report for a date range (JSON, or CSV with `format=csv`)
 
 ### B2B (Wfirma)
-- `POST /v1/b2b/proforma` - Create proforma from B2B order payload
+- `POST /v1/b2b/proforma` - Create proforma from B2B order payload (idempotent per `order_uid`; reuses the issued set while the data is unchanged)
 - `POST /v1/b2b/invoice` - Create invoice from B2B order payload
 
 ### Webhook

@@ -1,4 +1,4 @@
-package wfirma
+package keylock
 
 import (
 	"sync"
@@ -9,7 +9,7 @@ import (
 // goroutines holding the lock for one order never overlap, so a find→add sequence cannot
 // be interleaved by a second trigger for the same order.
 func TestOrderLocksSerializesSameKey(t *testing.T) {
-	locks := newOrderLocks()
+	locks := New()
 
 	var mu sync.Mutex
 	inside, maxInside := 0, 0
@@ -19,7 +19,7 @@ func TestOrderLocksSerializesSameKey(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			unlock := locks.lock("order-1")
+			unlock := locks.Lock("order-1")
 			defer unlock()
 
 			mu.Lock()
@@ -47,12 +47,12 @@ func TestOrderLocksSerializesSameKey(t *testing.T) {
 // TestOrderLocksIndependentKeys guards against serializing unrelated orders: two different
 // keys must be held simultaneously, otherwise invoice creation becomes globally single-file.
 func TestOrderLocksIndependentKeys(t *testing.T) {
-	locks := newOrderLocks()
+	locks := New()
 
-	first := locks.lock("order-1")
+	first := locks.Lock("order-1")
 	done := make(chan struct{})
 	go func() {
-		locks.lock("order-2")()
+		locks.Lock("order-2")()
 		close(done)
 	}()
 
@@ -63,10 +63,10 @@ func TestOrderLocksIndependentKeys(t *testing.T) {
 // TestOrderLocksNoKey covers the callers that pass an empty external ref and the zero-value
 // client: both must be no-ops rather than a panic or a global lock.
 func TestOrderLocksNoKey(t *testing.T) {
-	locks := newOrderLocks()
-	locks.lock("")()
-	locks.lock("")()
+	locks := New()
+	locks.Lock("")()
+	locks.Lock("")()
 
-	var nilLocks *orderLocks
-	nilLocks.lock("order-1")()
+	var nilLocks *Map
+	nilLocks.Lock("order-1")()
 }

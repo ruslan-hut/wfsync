@@ -14,6 +14,7 @@ import (
 	"wfsync/internal/config"
 	"wfsync/internal/enablebanking"
 	"wfsync/internal/stripeclient"
+	"wfsync/lib/keylock"
 	"wfsync/lib/sl"
 	occlient "wfsync/opencart/oc-client"
 
@@ -34,6 +35,7 @@ type InvoiceService interface {
 	RegisterInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 	RegisterProforma(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 	DeleteProforma(ctx context.Context, invoiceID string) error
+	FindProformaIds(ctx context.Context, externalId string) ([]string, error)
 	SyncFromRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
 	SyncToRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
 	FindInvoices(ctx context.Context, from, to string) ([]*entity.LocalInvoice, error)
@@ -60,16 +62,20 @@ type Core struct {
 	bankMatchDb BankMatchDatabase
 	bankFactDb  BankFactDatabase
 	retryQueue  *RetryQueue
-	filePath    string
-	fileUrl     string
-	log         *slog.Logger
+	proformaDb  ProformaDatabase
+	// proformaLocks serializes B2B proforma issuance per order.
+	proformaLocks *keylock.Map
+	filePath      string
+	fileUrl       string
+	log           *slog.Logger
 }
 
 func New(conf *config.Config, log *slog.Logger) Core {
 	return Core{
-		filePath: conf.FilePath,
-		fileUrl:  conf.OpenCart.FileUrl,
-		log:      log.With(sl.Module("core")),
+		filePath:      conf.FilePath,
+		fileUrl:       conf.OpenCart.FileUrl,
+		proformaLocks: keylock.New(),
+		log:           log.With(sl.Module("core")),
 	}
 }
 
@@ -699,14 +705,6 @@ func (c *Core) WFirmaCreateProforma(ctx context.Context, params *entity.Checkout
 
 func (c *Core) WFirmaCreateInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
 	return c.WFirmaRegisterInvoice(ctx, params)
-}
-
-func (c *Core) B2BCreateProforma(ctx context.Context, order *entity.B2BOrder) (*entity.Payment, error) {
-	params := order.ToCheckoutParams()
-	if err := c.validateB2BVATRate(params); err != nil {
-		return nil, err
-	}
-	return c.WFirmaRegisterProforma(ctx, params)
 }
 
 func (c *Core) B2BCreateInvoice(ctx context.Context, order *entity.B2BOrder) (*entity.Payment, error) {

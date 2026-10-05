@@ -104,7 +104,7 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	// queue) so the duplicate check below cannot be overtaken between find and add.
 	// Proformas are exempt: they are intentionally re-issued when an order changes.
 	if invType != invoiceProforma {
-		defer c.orderLocks.lock(params.ExternalRef())()
+		defer c.orderLocks.Lock(params.ExternalRef())()
 	}
 
 	if c.db != nil {
@@ -1074,6 +1074,28 @@ func sameAmount(a, b float64) bool {
 // order that failed part-way: n existing documents mean chunks 1..n are done and creation
 // picks up at n+1. Proformas share the id_external and are filtered out here.
 func (c *Client) findFakturasByExternalId(ctx context.Context, externalId string) ([]existingFaktura, error) {
+	return c.findByExternalId(ctx, externalId, isFakturaType)
+}
+
+// FindProformaIds returns the ids of every proforma carrying externalId in id_external,
+// in creation order. Fakturas sharing the id_external are filtered out.
+func (c *Client) FindProformaIds(ctx context.Context, externalId string) ([]string, error) {
+	found, err := c.findByExternalId(ctx, externalId, func(t string) bool {
+		return t == string(invoiceProforma)
+	})
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(found))
+	for i, f := range found {
+		ids[i] = f.Id
+	}
+	return ids, nil
+}
+
+// findByExternalId returns the documents whose type satisfies match and whose
+// id_external equals externalId, sorted by id (creation order).
+func (c *Client) findByExternalId(ctx context.Context, externalId string, match func(docType string) bool) ([]existingFaktura, error) {
 	if !c.enabled {
 		return nil, fmt.Errorf("wFirma is disabled")
 	}
@@ -1122,7 +1144,7 @@ func (c *Client) findFakturasByExternalId(ctx context.Context, externalId string
 	// The invoices map also carries a non-invoice "parameters" entry (Id == ""), skipped here.
 	var found []existingFaktura
 	for _, w := range resp.Invoices {
-		if w.Invoice.Id == "" || !isFakturaType(w.Invoice.Type) {
+		if w.Invoice.Id == "" || !match(w.Invoice.Type) {
 			continue
 		}
 		ex := existingFaktura{Id: w.Invoice.Id}
