@@ -1444,6 +1444,13 @@ func (c *Client) ksefReadiness(ctx context.Context, invoiceID string) (ready, pe
 // It is the pure core of ksefReadiness (extracted for testing). Field names are matched
 // loosely (any key containing "ksef") to stay robust to wFirma's exact response shape.
 func classifyKSefFields(fields map[string]json.RawMessage) (ready, pending bool) {
+	// A proforma is never sent to KSeF, yet wFirma returns the same (empty) ksef_*
+	// fields on it — read as "still processing", every proforma part would sit out
+	// the whole wait budget before its download.
+	if rawJSONString(fields["type"]) == string(invoiceProforma) {
+		return false, false
+	}
+
 	hasKSef := false
 	numberAssigned := false
 	statusOK := false

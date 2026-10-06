@@ -93,6 +93,11 @@ func TestClassifyKSefFields(t *testing.T) {
 			wantReady: true, wantPending: false,
 		},
 		{
+			name:      "proforma with empty ksef fields downloads immediately",
+			fields:    fields(map[string]string{"id": "123", "type": "proforma", "ksef_status": "", "ksef_reference_number": "", "ksef_registration_date": ""}),
+			wantReady: false, wantPending: false,
+		},
+		{
 			name:        "pending: submitted, still processing",
 			fields:      fields(map[string]string{"id": "123", "ksef_status": "processing", "ksef_reference_number": "", "ksef_registration_date": ""}),
 			wantReady:   false,
