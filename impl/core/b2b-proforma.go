@@ -59,7 +59,19 @@ func (c *Core) B2BCreateProforma(ctx context.Context, order *entity.B2BOrder) (*
 	}
 
 	record := c.proformaRecord(ref, log)
-	if record != nil && record.Fingerprint == fingerprint && slices.Equal(record.DocumentIds(), registeredIds) {
+	if record != nil && record.Fingerprint == fingerprint && containsAll(registeredIds, record.DocumentIds()) {
+		// Proformas registered beside the remembered set are copies no caller holds
+		// (left by a run that never recorded them); removing them keeps one set per order
+		// without renumbering the documents the client may already have.
+		if extra := without(registeredIds, record.DocumentIds()); len(extra) > 0 {
+			for _, id := range extra {
+				if err := c.inv.DeleteProforma(ctx, id); err != nil {
+					return nil, fmt.Errorf("delete duplicate proforma %s: %w", id, err)
+				}
+			}
+			log.With(slog.Any("proforma_ids", extra)).Info("duplicate proformas deleted")
+		}
+
 		// The documents are valid and may already be with the client; a failed PDF
 		// download is a reason to retry, never to replace them under new numbers.
 		payment, err := c.reuseProforma(ctx, record.Payment)
@@ -209,4 +221,28 @@ func proformaFiles(p *entity.Payment) []string {
 		}
 	}
 	return names
+}
+
+// containsAll reports whether every id in want is among have; an empty want never matches.
+func containsAll(have, want []string) bool {
+	if len(want) == 0 {
+		return false
+	}
+	for _, id := range want {
+		if !slices.Contains(have, id) {
+			return false
+		}
+	}
+	return true
+}
+
+// without returns the ids of all that are not in drop, in order.
+func without(all, drop []string) []string {
+	var out []string
+	for _, id := range all {
+		if !slices.Contains(drop, id) {
+			out = append(out, id)
+		}
+	}
+	return out
 }

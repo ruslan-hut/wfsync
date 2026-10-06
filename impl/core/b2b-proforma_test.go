@@ -222,6 +222,30 @@ func TestB2BCreateProformaReplacesUnrecordedDocuments(t *testing.T) {
 	}
 }
 
+// Copies registered beside the remembered set — left by runs that never recorded them —
+// are deleted, and the remembered set is returned under its original numbers.
+func TestB2BCreateProformaDeletesDuplicatesKeepsRecordedSet(t *testing.T) {
+	c, inv, _ := proformaTestCore(t, 2)
+	ctx := context.Background()
+
+	first, err := c.B2BCreateProforma(ctx, testB2BOrder())
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv.registered = append([]string{"80", "81"}, inv.registered...)
+
+	second, err := c.B2BCreateProforma(ctx, testB2BOrder())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv.registers != 1 {
+		t.Errorf("registrations = %d, want 1", inv.registers)
+	}
+	if !slices.Equal(paymentIds(second), paymentIds(first)) || !slices.Equal(inv.registered, paymentIds(first)) {
+		t.Errorf("returned %v, wFirma holds %v, want only %v", paymentIds(second), inv.registered, paymentIds(first))
+	}
+}
+
 // A document deleted by hand in wFirma no longer matches the record, so the set is issued again.
 func TestB2BCreateProformaReissuesWhenDocumentGone(t *testing.T) {
 	c, inv, _ := proformaTestCore(t, 2)

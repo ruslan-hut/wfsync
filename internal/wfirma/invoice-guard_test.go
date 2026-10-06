@@ -43,10 +43,12 @@ func (f *fakeWfirma) handler() http.Handler {
 	})
 }
 
-// writeFind answers invoices/find for the id_external condition in the request body.
+// writeFind answers invoices/find for the id_external and type conditions in the request
+// body. Like the real API, a query without a type condition returns no proformas.
 func (f *fakeWfirma) writeFind(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
-	ref := externalRefFromFindRequest(body)
+	ref := findRequestCondition(body, "id_external")
+	docType := findRequestCondition(body, "type")
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -54,6 +56,9 @@ func (f *fakeWfirma) writeFind(w http.ResponseWriter, r *http.Request) {
 	entries := []string{}
 	for _, inv := range f.added {
 		if ref != "" && inv.IdExternal != ref {
+			continue
+		}
+		if docType != "" && inv.Type != docType || docType == "" && inv.Type == string(invoiceProforma) {
 			continue
 		}
 		entries = append(entries, fmt.Sprintf(
@@ -96,9 +101,9 @@ func (f *fakeWfirma) writeAdd(w http.ResponseWriter, r *http.Request) {
 		inv.Id, inv.Number, inv.Type))
 }
 
-// externalRefFromFindRequest pulls the id_external value out of a find request's
-// conditions so the fake can filter like the real API does.
-func externalRefFromFindRequest(body []byte) string {
+// findRequestCondition pulls the value of one field's condition out of a find request
+// so the fake can filter like the real API does.
+func findRequestCondition(body []byte, field string) string {
 	var req struct {
 		API struct {
 			Invoices struct {
@@ -119,7 +124,7 @@ func externalRefFromFindRequest(body []byte) string {
 		return ""
 	}
 	for _, c := range req.API.Invoices.Parameters.Conditions.And {
-		if c.Condition.Field == "id_external" {
+		if c.Condition.Field == field {
 			return c.Condition.Value
 		}
 	}

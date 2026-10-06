@@ -447,7 +447,9 @@ Creates a proforma invoice in Wfirma from a B2B order payload. The order is conv
 The request is idempotent per `order_uid`:
 
 - The issued set (document ids, PDF files) is remembered together with a fingerprint of everything printed on it — order number, client, billing address, currency, totals and every line (SKU, name, quantity, price). A repeated request with the same fingerprint, while wFirma still holds exactly those documents, returns them without issuing new ones (a missing PDF is downloaded again).
-- When anything changed, or the documents in wFirma do not match the remembered set, every proforma registered under the order's `id_external` is deleted first, then a new set is issued. If the lookup or a delete fails the request fails and nothing new is issued, so an order never carries two sets.
+- When the data is unchanged but wFirma holds extra proformas beside the remembered set (copies from runs that never recorded them), only the extras are deleted and the remembered set is returned.
+- When anything changed, or the documents in wFirma do not match the remembered set, every proforma registered under the order's `id_external` is deleted first, then a new set is issued.
+- The lookup queries `invoices/find` with `type = proforma` as well as `id_external`: without a type condition wFirma returns no proformas. If the lookup or a delete fails the request fails and nothing new is issued, so an order never carries two sets.
 - Requests for the same order are serialized, and issuance runs detached from the HTTP request: a caller that timed out and retries waits for the running issuance and gets its result.
 
 ```
