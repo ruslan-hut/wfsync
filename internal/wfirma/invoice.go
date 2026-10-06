@@ -1159,7 +1159,11 @@ func (c *Client) findByExternalId(ctx context.Context, externalId, docType strin
 
 	// The invoices map also carries a non-invoice "parameters" entry (Id == ""), skipped here.
 	var found []existingFaktura
+	var returned []string // "id:type" of every document wFirma sent back, for the log
 	for _, w := range resp.Invoices {
+		if w.Invoice.Id != "" {
+			returned = append(returned, w.Invoice.Id+":"+w.Invoice.Type)
+		}
 		if w.Invoice.Id == "" || !match(w.Invoice.Type) {
 			continue
 		}
@@ -1171,6 +1175,14 @@ func (c *Client) findByExternalId(ctx context.Context, externalId, docType strin
 		}
 		found = append(found, ex)
 	}
+	c.log.With(
+		slog.String("external_id", externalId),
+		slog.String("doc_type", docType),
+		slog.Any("returned", returned),
+		slog.Int("matched", len(found)),
+		slog.Int("total", resp.Parameters.Total),
+	).Debug("invoices found by external id")
+
 	// The response is a map, so iteration order is random; sort numerically to restore
 	// creation order (wFirma ids are ascending integers).
 	sort.Slice(found, func(i, j int) bool {

@@ -59,6 +59,11 @@ func (c *Core) B2BCreateProforma(ctx context.Context, order *entity.B2BOrder) (*
 	}
 
 	record := c.proformaRecord(ref, log)
+	log.With(
+		slog.Any("registered_ids", registeredIds),
+		slog.Any("recorded_ids", record.DocumentIds()),
+		slog.Bool("fingerprint_match", record != nil && record.Fingerprint == fingerprint),
+	).Debug("proforma state")
 	if record != nil && record.Fingerprint == fingerprint && containsAll(registeredIds, record.DocumentIds()) {
 		// Proformas registered beside the remembered set are copies no caller holds
 		// (left by a run that never recorded them); removing them keeps one set per order
