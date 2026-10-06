@@ -35,7 +35,6 @@ type InvoiceService interface {
 	RegisterInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 	RegisterProforma(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 	DeleteProforma(ctx context.Context, invoiceID string) error
-	FindProformaIds(ctx context.Context, externalId string) ([]string, error)
 	SyncFromRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
 	SyncToRemote(ctx context.Context, from, to string) (*entity.SyncResult, error)
 	FindInvoices(ctx context.Context, from, to string) ([]*entity.LocalInvoice, error)

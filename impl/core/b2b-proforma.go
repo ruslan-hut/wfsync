@@ -27,12 +27,16 @@ func (c *Core) SetProformaDatabase(db ProformaDatabase) {
 // B2BCreateProforma issues the proforma set for a B2B order, or returns the set already
 // issued when nothing printed on it has changed.
 //
+// The issued set is known only from this service's own record: wFirma's invoices/find
+// does not match proformas by id_external, so the record is the source of truth. When
+// the data is unchanged and every recorded document still exists, the set is reused;
+// otherwise the recorded documents are deleted and a new set is issued, so an order never
+// carries more than one set.
+//
 // A large order is split into several documents, and issuing them can outlast the
 // caller's HTTP timeout. The work is therefore detached from the request and serialized
 // per order: a caller that gave up and retries waits for the running issuance and then
-// receives its result, instead of issuing a second set. When the data did change, every
-// proforma registered for the order is deleted before the new set is issued, so an order
-// never carries more than one set.
+// receives its result, instead of issuing a second set.
 func (c *Core) B2BCreateProforma(ctx context.Context, order *entity.B2BOrder) (*entity.Payment, error) {
 	params := order.ToCheckoutParams()
 	if err := c.validateB2BVATRate(params); err != nil {
@@ -52,47 +56,40 @@ func (c *Core) B2BCreateProforma(ctx context.Context, order *entity.B2BOrder) (*
 	)
 	fingerprint := params.ProformaFingerprint()
 
-	registeredIds, err := c.inv.FindProformaIds(ctx, ref)
+	record, err := c.proformaRecord(ref)
 	if err != nil {
-		// State unknown — issuing now could leave a second set beside the first.
-		return nil, fmt.Errorf("look up existing proformas: %w", err)
+		// Without the record the issued set is unknown — issuing now would leave a
+		// second set beside it.
+		return nil, fmt.Errorf("read proforma record: %w", err)
 	}
 
-	record := c.proformaRecord(ref, log)
-	log.With(
-		slog.Any("registered_ids", registeredIds),
-		slog.Any("recorded_ids", record.DocumentIds()),
-		slog.Bool("fingerprint_match", record != nil && record.Fingerprint == fingerprint),
-	).Debug("proforma state")
-	if record != nil && record.Fingerprint == fingerprint && containsAll(registeredIds, record.DocumentIds()) {
-		// Proformas registered beside the remembered set are copies no caller holds
-		// (left by a run that never recorded them); removing them keeps one set per order
-		// without renumbering the documents the client may already have.
-		if extra := without(registeredIds, record.DocumentIds()); len(extra) > 0 {
-			for _, id := range extra {
-				if err := c.inv.DeleteProforma(ctx, id); err != nil {
-					return nil, fmt.Errorf("delete duplicate proforma %s: %w", id, err)
-				}
-			}
-			log.With(slog.Any("proforma_ids", extra)).Info("duplicate proformas deleted")
-		}
-
-		// The documents are valid and may already be with the client; a failed PDF
-		// download is a reason to retry, never to replace them under new numbers.
-		payment, err := c.reuseProforma(ctx, record.Payment)
+	if record != nil && record.Fingerprint == fingerprint {
+		present, err := c.proformasPresent(ctx, record.DocumentIds())
 		if err != nil {
-			return nil, fmt.Errorf("reuse issued proforma: %w", err)
+			return nil, fmt.Errorf("check issued proformas: %w", err)
 		}
-		log.With(slog.Int("documents", len(registeredIds))).Info("proforma unchanged, reusing issued documents")
-		return payment, nil
+		if present {
+			// The documents are valid and may already be with the client; a failed PDF
+			// download is a reason to retry, never to replace them under new numbers.
+			payment, err := c.reuseProforma(ctx, record.Payment)
+			if err != nil {
+				return nil, fmt.Errorf("reuse issued proforma: %w", err)
+			}
+			log.With(slog.Any("proforma_ids", record.DocumentIds())).Info("proforma unchanged, reusing issued documents")
+			return payment, nil
+		}
+		log.With(slog.Any("proforma_ids", record.DocumentIds())).Info("issued proforma missing in wFirma, issuing anew")
 	}
 
-	if err := c.discardProformas(ctx, ref, registeredIds, record, log); err != nil {
+	if err := c.discardProformas(ctx, ref, record, log); err != nil {
 		return nil, err
 	}
 
 	payment, err := c.inv.RegisterProforma(ctx, params)
 	if err != nil {
+		// A set that failed part-way comes back with the parts already registered;
+		// nothing records them, so remove them now or they stay behind as strays.
+		c.rollbackProforma(ctx, payment, log)
 		return nil, err
 	}
 
@@ -123,24 +120,41 @@ func (c *Core) B2BCreateProforma(ctx context.Context, order *entity.B2BOrder) (*
 	return payment, nil
 }
 
-// proformaRecord returns the remembered proforma set for ref, nil when there is none or
-// it cannot be read — either way the order is treated as having no reusable set.
-func (c *Core) proformaRecord(ref string, log *slog.Logger) *entity.ProformaRecord {
+// proformaRecord returns the remembered proforma set for ref, nil when there is none.
+func (c *Core) proformaRecord(ref string) (*entity.ProformaRecord, error) {
 	if c.proformaDb == nil || ref == "" {
-		return nil
+		return nil, nil
 	}
-	record, err := c.proformaDb.GetProformaRecord(ref)
-	if err != nil {
-		log.Warn("get proforma record", sl.Err(err))
-		return nil
-	}
-	return record
+	return c.proformaDb.GetProformaRecord(ref)
 }
 
-// discardProformas deletes every proforma registered in wFirma for the order, then the
-// local files and the record of the previous set. A failed wFirma delete aborts: issuing
-// a new set beside a document that could not be removed is the duplicate this prevents.
-func (c *Core) discardProformas(ctx context.Context, ref string, ids []string, record *entity.ProformaRecord, log *slog.Logger) error {
+// proformasPresent reports whether every document of a recorded set still exists in
+// wFirma — one may have been deleted there by hand.
+func (c *Core) proformasPresent(ctx context.Context, ids []string) (bool, error) {
+	if len(ids) == 0 {
+		return false, nil
+	}
+	for _, id := range ids {
+		exists, err := c.inv.InvoiceExists(ctx, id)
+		if err != nil {
+			return false, err
+		}
+		if !exists {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// discardProformas deletes the recorded proforma set in wFirma, then its local files and
+// the record itself. A failed wFirma delete aborts: issuing a new set beside a document
+// that could not be removed is the duplicate this prevents. Documents already gone are
+// skipped by DeleteProforma.
+func (c *Core) discardProformas(ctx context.Context, ref string, record *entity.ProformaRecord, log *slog.Logger) error {
+	if record == nil {
+		return nil
+	}
+	ids := record.DocumentIds()
 	for _, id := range ids {
 		if err := c.inv.DeleteProforma(ctx, id); err != nil {
 			return fmt.Errorf("delete stale proforma %s: %w", id, err)
@@ -150,9 +164,6 @@ func (c *Core) discardProformas(ctx context.Context, ref string, ids []string, r
 		log.With(slog.Any("proforma_ids", ids)).Info("stale proformas deleted")
 	}
 
-	if record == nil {
-		return nil
-	}
 	for _, name := range proformaFiles(record.Payment) {
 		if err := os.Remove(filepath.Join(c.filePath, name)); err != nil && !os.IsNotExist(err) {
 			log.With(slog.String("file", name)).Warn("remove proforma file", sl.Err(err))
@@ -164,6 +175,22 @@ func (c *Core) discardProformas(ctx context.Context, ref string, ids []string, r
 		}
 	}
 	return nil
+}
+
+// rollbackProforma deletes the parts of a proforma set that failed part-way. It is best
+// effort: a part it cannot delete is logged for removal by hand.
+func (c *Core) rollbackProforma(ctx context.Context, partial *entity.Payment, log *slog.Logger) {
+	if partial == nil {
+		return
+	}
+	for _, id := range (&entity.ProformaRecord{Payment: partial}).DocumentIds() {
+		if err := c.inv.DeleteProforma(ctx, id); err != nil {
+			log.With(
+				slog.String("proforma_id", id),
+				slog.String("tg_topic", entity.TopicError),
+			).Error("delete part of failed proforma set, remove it in wFirma by hand", sl.Err(err))
+		}
+	}
 }
 
 // reuseProforma returns the remembered payment with fresh links, downloading again any
@@ -226,28 +253,4 @@ func proformaFiles(p *entity.Payment) []string {
 		}
 	}
 	return names
-}
-
-// containsAll reports whether every id in want is among have; an empty want never matches.
-func containsAll(have, want []string) bool {
-	if len(want) == 0 {
-		return false
-	}
-	for _, id := range want {
-		if !slices.Contains(have, id) {
-			return false
-		}
-	}
-	return true
-}
-
-// without returns the ids of all that are not in drop, in order.
-func without(all, drop []string) []string {
-	var out []string
-	for _, id := range all {
-		if !slices.Contains(drop, id) {
-			out = append(out, id)
-		}
-	}
-	return out
 }

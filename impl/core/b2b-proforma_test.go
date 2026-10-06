@@ -23,18 +23,19 @@ type proformaInvoiceService struct {
 	registered  []string
 	registers   int
 	downloads   int
-	findErr     error
+	existsErr   error
 	deleteErr   error
 	downloadErr error
+	failAtPart  int // when > 0, registration fails at this 1-based part after registering the earlier ones
 }
 
 func (s *proformaInvoiceService) ExpectedB2BVATRate(_ string, _ bool) int { return 0 }
 
-func (s *proformaInvoiceService) FindProformaIds(_ context.Context, _ string) ([]string, error) {
-	if s.findErr != nil {
-		return nil, s.findErr
+func (s *proformaInvoiceService) InvoiceExists(_ context.Context, id string) (bool, error) {
+	if s.existsErr != nil {
+		return false, s.existsErr
 	}
-	return slices.Clone(s.registered), nil
+	return slices.Contains(s.registered, id), nil
 }
 
 func (s *proformaInvoiceService) DeleteProforma(_ context.Context, id string) error {
@@ -49,6 +50,12 @@ func (s *proformaInvoiceService) RegisterProforma(_ context.Context, params *ent
 	s.registers++
 	var parts []*entity.Payment
 	for i := 0; i < s.parts; i++ {
+		if s.failAtPart > 0 && i+1 == s.failAtPart {
+			if len(parts) == 0 {
+				return nil, errors.New("wFirma error")
+			}
+			return &entity.Payment{Id: parts[0].Id, Parts: parts}, errors.New("wFirma error")
+		}
 		s.nextId++
 		id := strconv.Itoa(s.nextId)
 		s.registered = append(s.registered, id)
@@ -76,10 +83,11 @@ func (s *proformaInvoiceService) DownloadInvoice(_ context.Context, id string) (
 // memProformaDatabase is an in-memory ProformaDatabase.
 type memProformaDatabase struct {
 	records map[string]*entity.ProformaRecord
+	getErr  error
 }
 
 func (d *memProformaDatabase) GetProformaRecord(ref string) (*entity.ProformaRecord, error) {
-	return d.records[ref], nil
+	return d.records[ref], d.getErr
 }
 
 func (d *memProformaDatabase) SaveProformaRecord(r *entity.ProformaRecord) error {
@@ -207,9 +215,9 @@ func TestB2BCreateProformaReissuesOnChange(t *testing.T) {
 	}
 }
 
-// Proformas registered without a matching record — a run that died before saving it, or
-// one issued before records existed — are replaced rather than left beside the new set.
-func TestB2BCreateProformaReplacesUnrecordedDocuments(t *testing.T) {
+// Proformas wFirma holds without a record cannot be found (invoices/find does not match
+// proformas by id_external), so they are left alone rather than guessed at.
+func TestB2BCreateProformaLeavesUnrecordedDocuments(t *testing.T) {
 	c, inv, _ := proformaTestCore(t, 1)
 	inv.registered = []string{"90", "91"}
 
@@ -217,32 +225,24 @@ func TestB2BCreateProformaReplacesUnrecordedDocuments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(inv.registered, []string{payment.Id}) {
-		t.Errorf("wFirma holds %v, want only %s", inv.registered, payment.Id)
+	if want := []string{"90", "91", payment.Id}; !slices.Equal(inv.registered, want) {
+		t.Errorf("wFirma holds %v, want %v", inv.registered, want)
 	}
 }
 
-// Copies registered beside the remembered set — left by runs that never recorded them —
-// are deleted, and the remembered set is returned under its original numbers.
-func TestB2BCreateProformaDeletesDuplicatesKeepsRecordedSet(t *testing.T) {
-	c, inv, _ := proformaTestCore(t, 2)
-	ctx := context.Background()
+// A set that fails part-way is removed, so a retry does not leave its first parts behind.
+func TestB2BCreateProformaRollsBackPartialSet(t *testing.T) {
+	c, inv, db := proformaTestCore(t, 3)
+	inv.failAtPart = 3
 
-	first, err := c.B2BCreateProforma(ctx, testB2BOrder())
-	if err != nil {
-		t.Fatal(err)
+	if _, err := c.B2BCreateProforma(context.Background(), testB2BOrder()); err == nil {
+		t.Fatal("expected an error")
 	}
-	inv.registered = append([]string{"80", "81"}, inv.registered...)
-
-	second, err := c.B2BCreateProforma(ctx, testB2BOrder())
-	if err != nil {
-		t.Fatal(err)
+	if len(inv.registered) != 0 {
+		t.Errorf("wFirma holds %v after a failed set, want nothing", inv.registered)
 	}
-	if inv.registers != 1 {
-		t.Errorf("registrations = %d, want 1", inv.registers)
-	}
-	if !slices.Equal(paymentIds(second), paymentIds(first)) || !slices.Equal(inv.registered, paymentIds(first)) {
-		t.Errorf("returned %v, wFirma holds %v, want only %v", paymentIds(second), inv.registered, paymentIds(first))
+	if len(db.records) != 0 {
+		t.Errorf("a failed set was recorded: %+v", db.records)
 	}
 }
 
@@ -315,23 +315,38 @@ func TestB2BCreateProformaRedownloadsMissingFile(t *testing.T) {
 }
 
 func TestB2BCreateProformaAbortsOnUnknownState(t *testing.T) {
-	tests := map[string]func(inv *proformaInvoiceService){
-		"lookup fails": func(inv *proformaInvoiceService) { inv.findErr = errors.New("timeout") },
-		"delete fails": func(inv *proformaInvoiceService) {
-			inv.registered = []string{"90"}
+	tests := map[string]struct {
+		change bool // request with changed data, so the recorded set has to be deleted
+		setup  func(inv *proformaInvoiceService, db *memProformaDatabase)
+	}{
+		"record unreadable": {setup: func(_ *proformaInvoiceService, db *memProformaDatabase) {
+			db.getErr = errors.New("mongo down")
+		}},
+		"existence check fails": {setup: func(inv *proformaInvoiceService, _ *memProformaDatabase) {
+			inv.existsErr = errors.New("timeout")
+		}},
+		"delete fails": {change: true, setup: func(inv *proformaInvoiceService, _ *memProformaDatabase) {
 			inv.deleteErr = errors.New("timeout")
-		},
+		}},
 	}
-	for name, setup := range tests {
+	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			c, inv, _ := proformaTestCore(t, 1)
-			setup(inv)
+			c, inv, db := proformaTestCore(t, 1)
+			ctx := context.Background()
+			if _, err := c.B2BCreateProforma(ctx, testB2BOrder()); err != nil {
+				t.Fatal(err)
+			}
+			tt.setup(inv, db)
 
-			if _, err := c.B2BCreateProforma(context.Background(), testB2BOrder()); err == nil {
+			order := testB2BOrder()
+			if tt.change {
+				order.ClientName = "Other"
+			}
+			if _, err := c.B2BCreateProforma(ctx, order); err == nil {
 				t.Fatal("expected an error")
 			}
-			if inv.registers != 0 {
-				t.Errorf("registrations = %d, want 0", inv.registers)
+			if inv.registers != 1 {
+				t.Errorf("registrations = %d, want 1 (no new set)", inv.registers)
 			}
 		})
 	}

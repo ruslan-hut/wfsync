@@ -360,23 +360,3 @@ func TestRegisterInvoiceSkipsCompleteSplit(t *testing.T) {
 		t.Errorf("invoices created = %d, want 2 (the split parts only)", fake.addCount())
 	}
 }
-
-// FindProformaIds sees only the proformas of the order: fakturas sharing the id_external
-// and documents of other orders must never be offered up for deletion.
-func TestFindProformaIdsFiltersTypeAndOrder(t *testing.T) {
-	c, fake := newGuardTestClient(t)
-	fake.added = []*Invoice{
-		{Id: "10", Type: string(invoiceProforma), IdExternal: "uid-1"},
-		{Id: "11", Type: string(invoiceNormal), IdExternal: "uid-1"},
-		{Id: "12", Type: string(invoiceProforma), IdExternal: "uid-2"},
-		{Id: "9", Type: string(invoiceProforma), IdExternal: "uid-1"},
-	}
-
-	ids, err := c.FindProformaIds(context.Background(), "uid-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := []string{"9", "10"}; strings.Join(ids, ",") != strings.Join(want, ",") {
-		t.Errorf("ids = %v, want %v", ids, want)
-	}
-}

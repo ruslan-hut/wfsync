@@ -424,9 +424,17 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		resultInv, err := c.submitInvoice(ctx, log, inv, chunk)
 		if err != nil {
 			// A split order that fails part-way leaves the earlier parts registered in
-			// wFirma. Say so in the error: the order is neither uninvoiced nor complete,
-			// and a re-run resumes at this part rather than duplicating the earlier ones.
+			// wFirma.
 			if len(parts) > 0 {
+				// A proforma set is never resumed — it cannot be found again — so hand the
+				// registered parts back with the error for the caller to remove.
+				if invType == invoiceProforma {
+					partial := &entity.Payment{Id: parts[0].Id, OrderId: params.OrderId, Parts: parts}
+					return partial, fmt.Errorf("part %d/%d (%d already registered): %w",
+						partNum, totalParts, len(parts), err)
+				}
+				// A faktura set resumes: the order is neither uninvoiced nor complete, and a
+				// re-run continues at this part rather than duplicating the earlier ones.
 				return nil, fmt.Errorf("part %d/%d (%d already registered, re-run to resume): %w",
 					partNum, totalParts, len(parts), err)
 			}
@@ -1074,33 +1082,14 @@ func sameAmount(a, b float64) bool {
 // order that failed part-way: n existing documents mean chunks 1..n are done and creation
 // picks up at n+1. Proformas share the id_external and are filtered out here.
 func (c *Client) findFakturasByExternalId(ctx context.Context, externalId string) ([]existingFaktura, error) {
-	return c.findByExternalId(ctx, externalId, "", isFakturaType)
-}
-
-// FindProformaIds returns the ids of every proforma carrying externalId in id_external,
-// in creation order. Fakturas sharing the id_external are filtered out.
-//
-// The type must be part of the query: invoices/find without a type condition does not
-// return proformas, which left every proforma invisible to the duplicate check.
-func (c *Client) FindProformaIds(ctx context.Context, externalId string) ([]string, error) {
-	found, err := c.findByExternalId(ctx, externalId, string(invoiceProforma), func(t string) bool {
-		return t == string(invoiceProforma)
-	})
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]string, len(found))
-	for i, f := range found {
-		ids[i] = f.Id
-	}
-	return ids, nil
+	return c.findByExternalId(ctx, externalId, isFakturaType)
 }
 
 // findByExternalId returns the documents whose type satisfies match and whose
-// id_external equals externalId, sorted by id (creation order). A non-empty docType is
-// also sent as a type condition, which wFirma needs to return anything but its default
-// document type.
-func (c *Client) findByExternalId(ctx context.Context, externalId, docType string, match func(docType string) bool) ([]existingFaktura, error) {
+// id_external equals externalId, sorted by id (creation order). It finds fakturas only:
+// wFirma's invoices/find does not match proformas by id_external, with or without a
+// type condition (verified against the live API).
+func (c *Client) findByExternalId(ctx context.Context, externalId string, match func(docType string) bool) ([]existingFaktura, error) {
 	if !c.enabled {
 		return nil, fmt.Errorf("wFirma is disabled")
 	}
@@ -1116,15 +1105,6 @@ func (c *Client) findByExternalId(ctx context.Context, externalId, docType strin
 				"value":    externalId,
 			},
 		},
-	}
-	if docType != "" {
-		conditions = append(conditions, map[string]interface{}{
-			"condition": map[string]interface{}{
-				"field":    "type",
-				"operator": "eq",
-				"value":    docType,
-			},
-		})
 	}
 
 	payload := map[string]interface{}{
@@ -1177,7 +1157,6 @@ func (c *Client) findByExternalId(ctx context.Context, externalId, docType strin
 	}
 	c.log.With(
 		slog.String("external_id", externalId),
-		slog.String("doc_type", docType),
 		slog.Any("returned", returned),
 		slog.Int("matched", len(found)),
 		slog.Int("total", resp.Parameters.Total),
