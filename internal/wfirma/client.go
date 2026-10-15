@@ -58,6 +58,7 @@ type Database interface {
 	GetProductBySku(sku string) (*entity.Product, error)
 	SaveProduct(product *entity.Product) error
 	GetInvoicesByDateRange(from, to, invType string) ([]*entity.LocalInvoice, error)
+	GetInvoicesByExternalId(externalId string) ([]*entity.LocalInvoice, error)
 	DeleteInvoiceById(id string) error
 	UpdateInvoiceNumber(id, number string) error
 	SaveBankAccount(account *entity.BankAccount) error

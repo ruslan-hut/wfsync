@@ -1081,8 +1081,51 @@ func sameAmount(a, b float64) bool {
 // Returning all of them (rather than just the first) is what lets invoice() resume a split
 // order that failed part-way: n existing documents mean chunks 1..n are done and creation
 // picks up at n+1. Proformas share the id_external and are filtered out here.
+//
+// wFirma's invoices/find does not reliably match fakturas by id_external either (it returned
+// nothing for a faktura created a second earlier, letting two triggers of one capture each
+// issue one), so the local copy every created faktura is saved to is authoritative and the
+// remote lookup only adds what the local store missed.
 func (c *Client) findFakturasByExternalId(ctx context.Context, externalId string) ([]existingFaktura, error) {
-	return c.findByExternalId(ctx, externalId, isFakturaType)
+	remote, err := c.findByExternalId(ctx, externalId, isFakturaType)
+	if err != nil {
+		return nil, err
+	}
+	if c.db == nil || externalId == "" {
+		return remote, nil
+	}
+	local, err := c.db.GetInvoicesByExternalId(externalId)
+	if err != nil {
+		return nil, fmt.Errorf("find local invoices by external id %s: %w", externalId, err)
+	}
+
+	seen := make(map[string]bool, len(remote))
+	found := remote
+	for _, f := range remote {
+		seen[f.Id] = true
+	}
+	for _, inv := range local {
+		if inv == nil || inv.Id == "" || seen[inv.Id] || !isFakturaType(inv.Type) {
+			continue
+		}
+		seen[inv.Id] = true
+		found = append(found, existingFaktura{Id: inv.Id, Total: inv.Total})
+	}
+	sortFakturasById(found)
+	return found, nil
+}
+
+// sortFakturasById orders fakturas numerically by id, i.e. in creation order (wFirma ids
+// are ascending integers).
+func sortFakturasById(found []existingFaktura) {
+	sort.Slice(found, func(i, j int) bool {
+		a, errA := strconv.ParseInt(found[i].Id, 10, 64)
+		b, errB := strconv.ParseInt(found[j].Id, 10, 64)
+		if errA != nil || errB != nil {
+			return found[i].Id < found[j].Id
+		}
+		return a < b
+	})
 }
 
 // findByExternalId returns the documents whose type satisfies match and whose
@@ -1162,16 +1205,8 @@ func (c *Client) findByExternalId(ctx context.Context, externalId string, match 
 		slog.Int("total", resp.Parameters.Total),
 	).Debug("invoices found by external id")
 
-	// The response is a map, so iteration order is random; sort numerically to restore
-	// creation order (wFirma ids are ascending integers).
-	sort.Slice(found, func(i, j int) bool {
-		a, errA := strconv.ParseInt(found[i].Id, 10, 64)
-		b, errB := strconv.ParseInt(found[j].Id, 10, 64)
-		if errA != nil || errB != nil {
-			return found[i].Id < found[j].Id
-		}
-		return a < b
-	})
+	// The response is a map, so iteration order is random.
+	sortFakturasById(found)
 	return found, nil
 }
 

@@ -24,6 +24,7 @@ type fakeWfirma struct {
 	added    []*Invoice // invoices accepted by add, in order
 	nemo     int        // next invoice id
 	failFrom int        // when > 0, reject the add call with this 1-based number and beyond
+	blind    bool       // when set, find never returns fakturas, as observed on the live API
 }
 
 func (f *fakeWfirma) handler() http.Handler {
@@ -55,6 +56,9 @@ func (f *fakeWfirma) writeFind(w http.ResponseWriter, r *http.Request) {
 
 	entries := []string{}
 	for _, inv := range f.added {
+		if f.blind {
+			break
+		}
 		if ref != "" && inv.IdExternal != ref {
 			continue
 		}
@@ -358,5 +362,65 @@ func TestRegisterInvoiceSkipsCompleteSplit(t *testing.T) {
 	}
 	if fake.addCount() != 2 {
 		t.Errorf("invoices created = %d, want 2 (the split parts only)", fake.addCount())
+	}
+}
+
+// guardTestDB stores invoices in memory for the local half of the duplicate guard.
+// Methods invoice() does not call are left to the nil embedded interface.
+type guardTestDB struct {
+	Database
+	mu       sync.Mutex
+	invoices map[string]*Invoice
+}
+
+func (d *guardTestDB) SaveInvoice(id string, invoice interface{}) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.invoices == nil {
+		d.invoices = map[string]*Invoice{}
+	}
+	d.invoices[id] = invoice.(*Invoice)
+	return nil
+}
+
+func (d *guardTestDB) GetInvoicesByExternalId(externalId string) ([]*entity.LocalInvoice, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out []*entity.LocalInvoice
+	for _, inv := range d.invoices {
+		if inv.IdExternal == externalId {
+			out = append(out, &entity.LocalInvoice{Id: inv.Id, Type: inv.Type, Total: inv.Total, IdExternal: inv.IdExternal})
+		}
+	}
+	return out, nil
+}
+
+func (d *guardTestDB) SaveCheckoutParams(*entity.CheckoutParams) error   { return nil }
+func (d *guardTestDB) UpdateCheckoutParams(*entity.CheckoutParams) error { return nil }
+func (d *guardTestDB) GetAllowedBankAccount(string) (*entity.BankAccount, error) {
+	return nil, nil
+}
+
+// The capture API and the payment_intent.succeeded webhook both invoice one capture; when
+// wFirma's find misses the faktura the first created, the local record must stop the second.
+func TestRegisterInvoiceLocalRecordStopsDuplicateWhenFindIsBlind(t *testing.T) {
+	c, fake := newGuardTestClient(t)
+	fake.blind = true
+	c.db = &guardTestDB{}
+
+	first, err := c.RegisterInvoice(context.Background(), guardTestParams("17955", 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := c.RegisterInvoice(context.Background(), guardTestParams("17955", 3))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fake.addCount() != 1 {
+		t.Fatalf("invoices created = %d, want 1", fake.addCount())
+	}
+	if second.Id != first.Id {
+		t.Errorf("second call got invoice id %q, want %q", second.Id, first.Id)
 	}
 }

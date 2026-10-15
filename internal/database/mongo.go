@@ -571,6 +571,33 @@ func (m *MongoDB) GetInvoicesByDateRange(from, to, invType string) ([]*entity.Lo
 	return invoices, nil
 }
 
+// GetInvoicesByExternalId returns every locally stored invoice carrying externalId in
+// id_external, of any type.
+func (m *MongoDB) GetInvoicesByExternalId(externalId string) ([]*entity.LocalInvoice, error) {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionInvoice)
+	cursor, err := collection.Find(ctx, bson.D{{"id_external", externalId}})
+	if err != nil {
+		return nil, err
+	}
+	defer func(cursor *mongo.Cursor, ctx context.Context) {
+		_ = cursor.Close(ctx)
+	}(cursor, ctx)
+
+	var invoices []*entity.LocalInvoice
+	if err = cursor.All(ctx, &invoices); err != nil {
+		return nil, err
+	}
+	return invoices, nil
+}
+
 // DeleteInvoiceById removes a single invoice document by its wFirma ID.
 func (m *MongoDB) DeleteInvoiceById(id string) error {
 	ctx, cancel := m.opCtx()
