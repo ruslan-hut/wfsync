@@ -58,8 +58,8 @@ func NewSQLClient(conf *config.Config, log *slog.Logger) (*MySql, error) {
 		time.Sleep(30 * time.Second)
 	}
 
-	db.SetMaxOpenConns(50)           // макс. кол-во открытых соединений
-	db.SetMaxIdleConns(10)           // макс. кол-во "неактивных" соединений в пуле
+	db.SetMaxOpenConns(10)           // макс. кол-во открытых соединений
+	db.SetMaxIdleConns(5)            // макс. кол-во "неактивных" соединений в пуле
 	db.SetConnMaxLifetime(time.Hour) // время жизни соединения
 
 	sdb := &MySql{
