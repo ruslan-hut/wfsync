@@ -98,6 +98,7 @@ func TestResolveTaxId(t *testing.T) {
 		{"non-EU country is dropped", "US", "123456789", "", taxIdTypeNone, true},
 		{"no country to derive a prefix from is dropped", "", "28982711", "", taxIdTypeNone, true},
 		{"empty tax id is not a failure", "CZ", "", "", taxIdTypeNone, false},
+		{"Cyrillic look-alike letter is dropped", "BE", "\u0412E1034615262", "", taxIdTypeNone, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

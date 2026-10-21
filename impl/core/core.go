@@ -708,10 +708,25 @@ func (c *Core) WFirmaCreateInvoice(ctx context.Context, params *entity.CheckoutP
 
 func (c *Core) B2BCreateInvoice(ctx context.Context, order *entity.B2BOrder) (*entity.Payment, error) {
 	params := order.ToCheckoutParams()
+	if err := validateB2BTaxId(params); err != nil {
+		return nil, err
+	}
 	if err := c.validateB2BVATRate(params); err != nil {
 		return nil, err
 	}
 	return c.WFirmaRegisterInvoice(ctx, params)
+}
+
+// validateB2BTaxId rejects a malformed buyer VAT number with entity.ErrInvalidTaxId.
+// Downstream it would be mis-prefixed (a Cyrillic "В" is not read as a country code),
+// sent to wFirma as a contractor NIP and fail there as an unexplained 500. Look-alike
+// letters are deliberately not replaced: the portal must fix the number it holds.
+func validateB2BTaxId(params *entity.CheckoutParams) error {
+	taxId := params.ClientDetails.TaxId
+	if taxId == "" || entity.IsWellFormedTaxId(taxId) {
+		return nil
+	}
+	return fmt.Errorf("%w: %q must contain only Latin letters and digits", entity.ErrInvalidTaxId, taxId)
 }
 
 // validateB2BVATRate cross-checks the VAT rate implied by a B2B order payload

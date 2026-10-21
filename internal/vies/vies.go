@@ -142,6 +142,14 @@ func (s *Service) SetDatabase(db Database) {
 // results are never cached and must not be reported as invalid. Errors are logged but
 // never block the caller.
 func (s *Service) ValidateTaxId(taxId, fallbackCountry string) entity.VIESResult {
+	if !entity.IsWellFormedTaxId(taxId) {
+		// VIES answers such input with HTTP 400 (VOW-ERR-*), which would otherwise be
+		// read as a service failure rather than a bad number.
+		s.log.Warn("tax ID is not well formed",
+			slog.String("tax_id", taxId),
+			slog.String("fallback_country", fallbackCountry))
+		return entity.VIESInvalid
+	}
 	countryCode, vatNumber := splitTaxId(taxId, fallbackCountry)
 	if len(countryCode) != 2 || vatNumber == "" {
 		s.log.Warn("tax ID too short for VIES validation",

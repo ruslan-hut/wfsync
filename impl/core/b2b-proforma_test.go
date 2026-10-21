@@ -351,3 +351,19 @@ func TestB2BCreateProformaAbortsOnUnknownState(t *testing.T) {
 		})
 	}
 }
+
+// A VAT number with a Cyrillic look-alike letter (PL-666, PL-674) is refused before any
+// document is issued, so the portal gets a 400 instead of wFirma's unexplained error.
+func TestB2BCreateProformaRejectsMalformedTaxId(t *testing.T) {
+	c, inv, _ := proformaTestCore(t, 1)
+	order := testB2BOrder()
+	order.ClientVAT = "\u0412E1034615262"
+
+	_, err := c.B2BCreateProforma(context.Background(), order)
+	if !errors.Is(err, entity.ErrInvalidTaxId) {
+		t.Fatalf("err = %v, want ErrInvalidTaxId", err)
+	}
+	if inv.registers != 0 {
+		t.Errorf("registrations = %d, want 0", inv.registers)
+	}
+}

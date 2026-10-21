@@ -90,8 +90,8 @@ func CreateProforma(logger *slog.Logger, handler Core) http.HandlerFunc {
 
 		payment, err := handler.B2BCreateProforma(r.Context(), &order)
 		if err != nil {
-			if errors.Is(err, entity.ErrVATRateMismatch) {
-				log.Warn("proforma vat rate mismatch", sl.Err(err))
+			if errors.Is(err, entity.ErrVATRateMismatch) || errors.Is(err, entity.ErrInvalidTaxId) {
+				log.Warn("proforma rejected", sl.Err(err))
 				render.Status(r, 400)
 				render.JSON(w, r, errorResponse{Error: err.Error()})
 				return
@@ -152,8 +152,8 @@ func CreateInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 
 		payment, err := handler.B2BCreateInvoice(r.Context(), &order)
 		if err != nil {
-			if errors.Is(err, entity.ErrVATRateMismatch) {
-				log.Warn("invoice vat rate mismatch", sl.Err(err))
+			if errors.Is(err, entity.ErrVATRateMismatch) || errors.Is(err, entity.ErrInvalidTaxId) {
+				log.Warn("invoice rejected", sl.Err(err))
 				render.Status(r, 400)
 				render.JSON(w, r, errorResponse{Error: err.Error()})
 				return

@@ -571,7 +571,7 @@ Each part is a complete, standalone proforma in wFirma, with `(część N/M)` ap
 
 | Code | Description |
 |------|-------------|
-| 400 | Invalid request body, validation error, or VAT rate mismatch (see [B2B VAT validation](#b2b-vat-rate-validation)) |
+| 400 | Invalid request body, validation error, malformed `client_vat` or VAT rate mismatch (see [B2B VAT validation](#b2b-vat-rate-validation)) |
 | 401 | User not found / unauthorized |
 | 403 | User lacks `WFirmaAllowInvoice` permission |
 | 500 | B2B service unavailable or proforma creation failed |
@@ -633,7 +633,7 @@ Split order (e.g. 450 line items → 3 invoices of 200/200/50):
 
 | Code | Description |
 |------|-------------|
-| 400 | Invalid request body, validation error, or VAT rate mismatch (see [B2B VAT validation](#b2b-vat-rate-validation)) |
+| 400 | Invalid request body, validation error, malformed `client_vat` or VAT rate mismatch (see [B2B VAT validation](#b2b-vat-rate-validation)) |
 | 401 | User not found / unauthorized |
 | 403 | User lacks `WFirmaAllowInvoice` permission |
 | 500 | B2B service unavailable or invoice creation failed |
@@ -669,11 +669,21 @@ Example mismatch response (`400`):
 }
 ```
 
+Before the rate check, a non-empty `client_vat` must consist only of Latin letters and
+digits (spaces, hyphens and dots are ignored). A number typed with a look-alike Cyrillic
+letter is rejected with `400` and is not corrected — fix it in the calling system:
+
+```json
+{
+  "error": "invalid vat number: \"ВE1034615262\" must contain only Latin letters and digits"
+}
+```
+
 ---
 
 ### Sync Invoices from Remote (Pull)
 
-Pulls invoices from Wfirma for a date range and syncs them to the local MongoDB collection. Upserts remote invoices locally and deletes local records that no longer exist on Wfirma.
+Pulls invoices from Wfirma for a date range and syncs them to the local MongoDB collection. Upserts remote invoices locally — only number, type and date; the rest of the local record, including `id_external`, is kept — and deletes local records that no longer exist on Wfirma.
 
 ```
 POST /v1/wf/sync/pull?from=YYYY-MM-DD&to=YYYY-MM-DD

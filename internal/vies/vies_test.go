@@ -137,3 +137,20 @@ func (d *stubDB) GetVIESValidation(countryCode, vatNumber string) (*entity.VIESV
 	}
 	return nil, nil
 }
+
+// A look-alike Cyrillic letter (PL-666) is a bad number, not a VIES outage, and is
+// decided without calling VIES — which would answer HTTP 400.
+func TestMalformedTaxIdIsInvalidWithoutCall(t *testing.T) {
+	var calls int32
+	s := newTestService(t, func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusBadRequest)
+	})
+
+	if got := s.ValidateTaxId("\u0412E1034615262", "BE"); got != entity.VIESInvalid {
+		t.Errorf("result = %v, want VIESInvalid", got)
+	}
+	if calls != 0 {
+		t.Errorf("VIES calls = %d, want 0", calls)
+	}
+}

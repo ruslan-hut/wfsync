@@ -177,6 +177,11 @@ func resolveTaxId(countryCode, taxId string) (nip, taxIdType, reason string) {
 	if taxId == "" {
 		return "", taxIdTypeNone, ""
 	}
+	// Anything outside [A-Z0-9] — typically a Cyrillic look-alike letter — would defeat
+	// the prefix check below and reach wFirma as a mangled NIP it rejects.
+	if !entity.IsWellFormedTaxId(taxId) {
+		return "", taxIdTypeNone, "contains characters other than Latin letters and digits"
+	}
 
 	// A prefix on the number wins over the address country: a buyer registered for
 	// VAT abroad may well have a billing address elsewhere.

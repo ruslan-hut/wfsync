@@ -39,6 +39,9 @@ func (c *Core) SetProformaDatabase(db ProformaDatabase) {
 // receives its result, instead of issuing a second set.
 func (c *Core) B2BCreateProforma(ctx context.Context, order *entity.B2BOrder) (*entity.Payment, error) {
 	params := order.ToCheckoutParams()
+	if err := validateB2BTaxId(params); err != nil {
+		return nil, err
+	}
 	if err := c.validateB2BVATRate(params); err != nil {
 		return nil, err
 	}
