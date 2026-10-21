@@ -58,6 +58,9 @@ func main() {
 		if err := mongo.DedupeCheckoutParams(); err != nil {
 			log.Error("checkout params dedupe migration", sl.Err(err))
 		}
+		if err := mongo.EnsureInvoiceIndexes(); err != nil {
+			log.Error("wfirma invoice indexes", sl.Err(err))
+		}
 	}
 
 	// Initialize Telegram bot if enabled

@@ -598,6 +598,32 @@ func (m *MongoDB) GetInvoicesByExternalId(externalId string) ([]*entity.LocalInv
 	return invoices, nil
 }
 
+// EnsureInvoiceIndexes indexes the local wFirma document copy. id is the upsert key and is
+// unique; id_external is not — split orders and proformas share it — but the duplicate
+// guard looks it up on every capture and webhook. Idempotent.
+func (m *MongoDB) EnsureInvoiceIndexes() error {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionInvoice)
+	_, err = collection.Indexes().CreateMany(ctx, []mongo.IndexModel{
+		{
+			Keys:    bson.D{{Key: "id", Value: 1}},
+			Options: options.Index().SetName("uniq_id").SetUnique(true),
+		},
+		{
+			Keys:    bson.D{{Key: "id_external", Value: 1}},
+			Options: options.Index().SetName("id_external"),
+		},
+	})
+	return err
+}
+
 // DeleteInvoiceById removes a single invoice document by its wFirma ID.
 func (m *MongoDB) DeleteInvoiceById(id string) error {
 	ctx, cancel := m.opCtx()
