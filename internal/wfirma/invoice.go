@@ -1216,7 +1216,8 @@ func (c *Client) findByExternalId(ctx context.Context, externalId string, match 
 // is refused unless its type is exactly "proforma". This guarantees a normal VAT invoice
 // can never be deleted through this path, even if a caller passes the wrong id. A document
 // that is already absent (or confirmed gone) is treated as a successful no-op so callers
-// can safely regenerate.
+// can safely regenerate. Either way the local copy is dropped too: a reissued set may take
+// the same number, and a stale row would leave two records for it.
 func (c *Client) DeleteProforma(ctx context.Context, invoiceID string) error {
 	if !c.enabled {
 		return fmt.Errorf("wFirma is disabled")
@@ -1236,7 +1237,8 @@ func (c *Client) DeleteProforma(ctx context.Context, invoiceID string) error {
 	}
 
 	if isNotFoundStatus(getResp.Status.Code) {
-		return nil // already gone, nothing to delete
+		c.forgetInvoice(invoiceID) // already gone, nothing to delete
+		return nil
 	}
 	if getResp.Status.Code != "OK" {
 		msg := getResp.Status.Message
@@ -1256,7 +1258,8 @@ func (c *Client) DeleteProforma(ctx context.Context, invoiceID string) error {
 		}
 	}
 	if found == nil {
-		return nil // OK with no payload means the object is gone
+		c.forgetInvoice(invoiceID) // OK with no payload means the object is gone
+		return nil
 	}
 	if found.Type != string(invoiceProforma) {
 		return fmt.Errorf("refusing to delete invoice %s: type %q is not proforma", invoiceID, found.Type)
@@ -1279,7 +1282,19 @@ func (c *Client) DeleteProforma(ctx context.Context, invoiceID string) error {
 		return fmt.Errorf("wfirma delete invoice %s: %s", invoiceID, msg)
 	}
 
+	c.forgetInvoice(invoiceID)
 	return nil
+}
+
+// forgetInvoice removes the local copy of a document deleted in wFirma. Best effort: the
+// remote delete already succeeded, so a failure here is only logged.
+func (c *Client) forgetInvoice(invoiceID string) {
+	if c.db == nil {
+		return
+	}
+	if err := c.db.DeleteInvoiceById(invoiceID); err != nil {
+		c.log.With(slog.String("invoice_id", invoiceID)).Warn("delete local invoice copy", sl.Err(err))
+	}
 }
 
 func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (fileName string, meta *entity.FileMeta, err error) {

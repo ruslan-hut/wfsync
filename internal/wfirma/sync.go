@@ -153,8 +153,9 @@ func toLocalInvoice(inv InvoiceData) *entity.LocalInvoice {
 }
 
 // SyncFromRemote pulls invoices from wFirma for the given date range and syncs them to local DB.
-// Flow: fetch remote normal invoices, upsert each locally (with number), delete local records
-// whose IDs are absent from the remote set.
+// Flow: fetch remote normal invoices, upsert each locally (number, type and date only — the
+// rest of the local record is kept), delete local records whose IDs are absent from the
+// remote set.
 func (c *Client) SyncFromRemote(ctx context.Context, from, to string) (*entity.SyncResult, error) {
 	if !c.enabled {
 		return nil, fmt.Errorf("wFirma is disabled")
@@ -178,12 +179,15 @@ func (c *Client) SyncFromRemote(ctx context.Context, from, to string) (*entity.S
 	remoteIDs := make(map[string]bool, len(remoteInvoices))
 	for _, inv := range remoteInvoices {
 		remoteIDs[inv.Id] = true
-		// Build an Invoice struct to save via existing SaveInvoice (upsert)
-		localInv := &Invoice{
-			Id:     inv.Id,
-			Number: inv.Number,
-			Type:   inv.Type,
-			Date:   inv.Date,
+		// Only the fields read here are set. SaveInvoice is a $set upsert, and a full
+		// Invoice struct would blank id_external, contractor and contents on the local
+		// copy — the record the duplicate guard and SyncToRemote depend on, since wFirma
+		// no longer returns id_external.
+		localInv := map[string]interface{}{
+			"id":     inv.Id,
+			"number": inv.Number,
+			"type":   inv.Type,
+			"date":   inv.Date,
 		}
 		if err = c.db.SaveInvoice(inv.Id, localInv); err != nil {
 			log.Warn("upsert invoice", slog.String("invoice_id", inv.Id), sl.Err(err))
