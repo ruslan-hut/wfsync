@@ -9,6 +9,10 @@ import (
 	"wfsync/bot"
 )
 
+// tgErrorMaxLen caps the error text in an alert: an upstream error page
+// (wFirma 502 HTML) would otherwise fill several messages.
+const tgErrorMaxLen = 1000
+
 // TelegramHandler is a slog.Handler that sends log messages to Telegram
 type TelegramHandler struct {
 	handler  slog.Handler
@@ -48,56 +52,10 @@ func (h *TelegramHandler) Handle(ctx context.Context, record slog.Record) error 
 		h.mu.Lock()
 		defer h.mu.Unlock()
 
-		// Format the log message
-		var msg string
-		var header string
-
-		// Extract tg_topic and build message from all attribute sources.
-		// tg_skip=true suppresses the Telegram dispatch (the local handler still logs).
-		topic := ""
-		skip := false
-
-		// Add attributes from .With() calls
-		for _, attr := range h.attrs {
-			if attr.Key == "tg_topic" {
-				topic = attr.Value.String()
-			} else if attr.Key == "tg_skip" {
-				skip = skip || attr.Value.Bool()
-			} else if attr.Key == "error" {
-				msg += fmt.Sprintf("\n```error %v ```", attr.Value)
-			} else {
-				msg += bot.Sanitize(fmt.Sprintf("\n%s: %v", attr.Key, attr.Value))
-			}
-		}
-
-		// Add attributes from the record
-		record.Attrs(func(attr slog.Attr) bool {
-			if attr.Key == "tg_topic" {
-				topic = attr.Value.String()
-			} else if attr.Key == "tg_skip" {
-				skip = skip || attr.Value.Bool()
-			} else if attr.Key == "error" {
-				msg += fmt.Sprintf("```error %v ```", attr.Value)
-			} else {
-				msg += bot.Sanitize(fmt.Sprintf("\n%s: %v", attr.Key, attr.Value))
-			}
-			return true
-		})
-
+		msg, topic, skip := h.format(record)
 		if skip {
 			return nil
 		}
-
-		// Add group prefix if present
-		if h.group != "" {
-			header = fmt.Sprintf("*%s* `%s.%s`", record.Level.String(), h.group, record.Message)
-		} else {
-			header = fmt.Sprintf("*%s* `%s`", record.Level.String(), record.Message)
-		}
-		if topic != "" {
-			header = fmt.Sprintf("*%s* `%s`", strings.ToUpper(topic), record.Message)
-		}
-		msg = fmt.Sprintf("%s%s", header, msg)
 
 		// Route by topic if available, otherwise fall back to level-based routing
 		if h.bot != nil {
@@ -110,6 +68,45 @@ func (h *TelegramHandler) Handle(ctx context.Context, record slog.Record) error 
 	}
 
 	return nil
+}
+
+// format builds the MarkdownV2 alert text for a record.
+// tg_skip=true suppresses the Telegram dispatch (the local handler still logs).
+func (h *TelegramHandler) format(record slog.Record) (msg string, topic string, skip bool) {
+	addAttr := func(attr slog.Attr) {
+		switch attr.Key {
+		case "tg_topic":
+			topic = attr.Value.String()
+		case "tg_skip":
+			skip = skip || attr.Value.Bool()
+		case "error":
+			msg += "\n" + bot.CodeBlock(attr.Value.String(), tgErrorMaxLen)
+		default:
+			msg += bot.Sanitize(fmt.Sprintf("\n%s: %v", attr.Key, attr.Value))
+		}
+	}
+
+	// Attributes from .With() calls, then from the record
+	for _, attr := range h.attrs {
+		addAttr(attr)
+	}
+	record.Attrs(func(attr slog.Attr) bool {
+		addAttr(attr)
+		return true
+	})
+
+	// Add group prefix if present
+	var header string
+	message := bot.EscapeCodeBlock(record.Message)
+	if h.group != "" {
+		header = fmt.Sprintf("*%s* `%s.%s`", bot.Sanitize(record.Level.String()), bot.EscapeCodeBlock(h.group), message)
+	} else {
+		header = fmt.Sprintf("*%s* `%s`", bot.Sanitize(record.Level.String()), message)
+	}
+	if topic != "" {
+		header = fmt.Sprintf("*%s* `%s`", bot.Sanitize(strings.ToUpper(topic)), message)
+	}
+	return header + msg, topic, skip
 }
 
 // WithAttrs implements slog.Handler.WithAttrs

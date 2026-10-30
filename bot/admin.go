@@ -313,7 +313,7 @@ func (t *TgBot) retries(_ *tgbotapi.Bot, ctx *ext.Context) error {
 			errText = "(no error recorded)"
 		}
 		sb.WriteString("```\n")
-		sb.WriteString(escapeCodeBlock(errText))
+		sb.WriteString(EscapeCodeBlock(errText))
 		sb.WriteString("\n```")
 
 		t.plainResponse(chatId, sb.String())
@@ -350,7 +350,7 @@ func (t *TgBot) retry(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	job, err := runner.RetryNow(orderId)
 	if err != nil {
 		t.plainResponse(chatId, fmt.Sprintf("Retry failed for order `%s`:\n```\n%s\n```",
-			Sanitize(orderId), escapeCodeBlock(err.Error())))
+			Sanitize(orderId), EscapeCodeBlock(err.Error())))
 		return nil
 	}
 
@@ -366,19 +366,10 @@ func (t *TgBot) retry(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	}
 	if job.LastError != "" {
 		sb.WriteString("```\n")
-		sb.WriteString(escapeCodeBlock(job.LastError))
+		sb.WriteString(EscapeCodeBlock(job.LastError))
 		sb.WriteString("\n```")
 	}
 
 	t.plainResponse(chatId, sb.String())
 	return nil
-}
-
-// escapeCodeBlock escapes the characters Telegram MarkdownV2 requires inside a
-// pre/code entity (backslash and backtick), so arbitrary error text — which may
-// itself contain backticks — cannot break out of the fenced block.
-func escapeCodeBlock(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "`", "\\`")
-	return s
 }

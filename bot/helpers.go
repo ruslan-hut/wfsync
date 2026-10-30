@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 	"wfsync/entity"
 	"wfsync/lib/sl"
 
@@ -35,17 +36,40 @@ func (t *TgBot) plainResponse(chatId int64, text string) {
 	}
 }
 
+// Sanitize escapes every character Telegram MarkdownV2 reserves outside entities.
 func Sanitize(input string) string {
-	reservedChars := "\\_{}#+-.!|()[]=*"
-	sanitized := ""
+	const reservedChars = "\\_*[]()~`>#+-=|{}.!"
+	var sb strings.Builder
+	sb.Grow(len(input))
 	for _, char := range input {
 		if strings.ContainsRune(reservedChars, char) {
-			sanitized += "\\" + string(char)
-		} else {
-			sanitized += string(char)
+			sb.WriteByte('\\')
 		}
+		sb.WriteRune(char)
 	}
-	return sanitized
+	return sb.String()
+}
+
+// EscapeCodeBlock escapes the characters Telegram MarkdownV2 requires inside a
+// pre/code entity (backslash and backtick), so arbitrary error text — which may
+// itself contain backticks — cannot break out of the fenced block.
+func EscapeCodeBlock(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "`", "\\`")
+	return s
+}
+
+// CodeBlock wraps text in a fenced pre block, cut to at most maxLen bytes so a
+// verbose error (an HTML error page) does not flood the chat.
+func CodeBlock(text string, maxLen int) string {
+	if len(text) > maxLen {
+		cut := maxLen
+		for cut > 0 && !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		text = text[:cut] + "…"
+	}
+	return "```\n" + EscapeCodeBlock(text) + "\n```"
 }
 
 func (t *TgBot) requireAdmin(chatId int64) bool {
@@ -109,26 +133,64 @@ func (t *TgBot) notifyAdmins(msg string) {
 	}
 }
 
+const codeFence = "```"
+
+// splitMessage cuts MarkdownV2 text into parts of at most maxLen bytes. A part
+// that ends inside a fenced block is closed and the next one reopens it, so each
+// part parses on its own.
 func splitMessage(text string, maxLen int) []string {
 	if len(text) <= maxLen {
 		return []string{text}
 	}
+	// Room for closing a fence at the end of a part and reopening it in the next.
+	limit := maxLen - 2*(len(codeFence)+1)
 	var parts []string
+	reopen := false
 	for len(text) > 0 {
+		if reopen {
+			text = codeFence + "\n" + text
+		}
 		if len(text) <= maxLen {
 			parts = append(parts, text)
 			break
 		}
 		// Try to split at newline
-		cutAt := maxLen
-		nlIdx := strings.LastIndex(text[:maxLen], "\n")
+		cutAt := limit
+		nlIdx := strings.LastIndex(text[:limit], "\n")
 		if nlIdx > 0 {
 			cutAt = nlIdx + 1
+		} else {
+			// No newline: stay on a rune boundary and keep an escape pair together.
+			for cutAt > 0 && !utf8.RuneStart(text[cutAt]) {
+				cutAt--
+			}
+			if trailingBackslashes(text[:cutAt])%2 == 1 {
+				cutAt--
+			}
+			if cutAt <= 0 {
+				cutAt = limit
+			}
 		}
-		parts = append(parts, text[:cutAt])
+		part := text[:cutAt]
 		text = text[cutAt:]
+		reopen = strings.Count(part, codeFence)%2 == 1
+		if reopen {
+			if !strings.HasSuffix(part, "\n") {
+				part += "\n"
+			}
+			part += codeFence
+		}
+		parts = append(parts, part)
 	}
 	return parts
+}
+
+func trailingBackslashes(s string) int {
+	n := 0
+	for n < len(s) && s[len(s)-1-n] == '\\' {
+		n++
+	}
+	return n
 }
 
 func userDisplayName(user *entity.User) string {
