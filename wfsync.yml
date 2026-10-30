@@ -77,7 +77,7 @@ enable_banking:
   private_key_path: /etc/conf/enablebanking.pem
   # Must match a redirect URL registered for the application.
   redirect_url: https://api.darkbyrior.com/bank/callback
-  aspsp_name: PKO
+  aspsp_name: PKO Bank Polski
   aspsp_country: PL
   psu_type: business
   # Empty means poll every account the consent covers.

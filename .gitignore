@@ -3,3 +3,4 @@
 /wfsync
 .DS_Store
 /tasks
+.env.*
