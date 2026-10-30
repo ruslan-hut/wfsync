@@ -14,7 +14,7 @@ const maxTelegramMessageLen = 4096
 
 // DigestEntry is a single buffered notification waiting for the next flush.
 type DigestEntry struct {
-	Message   string
+	Message   string // MarkdownV2, ready to send
 	Topic     string
 	Level     slog.Level
 	Timestamp time.Time
@@ -112,7 +112,8 @@ func formatDigest(entries []DigestEntry) string {
 		sb.WriteString(fmt.Sprintf("*%s* \\(%d\\):\n", Sanitize(topic), len(topicEntries)))
 		for _, e := range topicEntries {
 			ts := e.Timestamp.Format("15:04")
-			sb.WriteString(fmt.Sprintf("  `%s` %s %s\n", ts, e.Level.String(), Sanitize(e.Message)))
+			// Message is already MarkdownV2 (formatted by the Telegram log handler).
+			sb.WriteString(fmt.Sprintf("  `%s` %s %s\n", ts, Sanitize(e.Level.String()), e.Message))
 		}
 		sb.WriteString("\n")
 	}
