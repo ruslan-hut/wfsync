@@ -1371,6 +1371,12 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (fileNam
 
 	ext := ".pdf"
 	if !strings.Contains(meta.ContentType, "pdf") {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxLoggedDownloadBody))
+		_ = resp.Body.Close()
+		log.With(
+			slog.String("content_type", meta.ContentType),
+			slog.String("body", string(body)),
+		).Error("invoice download returned non-pdf")
 		return "", nil, fmt.Errorf("unsupported content type: %s", meta.ContentType)
 	}
 	fileName = uuid.New().String() + ext
@@ -1411,6 +1417,9 @@ func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (fileNam
 
 // ksefDownloadPollInterval is how often waitForKSefProcessed re-checks the KSeF state.
 const ksefDownloadPollInterval = 3 * time.Second
+
+// maxLoggedDownloadBody bounds how much of a non-PDF download response goes to the log.
+const maxLoggedDownloadBody = 4096
 
 // waitForKSefProcessed blocks until the invoice has been processed by KSeF (a KSeF number
 // is assigned) or the configured budget (c.ksefDownloadWait) elapses. It exists because a
@@ -1468,8 +1477,10 @@ func (c *Client) waitForKSefProcessed(ctx context.Context, invoiceID string, log
 // exact response shape: the KSeF number lives in a key like ksef_reference_number /
 // ksef_number, the status in ksef_status, and the processing time in ksef_registration_date.
 func (c *Client) ksefReadiness(ctx context.Context, invoiceID string) (ready, pending bool) {
+	log := c.log.With(slog.String("invoice_id", invoiceID))
 	res, err := c.request(ctx, "invoices", "get/"+invoiceID, map[string]interface{}{})
 	if err != nil {
+		log.With(sl.Err(err)).Warn("KSeF state request failed; downloading without waiting")
 		return false, false
 	}
 
@@ -1480,6 +1491,7 @@ func (c *Client) ksefReadiness(ctx context.Context, invoiceID string) (ready, pe
 		Status Status `json:"status"`
 	}
 	if err := json.Unmarshal(res, &probe); err != nil || probe.Status.Code != "OK" {
+		log.With(slog.String("status", probe.Status.Code)).Warn("KSeF state unreadable; downloading without waiting")
 		return false, false
 	}
 
@@ -1492,9 +1504,28 @@ func (c *Client) ksefReadiness(ctx context.Context, invoiceID string) (ready, pe
 		}
 	}
 	if fields == nil {
+		log.Warn("KSeF state missing from invoice response; downloading without waiting")
 		return false, false
 	}
-	return classifyKSefFields(fields)
+	ready, pending = classifyKSefFields(fields)
+	log.With(
+		slog.Any("ksef_fields", ksefFieldsForLog(fields)),
+		slog.Bool("ready", ready),
+		slog.Bool("pending", pending),
+	).Info("KSeF state before download")
+	return ready, pending
+}
+
+// ksefFieldsForLog returns the ksef_* fields of an invoice so the readiness decision can
+// be checked against what wFirma actually sent.
+func ksefFieldsForLog(fields map[string]json.RawMessage) map[string]string {
+	out := make(map[string]string)
+	for key, raw := range fields {
+		if strings.Contains(strings.ToLower(key), "ksef") {
+			out[key] = rawJSONString(raw)
+		}
+	}
+	return out
 }
 
 // classifyKSefFields inspects an invoice object's fields and reports its KSeF readiness.

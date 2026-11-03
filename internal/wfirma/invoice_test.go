@@ -1,9 +1,46 @@
 package wfirma
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"log/slog"
+	"net/http"
+	"strings"
 	"testing"
 )
+
+// TestDownloadInvoiceLogsNonPDFBody keeps the reason wFirma gives when it answers a
+// download with something other than a PDF: the error alone says only the content type.
+func TestDownloadInvoiceLogsNonPDFBody(t *testing.T) {
+	const reason = "invoice is not available"
+	c, _ := newLocalCopyClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":{"code":"ERROR","message":"` + reason + `"}}`))
+	})
+	var logged bytes.Buffer
+	c.log = slog.New(slog.NewTextHandler(&logged, nil))
+
+	_, _, err := c.DownloadInvoice(context.Background(), "123")
+	if err == nil || !strings.Contains(err.Error(), "unsupported content type") {
+		t.Fatalf("err = %v, want unsupported content type", err)
+	}
+	if !strings.Contains(logged.String(), reason) {
+		t.Errorf("log does not carry the response body: %s", logged.String())
+	}
+}
+
+// TestKSefFieldsForLog keeps only the fields the readiness decision reads.
+func TestKSefFieldsForLog(t *testing.T) {
+	got := ksefFieldsForLog(map[string]json.RawMessage{
+		"id":                    json.RawMessage(`"123"`),
+		"ksef_status":           json.RawMessage(`"processing"`),
+		"ksef_reference_number": json.RawMessage(`""`),
+	})
+	if len(got) != 2 || got["ksef_status"] != "processing" {
+		t.Errorf("ksefFieldsForLog = %v", got)
+	}
+}
 
 // TestIsKSefAuthError ensures the KSeF-authorization detector fires only on the
 // authorization error that the draft fallback is meant to recover from, and not on
