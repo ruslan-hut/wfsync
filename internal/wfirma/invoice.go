@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1297,6 +1298,47 @@ func (c *Client) forgetInvoice(invoiceID string) {
 	}
 }
 
+// Unencrypted PDF dictionaries of the transaction confirmation wFirma renders for some
+// invoices (see isTransactionConfirmation). The text itself is in encrypted streams.
+var (
+	pdfPageRe  = regexp.MustCompile(`/Type\s*/Page\b`)
+	pdfImageRe = regexp.MustCompile(`/Subtype\s*/Image\b`)
+)
+
+// isTransactionConfirmation reports whether a wFirma PDF is a KSeF transaction confirmation
+// rather than the invoice: one page with exactly three images (two QR codes and a mask).
+// On 88 stored files (26 confirmations, 62 invoices) this split them without a miss; no
+// invoice has three images. A layout change at wFirma reads as "not a confirmation".
+func isTransactionConfirmation(data []byte) bool {
+	return len(pdfPageRe.FindAll(data, 2)) == 1 && len(pdfImageRe.FindAll(data, 4)) == 3
+}
+
+// DownloadFinalInvoice saves the invoice PDF like DownloadInvoice, but refuses a transaction
+// confirmation: it deletes the file and returns entity.ErrInvoiceFileNotReady, so the caller
+// asks again later instead of keeping a document without line items.
+func (c *Client) DownloadFinalInvoice(ctx context.Context, invoiceID string) (string, *entity.FileMeta, error) {
+	fileName, meta, err := c.DownloadInvoice(ctx, invoiceID)
+	if err != nil {
+		return "", nil, err
+	}
+	filePath := filepath.Join(c.filePath, fileName)
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", nil, fmt.Errorf("read invoice file: %w", err)
+	}
+	if isTransactionConfirmation(data) {
+		log := c.log.With(slog.String("invoice_id", invoiceID))
+		if err := os.Remove(filePath); err != nil {
+			log.With(sl.Err(err)).Warn("remove transaction confirmation file")
+		}
+		log.Info("wFirma returned a transaction confirmation, not the invoice")
+		return "", nil, entity.ErrInvoiceFileNotReady
+	}
+	return fileName, meta, nil
+}
+
+// DownloadInvoice saves the invoice PDF. The file may be a transaction confirmation; use
+// DownloadFinalInvoice where that is not acceptable.
 func (c *Client) DownloadInvoice(ctx context.Context, invoiceID string) (fileName string, meta *entity.FileMeta, err error) {
 	if !c.enabled {
 		return "", nil, fmt.Errorf("wFirma is disabled")

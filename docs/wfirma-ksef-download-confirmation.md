@@ -51,6 +51,24 @@ KSeF field names in the `invoices/get` response are matched loosely (any key con
 processed by KSeF; waiting before download`) is emitted when the gate waits, which can be
 used to confirm detection against live responses.
 
+This gate does not rule confirmations out. `ksef_registration_date` is set when the invoice
+is sent, so the gate reads it as processed at once. Waiting for `ksef_acquisition_timestamp`
+does not work either: history shows full files for most foreign buyers well before it, and
+confirmations for Polish and Slovak buyers until it (up to about 10 minutes; why these two
+differ is unknown).
+
+## The B2B portal: checking the file
+
+`DownloadFinalInvoice`, used by `POST /v1/b2b/invoice`, checks the downloaded file. A
+confirmation is deleted and the request answers `503` with `Retry-After` and
+`invoice file not ready`. Asking again is safe: the request finds the registered invoice by
+`id_external` and creates no duplicate. Comex repeats it by itself.
+
+The text is in encrypted streams, so the check reads the unencrypted PDF structure: exactly
+one page and three images. On 88 stored files this separated all 26 confirmations from 62
+invoices (2 or 4 images). If wFirma changes the layout, a confirmation passes as an invoice,
+as it did before this check. Every other flow keeps `DownloadInvoice` and is not checked.
+
 ## Alternative (non-code) remedy
 
 Uploading a **Type 2 (offline) KSeF certificate** for the API user makes wFirma render the

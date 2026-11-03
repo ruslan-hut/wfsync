@@ -68,6 +68,10 @@ func (s *proformaInvoiceService) RegisterProforma(_ context.Context, params *ent
 	return &head, nil
 }
 
+func (s *proformaInvoiceService) DownloadFinalInvoice(ctx context.Context, id string) (string, *entity.FileMeta, error) {
+	return s.DownloadInvoice(ctx, id)
+}
+
 func (s *proformaInvoiceService) DownloadInvoice(_ context.Context, id string) (string, *entity.FileMeta, error) {
 	if s.downloadErr != nil {
 		return "", nil, s.downloadErr

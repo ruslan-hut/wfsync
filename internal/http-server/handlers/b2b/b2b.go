@@ -109,6 +109,9 @@ func CreateProforma(logger *slog.Logger, handler Core) http.HandlerFunc {
 	}
 }
 
+// invoiceFileRetryAfterSeconds is the Retry-After sent while KSeF is still processing.
+const invoiceFileRetryAfterSeconds = "120"
+
 func CreateInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		mod := sl.Module("http.handlers.b2b")
@@ -155,6 +158,13 @@ func CreateInvoice(logger *slog.Logger, handler Core) http.HandlerFunc {
 			if errors.Is(err, entity.ErrVATRateMismatch) || errors.Is(err, entity.ErrInvalidTaxId) {
 				log.Warn("invoice rejected", sl.Err(err))
 				render.Status(r, 400)
+				render.JSON(w, r, errorResponse{Error: err.Error()})
+				return
+			}
+			if errors.Is(err, entity.ErrInvoiceFileNotReady) {
+				log.Warn("invoice file not ready", sl.Err(err))
+				w.Header().Set("Retry-After", invoiceFileRetryAfterSeconds)
+				render.Status(r, 503)
 				render.JSON(w, r, errorResponse{Error: err.Error()})
 				return
 			}

@@ -19,6 +19,11 @@ const (
 // 400 validation error so the calling system can reconcile its VAT calculation.
 var ErrVATRateMismatch = errors.New("vat rate mismatch")
 
+// ErrInvoiceFileNotReady signals that the invoice exists but KSeF has not finished with
+// it, so only a transaction confirmation could be downloaded. Asking again later is safe:
+// the repeated request finds the registered invoice and creates nothing.
+var ErrInvoiceFileNotReady = errors.New("invoice file not ready")
+
 type B2BOrder struct {
 	OrderUID        string     `json:"order_uid" validate:"required"`
 	OrderNumber     string     `json:"order_number" validate:"required"`
@@ -89,9 +94,9 @@ func (o *B2BOrder) ToCheckoutParams() *CheckoutParams {
 			ZipCode: zipcode,
 			TaxId:   o.ClientVAT,
 		},
-		Total:         floatToCents(o.Total),
-		Currency:      o.CurrencyCode,
-		OrderId:       o.OrderNumber,
+		Total:    floatToCents(o.Total),
+		Currency: o.CurrencyCode,
+		OrderId:  o.OrderNumber,
 		// The B2B portal is a separate system with its own id space, so OrderNumber can
 		// collide with an OpenCart order id. Dedup on the globally-unique order UID instead
 		// (stamped into the invoice id_external), while OrderNumber stays as the human

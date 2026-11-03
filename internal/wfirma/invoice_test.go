@@ -4,11 +4,83 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"wfsync/entity"
 )
+
+// fakeWFirmaPDF builds the part of a PDF the confirmation check reads: unencrypted dictionaries.
+func fakeWFirmaPDF(pages, images int) []byte {
+	var b strings.Builder
+	b.WriteString("%PDF-1.7\n<< /Count 1 /Kids [ 5 0 R ] /Type /Pages >>\n")
+	b.WriteString(strings.Repeat("<< /Parent 4 0 R /StructParents 0 /Type /Page >>\n", pages))
+	b.WriteString(strings.Repeat("<< /Filter /FlateDecode /Subtype /Image /Type /XObject >>\n", images))
+	return []byte(b.String())
+}
+
+func TestIsTransactionConfirmation(t *testing.T) {
+	cases := []struct {
+		name          string
+		pages, images int
+		want          bool
+	}{
+		{"confirmation: one page, three images", 1, 3, true},
+		{"one-page invoice has two images", 1, 2, false},
+		{"long invoice has four images", 8, 4, false},
+		{"three images on two pages is not a confirmation", 2, 3, false},
+		{"no readable structure", 0, 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTransactionConfirmation(fakeWFirmaPDF(tc.pages, tc.images)); got != tc.want {
+				t.Errorf("isTransactionConfirmation = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDownloadFinalInvoice: a confirmation is refused and leaves no file; DownloadInvoice,
+// which every other flow uses, keeps saving whatever wFirma returns.
+func TestDownloadFinalInvoice(t *testing.T) {
+	cases := []struct {
+		name    string
+		pdf     []byte
+		final   bool
+		wantErr error
+		wantN   int
+	}{
+		{"final, confirmation: refused, no file", fakeWFirmaPDF(1, 3), true, entity.ErrInvoiceFileNotReady, 0},
+		{"final, invoice: saved", fakeWFirmaPDF(8, 4), true, nil, 1},
+		{"best effort, confirmation: saved", fakeWFirmaPDF(1, 3), false, nil, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := newLocalCopyClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/pdf")
+				_, _ = w.Write(tc.pdf)
+			})
+			c.filePath = t.TempDir()
+			download := c.DownloadInvoice
+			if tc.final {
+				download = c.DownloadFinalInvoice
+			}
+			_, _, err := download(context.Background(), "123")
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("err = %v, want %v", err, tc.wantErr)
+			}
+			saved, _ := filepath.Glob(filepath.Join(c.filePath, "*"))
+			if len(saved) != tc.wantN {
+				t.Errorf("saved %d files, want %d", len(saved), tc.wantN)
+			}
+			_ = os.RemoveAll(c.filePath)
+		})
+	}
+}
 
 // TestDownloadInvoiceLogsNonPDFBody keeps the reason wFirma gives when it answers a
 // download with something other than a PDF: the error alone says only the content type.

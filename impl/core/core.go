@@ -32,6 +32,7 @@ type AuthService interface {
 
 type InvoiceService interface {
 	DownloadInvoice(ctx context.Context, invoiceID string) (string, *entity.FileMeta, error)
+	DownloadFinalInvoice(ctx context.Context, invoiceID string) (string, *entity.FileMeta, error)
 	RegisterInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 	RegisterProforma(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 	DeleteProforma(ctx context.Context, invoiceID string) error
@@ -463,11 +464,17 @@ func (c *Core) discardExistingProforma(ctx context.Context, params *entity.Check
 	params.ProformaFile = ""
 }
 
+// invoiceDownloader saves an invoice PDF and returns its file name.
+type invoiceDownloader func(ctx context.Context, invoiceID string) (string, *entity.FileMeta, error)
+
 func (c *Core) WFirmaRegisterInvoice(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error) {
 	if c.inv == nil {
 		return nil, fmt.Errorf("invoice service not connected")
 	}
+	return c.registerInvoice(ctx, params, c.inv.DownloadInvoice)
+}
 
+func (c *Core) registerInvoice(ctx context.Context, params *entity.CheckoutParams, download invoiceDownloader) (*entity.Payment, error) {
 	var payment *entity.Payment
 	var err error
 
@@ -492,25 +499,29 @@ func (c *Core) WFirmaRegisterInvoice(ctx context.Context, params *entity.Checkou
 		}
 	}
 
-	fileName, link, err := c.downloadInvoice(ctx, params.InvoiceFile, payment.Id)
+	fileName, link, err := c.fetchInvoice(ctx, params.InvoiceFile, payment.Id, download)
 	if err != nil {
 		return nil, err
 	}
 	payment.Link = link
 	payment.InvoiceFile = fileName
 
-	if err := c.downloadParts(ctx, payment); err != nil {
+	if err := c.fetchParts(ctx, payment, download); err != nil {
 		return nil, err
 	}
 
 	return payment, nil
 }
 
-// downloadParts fetches the PDF for every additional split part on the payment
-// and fills in Link/InvoiceFile in place. The first part is assumed to already
-// carry its own file fields (downloaded by the caller); the slice is iterated
-// uniformly because Parts mirrors the first part as its head element.
+// downloadParts fetches the PDF for every additional split part on the payment.
 func (c *Core) downloadParts(ctx context.Context, payment *entity.Payment) error {
+	return c.fetchParts(ctx, payment, c.inv.DownloadInvoice)
+}
+
+// fetchParts fills in Link/InvoiceFile of every split part in place. The first part is
+// assumed to already carry its own file fields (downloaded by the caller); the slice is
+// iterated uniformly because Parts mirrors the first part as its head element.
+func (c *Core) fetchParts(ctx context.Context, payment *entity.Payment, download invoiceDownloader) error {
 	if payment == nil || len(payment.Parts) <= 1 {
 		return nil
 	}
@@ -523,7 +534,7 @@ func (c *Core) downloadParts(ctx context.Context, payment *entity.Payment) error
 			part.InvoiceFile = payment.InvoiceFile
 			continue
 		}
-		fileName, link, err := c.downloadInvoice(ctx, "", part.Id)
+		fileName, link, err := c.fetchInvoice(ctx, "", part.Id, download)
 		if err != nil {
 			return err
 		}
@@ -534,9 +545,13 @@ func (c *Core) downloadParts(ctx context.Context, payment *entity.Payment) error
 }
 
 func (c *Core) downloadInvoice(ctx context.Context, fileName, paymentId string) (string, string, error) {
+	return c.fetchInvoice(ctx, fileName, paymentId, c.inv.DownloadInvoice)
+}
+
+func (c *Core) fetchInvoice(ctx context.Context, fileName, paymentId string, download invoiceDownloader) (string, string, error) {
 	var err error
 	if fileName == "" {
-		fileName, _, err = c.inv.DownloadInvoice(ctx, paymentId)
+		fileName, _, err = download(ctx, paymentId)
 		if err != nil {
 			return "", "", fmt.Errorf("download invoice: %w", err)
 		}
@@ -714,7 +729,12 @@ func (c *Core) B2BCreateInvoice(ctx context.Context, order *entity.B2BOrder) (*e
 	if err := c.validateB2BVATRate(params); err != nil {
 		return nil, err
 	}
-	return c.WFirmaRegisterInvoice(ctx, params)
+	if c.inv == nil {
+		return nil, fmt.Errorf("invoice service not connected")
+	}
+	// The portal keeps and shows the file it gets, so it must not get a transaction
+	// confirmation: it hears entity.ErrInvoiceFileNotReady and asks again instead.
+	return c.registerInvoice(ctx, params, c.inv.DownloadFinalInvoice)
 }
 
 // validateB2BTaxId rejects a malformed buyer VAT number with entity.ErrInvalidTaxId.
