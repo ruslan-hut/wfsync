@@ -95,6 +95,15 @@ func NewSQLClient(conf *config.Config, log *slog.Logger) (*MySql, error) {
 	if err = sdb.addColumnIfNotExists("order", "wf_payment_session", "VARCHAR(128) NOT NULL DEFAULT ''"); err != nil {
 		return nil, err
 	}
+	// wf_payment_time is the UTC moment the payment reached a final state (paid or
+	// canceled). Updating the payment columns does not touch date_modified, so this is
+	// the only marker an external reader (1C via ocapi) can poll to pick up captures.
+	if err = sdb.addColumnIfNotExists("order", "wf_payment_time", "DATETIME NULL DEFAULT NULL"); err != nil {
+		return nil, err
+	}
+	if err = sdb.addIndexIfNotExists("order", "idx_wf_payment_time", "wf_payment_time"); err != nil {
+		return nil, err
+	}
 
 	loc, err := time.LoadLocation(conf.Location)
 	if err != nil {
@@ -561,9 +570,46 @@ func (s *MySql) UpdatePayment(orderId int64, paymentId, sessionId, status string
 	if err != nil {
 		return err
 	}
-	_, err = stmt.Exec(status, paymentId, amount, sessionId, orderId)
+	_, err = stmt.Exec(status, status, status, paymentId, amount, sessionId, orderId)
 	if err != nil {
 		return err
 	}
 	return nil
+}
+
+// OrdersMissingPaymentTime returns ids of orders added since the given moment whose
+// payment is final (paid/canceled) but carries no wf_payment_time — orders finalized
+// before the column existed. Used by the one-off backfill.
+func (s *MySql) OrdersMissingPaymentTime(since time.Time, limit int) ([]int64, error) {
+	query := fmt.Sprintf(
+		`SELECT order_id FROM %sorder
+		WHERE wf_payment_status IN ('paid', 'canceled') AND wf_payment_time IS NULL AND date_added >= ?
+		ORDER BY order_id LIMIT ?`,
+		s.prefix,
+	)
+	rows, err := s.db.Query(query, since.In(s.loc).Format(time.DateTime), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err = rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// SetPaymentTimeIfEmpty stamps wf_payment_time (stored as UTC) on an order that has none
+// yet; an order that already carries a time is left untouched.
+func (s *MySql) SetPaymentTimeIfEmpty(orderId int64, at time.Time) error {
+	query := fmt.Sprintf(
+		`UPDATE %sorder SET wf_payment_time = ? WHERE order_id = ? AND wf_payment_time IS NULL`,
+		s.prefix,
+	)
+	_, err := s.db.Exec(query, at.UTC().Format(time.DateTime), orderId)
+	return err
 }

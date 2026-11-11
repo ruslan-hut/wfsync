@@ -48,6 +48,7 @@ type PaymentDatabase interface {
 	GetCheckoutParamsByDateRange(from, to string) ([]*entity.CheckoutParams, error)
 	GetCheckoutParamsByRefs(refs []string) ([]*entity.CheckoutParams, error)
 	GetUnresolvedHeldParams(limit int) ([]*entity.CheckoutParams, error)
+	GetCheckoutParamsByOrder(orderId string) (*entity.CheckoutParams, error)
 }
 
 type Core struct {

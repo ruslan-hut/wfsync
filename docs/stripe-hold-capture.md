@@ -394,6 +394,28 @@ curl -X POST "https://api.example.com/v1/st/cancel/cs_...b1ELPMpzHCbEuE9ab" \
 - Cancel releases funds without capturing
 - For direct payments (no hold), use `POST /v1/st/pay`
 
+## OpenCart Order Columns
+
+Every payment outcome (webhook, capture, cancel, reconciler) is written to the OpenCart
+order row. Writing these columns does **not** change `date_modified` or the order status
+(except status 17 on a confirmed hold), so readers that poll for payments must use
+`wf_payment_time`.
+
+| Column | Type | Meaning |
+|---|---|---|
+| `wf_payment_status` | VARCHAR(32) | `pending`, `requires_capture`, `paid`, `canceled` |
+| `wf_payment_id` | VARCHAR(64) | Stripe PaymentIntent id (`pi_...`) |
+| `wf_payment_amount` | BIGINT | amount in minor units (captured amount once `paid`) |
+| `wf_payment_session` | VARCHAR(128) | Checkout Session id (`cs_...`) |
+| `wf_payment_time` | DATETIME NULL, indexed | UTC moment the status changed into `paid` or `canceled`; repeated writes of the same outcome keep the first moment, `NULL` until final |
+
+On start the service fills `wf_payment_time` for orders of the last 90 days that were
+final before the column existed, using the `closed` (or `modified`) time of the local
+checkout record; orders without a record stay `NULL`.
+
+1C reads these columns through ocapi (`order_payment` config block, `GET payments`) to
+post a cash receipt for each captured payment.
+
 ## Related Documentation
 
 - [Stripe API](api-stripe.md) - All Stripe endpoints reference

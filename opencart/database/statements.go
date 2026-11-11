@@ -76,9 +76,16 @@ func (s *MySql) stmtUpdateOrderInvoice() (*sql.Stmt, error) {
 	return s.prepareStmt("updateOrderInvoice", query)
 }
 
+// stmtUpdateOrderPayment writes the payment columns. wf_payment_time is stamped only
+// when the status changes into a final state (paid/canceled), so the repeated writes of
+// the same outcome (webhook, capture call, reconciler) keep the first moment. MySQL
+// evaluates single-table UPDATE assignments left to right, which is why the time is
+// assigned before wf_payment_status: it still sees the previous status.
+// Parameters: status, status, status, payment id, amount, session id, order id.
 func (s *MySql) stmtUpdateOrderPayment() (*sql.Stmt, error) {
 	query := fmt.Sprintf(
 		`UPDATE %sorder SET
+                   wf_payment_time = IF(? IN ('paid', 'canceled') AND wf_payment_status <> ?, UTC_TIMESTAMP(), wf_payment_time),
                    wf_payment_status = ?,
                    wf_payment_id = ?,
                    wf_payment_amount = ?,

@@ -88,6 +88,25 @@ func (s *MySql) addColumnIfNotExists(tableName, columnName, columnType string) e
 	return nil
 }
 
+// addIndexIfNotExists creates a single-column index on the table unless an index with
+// the same name already exists.
+func (s *MySql) addIndexIfNotExists(tableName, indexName, columnName string) error {
+	query := `SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`
+	var count int
+	if err := s.db.QueryRow(query, s.prefix+tableName, indexName).Scan(&count); err != nil {
+		return fmt.Errorf("checking index %s existence in %s: %w", indexName, tableName, err)
+	}
+	if count > 0 {
+		return nil
+	}
+	alterQuery := fmt.Sprintf("ALTER TABLE `%s%s` ADD INDEX `%s` (`%s`)", s.prefix, tableName, indexName, columnName)
+	if _, err := s.db.Exec(alterQuery); err != nil {
+		return fmt.Errorf("add index %s to table %s: %w", indexName, tableName, err)
+	}
+	return nil
+}
+
 func (s *MySql) readStructure(table string) (map[string]Column, error) {
 	var err error
 	// Запросим структуру таблицы из кэша

@@ -338,6 +338,23 @@ func (oc *Opencart) SavePaymentData(orderId string, paymentId, sessionId, status
 	return oc.db.UpdatePayment(id, paymentId, sessionId, status, amount)
 }
 
+// OrdersMissingPaymentTime lists orders added since the given moment that have a final
+// payment status but no wf_payment_time.
+func (oc *Opencart) OrdersMissingPaymentTime(since time.Time, limit int) ([]int64, error) {
+	if oc.db == nil {
+		return nil, nil
+	}
+	return oc.db.OrdersMissingPaymentTime(since, limit)
+}
+
+// SetPaymentTimeIfEmpty stamps the payment time on an order that has none yet.
+func (oc *Opencart) SetPaymentTimeIfEmpty(orderId int64, at time.Time) error {
+	if oc.db == nil {
+		return nil
+	}
+	return oc.db.SetPaymentTimeIfEmpty(orderId, at)
+}
+
 // orderIdDigits matches an id consisting of a non-numeric prefix followed entirely by
 // digits, e.g. "ORD-739178000056082505". CRM-originated payments arrive with the Zoho
 // id under such a prefix; OpenCart stores the bare digits in the zoho_id column.

@@ -133,6 +133,7 @@ func main() {
 		handler.SetProformaDatabase(mongo)
 	}
 	handler.SetOpencart(oc)
+	go handler.BackfillPaymentTime(context.Background())
 
 	var bankPoller *core.BankPoller
 	if conf.EnableBanking.Enabled {
