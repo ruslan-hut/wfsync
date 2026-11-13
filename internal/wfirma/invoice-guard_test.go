@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"wfsync/entity"
 	"wfsync/lib/keylock"
 )
@@ -66,8 +67,8 @@ func (f *fakeWfirma) writeFind(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		entries = append(entries, fmt.Sprintf(
-			`"%d":{"invoice":{"id":"%s","fullnumber":"%s","type":"%s","id_external":"%s","total":"%.2f"}}`,
-			len(entries), inv.Id, inv.Number, inv.Type, inv.IdExternal, inv.Total))
+			`"%d":{"invoice":{"id":"%s","fullnumber":"%s","type":"%s","id_external":"%s","total":"%.2f","date":"%s"}}`,
+			len(entries), inv.Id, inv.Number, inv.Type, inv.IdExternal, inv.Total, inv.Date))
 	}
 	// The real API returns pagination metadata as an extra map entry with no invoice.
 	entries = append(entries, `"parameters":{"limit":"100","page":"1","total":"1"}`)
@@ -187,6 +188,10 @@ func TestRegisterInvoiceCreatesWhenNoneExists(t *testing.T) {
 	}
 	if payment.Id == "" {
 		t.Error("no invoice id returned")
+	}
+	today := time.Now().Format("2006-01-02")
+	if payment.Number != "FV 1/2026" || payment.Date != today || payment.Currency != "PLN" || payment.Amount != 30000 {
+		t.Errorf("document = %q %q %d %q, want FV 1/2026 %s 30000 PLN", payment.Number, payment.Date, payment.Amount, payment.Currency, today)
 	}
 }
 
@@ -346,7 +351,13 @@ func TestRegisterInvoiceResumesIncompleteSplit(t *testing.T) {
 		t.Errorf("resumed part description = %q, want a 2/2 marker", created.Description)
 	}
 	if len(payment.Parts) != 2 {
-		t.Errorf("payment parts = %d, want 2", len(payment.Parts))
+		t.Fatalf("payment parts = %d, want 2", len(payment.Parts))
+	}
+	// The part found in wFirma carries its number and date as well as the new one.
+	for i, want := range []string{"FV 1/2026", "FV 2/2026"} {
+		if p := payment.Parts[i]; p.Number != want || p.Date == "" || p.Currency != "PLN" {
+			t.Errorf("part %d = %q %q %q, want %s with a date in PLN", i+1, p.Number, p.Date, p.Currency, want)
+		}
 	}
 }
 

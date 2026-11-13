@@ -11,6 +11,13 @@ type Payment struct {
 	OrderId     string `json:"order_id" validate:"required"`
 	Link        string `json:"link,omitempty"`
 	InvoiceFile string `json:"invoice_file,omitempty"`
+	// Number is the document's full wFirma number, e.g. "PRO 12/11/2026"; empty for
+	// payments that are not wFirma documents or were recorded before it was kept.
+	Number string `json:"number,omitempty"`
+	// Date is the document's issue date, YYYY-MM-DD.
+	Date string `json:"date,omitempty"`
+	// Currency is the document's currency, ISO 4217 upper case; Amount is in its minor units.
+	Currency string `json:"currency,omitempty"`
 	// Parts carries every document produced for the order when the request was
 	// split across multiple wFirma invoices (over the soft item limit).
 	// Includes the first part as well, so consumers can iterate uniformly.
