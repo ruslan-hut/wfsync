@@ -541,6 +541,15 @@ Single-document order (most common):
   "url": "https://files.example.com/uuid-1.pdf",
   "urls": [
     "https://files.example.com/uuid-1.pdf"
+  ],
+  "documents": [
+    {
+      "url": "https://files.example.com/uuid-1.pdf",
+      "number": "PRO 12/11/2026",
+      "date": "2026-11-13",
+      "amount": 15000,
+      "currency": "EUR"
+    }
   ]
 }
 ```
@@ -566,6 +575,12 @@ Each part is a complete, standalone proforma in wFirma, with `(część N/M)` ap
 |-------|------|-------------|
 | `url` | string | Public URL of the first generated proforma PDF. Kept for backward compatibility — equal to `urls[0]`. |
 | `urls` | string[] | Public URLs of every proforma PDF produced for the order. Always populated; contains a single entry for non-split orders and one entry per part for split orders (in part order, 1..N). |
+| `documents` | object[] | The same documents as `urls`, in the same order, with their wFirma data (below). |
+| `documents[].url` | string | Public URL of the PDF, equal to the `urls` entry |
+| `documents[].number` | string | Full wFirma number, e.g. `PRO 12/11/2026` or `FV 3/11/2026`. Absent for a proforma issued before the number was recorded (re-used unchanged proforma) |
+| `documents[].date` | string | Issue date, `YYYY-MM-DD`. Absent when `number` is |
+| `documents[].amount` | integer | Gross total of the document in minor units of `currency` |
+| `documents[].currency` | string | ISO 4217, upper case |
 
 #### Errors
 

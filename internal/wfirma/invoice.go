@@ -356,9 +356,12 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 				).Warn("registered faktura amount does not match the order part, check for duplicates")
 			}
 			parts = append(parts, &entity.Payment{
-				Amount:  int64(amount * 100),
-				Id:      ex.Id,
-				OrderId: params.OrderId,
+				Amount:   int64(math.Round(amount * 100)),
+				Id:       ex.Id,
+				OrderId:  params.OrderId,
+				Number:   ex.Number,
+				Date:     ex.Date,
+				Currency: strings.ToUpper(params.Currency),
 			})
 		}
 		if len(existing) > totalParts {
@@ -444,6 +447,9 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 
 		inv.Id = resultInv.Id
 		inv.Number = resultInv.Number
+		if resultInv.Date != "" {
+			inv.Date = resultInv.Date
+		}
 
 		if c.db != nil {
 			if saveErr := c.db.SaveInvoice(inv.Id, inv); saveErr != nil {
@@ -473,9 +479,12 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 		).Info("invoice created")
 
 		parts = append(parts, &entity.Payment{
-			Amount:  int64(chunkTotal * 100),
-			Id:      inv.Id,
-			OrderId: params.OrderId,
+			Amount:   int64(math.Round(chunkTotal * 100)),
+			Id:       inv.Id,
+			OrderId:  params.OrderId,
+			Number:   inv.Number,
+			Date:     inv.Date,
+			Currency: inv.Currency,
 		})
 	}
 
@@ -1065,8 +1074,10 @@ func isFakturaType(t string) bool {
 // a part still needs creating (Id) and whether the documents look like the parts of this
 // order or like duplicates (Total).
 type existingFaktura struct {
-	Id    string
-	Total float64
+	Id     string
+	Total  float64
+	Number string
+	Date   string
 }
 
 // sameAmount compares two gross amounts at cent precision, the granularity wFirma
@@ -1110,7 +1121,7 @@ func (c *Client) findFakturasByExternalId(ctx context.Context, externalId string
 			continue
 		}
 		seen[inv.Id] = true
-		found = append(found, existingFaktura{Id: inv.Id, Total: inv.Total})
+		found = append(found, existingFaktura{Id: inv.Id, Total: inv.Total, Number: inv.Number, Date: inv.Date})
 	}
 	sortFakturasById(found)
 	return found, nil
@@ -1191,7 +1202,7 @@ func (c *Client) findByExternalId(ctx context.Context, externalId string, match 
 		if w.Invoice.Id == "" || !match(w.Invoice.Type) {
 			continue
 		}
-		ex := existingFaktura{Id: w.Invoice.Id}
+		ex := existingFaktura{Id: w.Invoice.Id, Number: w.Invoice.Number, Date: w.Invoice.Date}
 		// Total comes back as a formatted decimal string; an unparsable one leaves the
 		// amount at zero, which only costs the caller its cross-check.
 		if t, parseErr := strconv.ParseFloat(w.Invoice.Total, 64); parseErr == nil {

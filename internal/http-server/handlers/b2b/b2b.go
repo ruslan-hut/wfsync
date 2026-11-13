@@ -26,21 +26,44 @@ type Core interface {
 type urlResponse struct {
 	URL  string   `json:"url"`
 	URLs []string `json:"urls"`
+	// Documents describes the same documents as URLs, in the same order.
+	Documents []documentResponse `json:"documents"`
+}
+
+// documentResponse is one wFirma document of the order. Number and Date are empty
+// for a proforma issued before they were recorded.
+type documentResponse struct {
+	URL      string `json:"url"`
+	Number   string `json:"number,omitempty"`
+	Date     string `json:"date,omitempty"`
+	Amount   int64  `json:"amount"`
+	Currency string `json:"currency,omitempty"`
 }
 
 // buildURLResponse extracts the URL list from a payment, including all split parts.
 func buildURLResponse(payment *entity.Payment) urlResponse {
-	urls := []string{payment.Link}
-	if len(payment.Parts) > 1 {
-		urls = urls[:0]
-		for _, part := range payment.Parts {
-			if part == nil || part.Link == "" {
-				continue
-			}
-			urls = append(urls, part.Link)
-		}
+	resp := urlResponse{URL: payment.Link, URLs: []string{}, Documents: []documentResponse{}}
+	add := func(doc *entity.Payment) {
+		resp.URLs = append(resp.URLs, doc.Link)
+		resp.Documents = append(resp.Documents, documentResponse{
+			URL:      doc.Link,
+			Number:   doc.Number,
+			Date:     doc.Date,
+			Amount:   doc.Amount,
+			Currency: doc.Currency,
+		})
 	}
-	return urlResponse{URL: payment.Link, URLs: urls}
+	if len(payment.Parts) <= 1 {
+		add(payment)
+		return resp
+	}
+	for _, part := range payment.Parts {
+		if part == nil || part.Link == "" {
+			continue
+		}
+		add(part)
+	}
+	return resp
 }
 
 type errorResponse struct {
