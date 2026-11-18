@@ -66,3 +66,7 @@ enable_banking:
   lookback_days: 7
   reauth_warn_days: 30
   request_timeout_sec: 30
+  # Daily balance snapshot, working days only, local time of `location`.
+  balance_time: "07:00"
+  balance_retry_min: 30
+  balance_max_attempts: 6

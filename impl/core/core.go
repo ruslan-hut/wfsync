@@ -52,18 +52,19 @@ type PaymentDatabase interface {
 }
 
 type Core struct {
-	sc          *stripeclient.StripeClient
-	oc          *occlient.Opencart
-	inv         InvoiceService
-	db          PaymentDatabase
-	auth        AuthService
-	eb          *enablebanking.Client
-	bankDb      BankSessionDatabase
-	bankTxDb    BankTransactionDatabase
-	bankMatchDb BankMatchDatabase
-	bankFactDb  BankFactDatabase
-	retryQueue  *RetryQueue
-	proformaDb  ProformaDatabase
+	sc            *stripeclient.StripeClient
+	oc            *occlient.Opencart
+	inv           InvoiceService
+	db            PaymentDatabase
+	auth          AuthService
+	eb            *enablebanking.Client
+	bankDb        BankSessionDatabase
+	bankTxDb      BankTransactionDatabase
+	bankMatchDb   BankMatchDatabase
+	bankFactDb    BankFactDatabase
+	bankBalanceDb BankBalanceReader
+	retryQueue    *RetryQueue
+	proformaDb    ProformaDatabase
 	// proformaLocks serializes B2B proforma issuance per order.
 	proformaLocks *keylock.Map
 	filePath      string

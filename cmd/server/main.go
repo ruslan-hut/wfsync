@@ -136,6 +136,7 @@ func main() {
 	go handler.BackfillPaymentTime(context.Background())
 
 	var bankPoller *core.BankPoller
+	var balanceSnapshotter *core.BalanceSnapshotter
 	if conf.EnableBanking.Enabled {
 		// Statement polling needs somewhere to keep the session: the consent is granted
 		// by a person, lasts at most 180 days and cannot be refreshed, so losing it on
@@ -167,6 +168,23 @@ func main() {
 			bankPoller.SetDatabase(mongo)
 			bankPoller.SetMatcher(&handler)
 			bankPoller.Start()
+
+			handler.SetBankBalanceReader(mongo)
+			loc, err := time.LoadLocation(conf.Location)
+			if err != nil {
+				log.Error("load location for balance snapshots, using UTC", sl.Err(err))
+				loc = time.UTC
+			}
+			balances, err := core.NewBalanceSnapshotter(ebClient, mongo, log, loc,
+				conf.EnableBanking.BalanceTime,
+				conf.EnableBanking.BalanceRetryMin,
+				conf.EnableBanking.BalanceMaxAttempts)
+			if err != nil {
+				log.Error("balance snapshotter disabled", sl.Err(err))
+			} else {
+				balanceSnapshotter = balances
+				balanceSnapshotter.Start()
+			}
 			log.Info("bank poller started",
 				slog.Int("interval_min", conf.EnableBanking.PollIntervalMin),
 				slog.Int("lookback_days", conf.EnableBanking.LookbackDays))
@@ -237,6 +255,10 @@ func main() {
 
 	if bankPoller != nil {
 		bankPoller.Stop()
+	}
+
+	if balanceSnapshotter != nil {
+		balanceSnapshotter.Stop()
 	}
 
 	if vatService != nil {

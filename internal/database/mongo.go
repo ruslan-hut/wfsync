@@ -27,6 +27,7 @@ const (
 	collectionBankSessions    = "bank_sessions"
 	collectionBankTx          = "bank_transactions"
 	collectionPaymentFacts    = "payment_facts"
+	collectionBankBalances    = "bank_balances"
 	collectionProformas       = "b2b_proformas"
 )
 
@@ -1764,4 +1765,90 @@ func (m *MongoDB) GetPaymentFactsByDateRange(from, to time.Time) ([]*entity.Paym
 		return nil, err
 	}
 	return facts, nil
+}
+
+// SaveBankBalance stores one account's balance snapshot for a day, replacing an earlier
+// one for the same account and day.
+func (m *MongoDB) SaveBankBalance(snap *entity.BankBalanceSnapshot) error {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionBankBalances)
+	if _, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "iban", Value: 1}, {Key: "date", Value: 1}},
+		Options: options.Index().SetName("uniq_iban_date").SetUnique(true),
+	}); err != nil {
+		return fmt.Errorf("ensure bank balance index: %w", err)
+	}
+
+	_, err = collection.ReplaceOne(ctx,
+		bson.D{{Key: "iban", Value: snap.IBAN}, {Key: "date", Value: snap.Date}},
+		snap,
+		options.Replace().SetUpsert(true))
+	return err
+}
+
+// GetBankBalancesByDateRange returns snapshots for days within [from, to], oldest first.
+func (m *MongoDB) GetBankBalancesByDateRange(from, to string) ([]*entity.BankBalanceSnapshot, error) {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionBankBalances)
+	filter := bson.D{{Key: "date", Value: bson.D{{Key: "$gte", Value: from}, {Key: "$lte", Value: to}}}}
+	opts := options.Find().SetSort(bson.D{{Key: "date", Value: 1}, {Key: "iban", Value: 1}})
+	cursor, err := collection.Find(ctx, filter, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+
+	var out []*entity.BankBalanceSnapshot
+	if err := cursor.All(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// GetLatestBankBalances returns the most recent snapshot of each account. Accounts are
+// taken separately, so one that failed today still shows its last known balance.
+func (m *MongoDB) GetLatestBankBalances() ([]*entity.BankBalanceSnapshot, error) {
+	ctx, cancel := m.opCtx()
+	defer cancel()
+	connection, err := m.connect(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer m.disconnect(ctx, connection)
+
+	collection := connection.Database(m.database).Collection(collectionBankBalances)
+	pipeline := mongo.Pipeline{
+		{{Key: "$sort", Value: bson.D{{Key: "date", Value: -1}}}},
+		{{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: "$iban"},
+			{Key: "doc", Value: bson.D{{Key: "$first", Value: "$$ROOT"}}},
+		}}},
+		{{Key: "$replaceRoot", Value: bson.D{{Key: "newRoot", Value: "$doc"}}}},
+		{{Key: "$sort", Value: bson.D{{Key: "iban", Value: 1}}}},
+	}
+	cursor, err := collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = cursor.Close(ctx) }()
+
+	var out []*entity.BankBalanceSnapshot
+	if err := cursor.All(ctx, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

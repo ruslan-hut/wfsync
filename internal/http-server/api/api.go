@@ -105,6 +105,7 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 			bankRouter.Get("/status", bank.Status(log, handler))
 			bankRouter.Get("/transactions", bank.Transactions(log, handler))
 			bankRouter.Get("/balances", bank.Balances(log, handler))
+			bankRouter.Get("/balances/live", bank.BalancesLive(log, handler))
 			bankRouter.Get("/payments", bank.Payments(log, handler))
 			bankRouter.Get("/unmatched", bank.Unmatched(log, handler))
 			bankRouter.Post("/match", bank.Match(log, handler))

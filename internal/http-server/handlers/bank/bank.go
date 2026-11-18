@@ -36,6 +36,7 @@ type Core interface {
 	MatchBankPaymentManually(ctx context.Context, txKey, documentNumber string) error
 	PaymentFactsByDateRange(from, to time.Time) ([]*entity.PaymentFact, error)
 	BankBalances(ctx context.Context) ([]*entity.BankAccountBalances, error)
+	BankBalanceSnapshots(from, to string) ([]*entity.BankBalanceSnapshot, error)
 }
 
 // datePattern guards the range parameters; the stored dates are "YYYY-MM-DD" strings and
@@ -168,10 +169,53 @@ func Transactions(logger *slog.Logger, handler Core) http.HandlerFunc {
 	}
 }
 
-// Balances handles GET /v1/bank/balances — current balances of every authorized
-// account, fetched live from the bank. Each call counts against the bank's daily limit
-// for unattended access, so it is meant for an occasional check, not for polling.
+// Balances handles GET /v1/bank/balances[?from=&to=] — the daily balance snapshots, the
+// ERP's balance feed. Without a range it returns the latest snapshot of each account.
+// Served from storage, so consumers may call it as often as they like.
 func Balances(logger *slog.Logger, handler Core) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log := logger.With(
+			sl.Module("http.handlers.bank"),
+			slog.String("request_id", middleware.GetReqID(r.Context())),
+		)
+
+		if handler == nil {
+			render.Status(r, http.StatusServiceUnavailable)
+			render.JSON(w, r, response.Error("Bank service not available"))
+			return
+		}
+
+		from := r.URL.Query().Get("from")
+		to := r.URL.Query().Get("to")
+		if from != "" || to != "" {
+			if !datePattern.MatchString(from) || !datePattern.MatchString(to) {
+				render.Status(r, http.StatusBadRequest)
+				render.JSON(w, r, response.Error("Invalid date format, expected YYYY-MM-DD for both from and to"))
+				return
+			}
+		}
+
+		snaps, err := handler.BankBalanceSnapshots(from, to)
+		if err != nil {
+			log.Error("bank balance snapshots", sl.Err(err))
+			render.JSON(w, r, response.Error(fmt.Sprintf("Balances: %v", err)))
+			return
+		}
+		render.JSON(w, r, response.Ok(balancesResponse{Count: len(snaps), Items: snaps}))
+	}
+}
+
+// balancesResponse wraps the snapshots so an empty result reads as such.
+type balancesResponse struct {
+	Count int                           `json:"count"`
+	Items []*entity.BankBalanceSnapshot `json:"items"`
+}
+
+// BalancesLive handles GET /v1/bank/balances/live — current balances of every authorized
+// account, fetched from the bank on this request. Each call counts against the bank's
+// daily limit for unattended access, so it is meant for an occasional check; consumers
+// read Balances instead.
+func BalancesLive(logger *slog.Logger, handler Core) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		log := logger.With(
 			sl.Module("http.handlers.bank"),

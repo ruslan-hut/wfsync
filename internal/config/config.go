@@ -147,6 +147,14 @@ type EnableBanking struct {
 	// Sessions cannot be renewed — only re-authorized by the account holder in person.
 	ReauthWarnDays int `yaml:"reauth_warn_days" env-default:"30"`
 
+	// BalanceTime is the local time ("HH:MM", in the top-level location) at which the
+	// daily balance snapshot is taken on working days.
+	BalanceTime string `yaml:"balance_time" env-default:"07:00"`
+	// BalanceRetryMin and BalanceMaxAttempts bound retries of accounts whose balance
+	// could not be fetched; each attempt is another request counted by the bank.
+	BalanceRetryMin    int `yaml:"balance_retry_min" env-default:"30"`
+	BalanceMaxAttempts int `yaml:"balance_max_attempts" env-default:"6"`
+
 	// RequestTimeoutSec bounds a single Enable Banking API call.
 	RequestTimeoutSec int `yaml:"request_timeout_sec" env-default:"30"`
 }
