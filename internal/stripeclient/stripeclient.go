@@ -356,6 +356,7 @@ func (s *StripeClient) handlePaymentIntentSucceeded(evt *stripe.Event) *entity.C
 	params.EventId = evt.ID
 	params.Status = string(pi.Status)
 	params.Total = pi.Amount
+	params.AmountPaid = pi.AmountReceived
 	params.Paid = true
 	params.Modified = time.Now()
 
@@ -490,6 +491,7 @@ func (s *StripeClient) CaptureAmount(sessionId string, amount int64) (*entity.Pa
 
 	params.PaymentId = result.ID
 	params.Total = result.Amount
+	params.AmountPaid = result.AmountReceived
 	params.Status = string(result.Status)
 	params.Paid = true
 	if params.EventId == "" {

@@ -162,7 +162,7 @@ func (r *Reconciler) reconcileOne(params *entity.CheckoutParams) reconcileOutcom
 		slog.String("payment_id", params.PaymentId),
 	)
 
-	status, _, err := r.core.sc.PaymentIntentStatus(params.PaymentId)
+	status, received, err := r.core.sc.PaymentIntentStatus(params.PaymentId)
 	if err != nil {
 		if errors.Is(err, stripeclient.ErrPaymentIntentNotFound) {
 			// The PaymentIntent does not exist (e.g. stale or test-mode records queried
@@ -179,6 +179,9 @@ func (r *Reconciler) reconcileOne(params *entity.CheckoutParams) reconcileOutcom
 
 	switch stripe.PaymentIntentStatus(status) {
 	case stripe.PaymentIntentStatusSucceeded:
+		if received > 0 {
+			params.AmountPaid = received
+		}
 		return r.handleSucceeded(log, params)
 	case stripe.PaymentIntentStatusCanceled:
 		return r.handleCanceled(log, params)

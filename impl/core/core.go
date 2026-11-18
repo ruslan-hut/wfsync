@@ -67,6 +67,7 @@ type Core struct {
 	proformaDb    ProformaDatabase
 	// proformaLocks serializes B2B proforma issuance per order.
 	proformaLocks *keylock.Map
+	amountAlerts  *amountAlerts
 	filePath      string
 	fileUrl       string
 	log           *slog.Logger
@@ -77,6 +78,7 @@ func New(conf *config.Config, log *slog.Logger) Core {
 		filePath:      conf.FilePath,
 		fileUrl:       conf.OpenCart.FileUrl,
 		proformaLocks: keylock.New(),
+		amountAlerts:  &amountAlerts{},
 		log:           log.With(sl.Module("core")),
 	}
 }
@@ -262,6 +264,13 @@ func (c *Core) processInvoice(ctx context.Context, params *entity.CheckoutParams
 			slog.String("order_id", params.OrderId),
 			slog.String("event_id", params.EventId),
 		).Warn("invoice already registered")
+		return nil
+	}
+
+	// Never issue a faktura for a different amount than the customer paid: block it and
+	// signal instead. Not enqueued — retrying cannot fix a wrong amount.
+	if err := checkCapturedAmount(params); err != nil {
+		c.reportAmountMismatch(params, err)
 		return nil
 	}
 

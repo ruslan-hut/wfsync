@@ -56,6 +56,10 @@ type CheckoutParams struct {
 	Source        Source         `json:"source,omitempty" bson:"source"`
 	CustomerGroup int            `json:"customer_group,omitempty" bson:"customer_group,omitempty"`
 	Payload       interface{}    `json:"payload,omitempty" bson:"payload,omitempty"`
+	// AmountPaid is what Stripe actually captured (PaymentIntent.amount_received), set on
+	// the capture paths. It can differ from Total after a partial capture or when the
+	// hold link carried a total edited outside OpenCart; zero means unknown.
+	AmountPaid int64 `json:"amount_paid,omitempty" bson:"amount_paid,omitempty"`
 }
 
 func (c *CheckoutParams) Bind(_ *http.Request) error {

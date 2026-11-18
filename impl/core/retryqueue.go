@@ -290,6 +290,18 @@ func (rq *RetryQueue) processOneJob(job *entity.RetryJob, manual bool) {
 	// the original error was already reported to Telegram when the job was enqueued.
 	ctx := entity.WithRetry(context.Background())
 
+	// Same guard as processInvoice, for jobs enqueued before it existed or whose stored
+	// params drifted. Terminal: a wrong amount needs a human, not another attempt.
+	if err := checkCapturedAmount(params); err != nil {
+		log.With(
+			slog.String("invoice_total", formatMinor(params.Total)),
+			slog.String("captured", formatMinor(params.AmountPaid)),
+			slog.String("tg_topic", entity.TopicError),
+		).Error("retry job failed: invoice total differs from captured amount", sl.Err(err))
+		rq.failJob(job, err.Error())
+		return
+	}
+
 	// Attempt to register the invoice. RegisterInvoice is order-level idempotent: a faktura
 	// a capture / webhook / reconciler already issued is reused (matched on id_external),
 	// and a split order that failed part-way resumes at its first missing part. A lookup
