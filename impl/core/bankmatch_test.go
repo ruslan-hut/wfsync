@@ -352,3 +352,148 @@ func TestParseValidUntil(t *testing.T) {
 		}
 	}
 }
+
+// TestMatchBareNumber covers references that quote the number with no FV/PROF prefix,
+// taken from a real November 2026 statement. A bare number does not say whether it is a
+// proforma or an invoice, so only the currency and exact amount may confirm it.
+func TestMatchBareNumber(t *testing.T) {
+	tests := []struct {
+		name       string
+		remittance string
+		amount     int64
+		wantDoc    string // empty: must stay unmatched
+	}{
+		{"slashed", "1137/2026 FOREIGN-TRANSFER-IN", 147955, "PROF 1137/2026"},
+		{"with a word in front", "ANNE 1038/2026 INSTANT-SEPA-TRANSFER", 147955, "PROF 1038/2026"},
+		{"space instead of slash", "1100 2026 INSTANT-SEPA-TRANSFER", 147955, "PROF 1100/2026"},
+		{"order word, space", "ORDER 1101 2026 INSTANT-SEPA-TRANSFER", 147955, "PROF 1101/2026"},
+		{"run together", "11452026 INSTANT-SEPA-TRANSFER", 147955, "PROF 1145/2026"},
+		{"spelled-out prefix", "FAKT.PRO FORMA 1091/2026 TRANSFER-IN", 50000, "PROF 1091/2026"},
+		{"amount differs", "1137/2026 FOREIGN-TRANSFER-IN", 147900, ""},
+		{"no year", "INVOICE 782 INSTANT-SEPA-TRANSFER", 147955, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newFakeMatchDB()
+			for _, n := range []string{"PROF 1137/2026", "PROF 1038/2026", "PROF 1100/2026", "PROF 1101/2026", "PROF 1145/2026"} {
+				db.byNumber[n] = doc(n, "order-"+n, "EUR", 1479.55)
+			}
+			// An invoice with the same number in another currency must not compete.
+			db.byNumber["FV 1137/2026"] = doc("FV 1137/2026", "order-fv", "PLN", 1479.55)
+			db.byNumber["PROF 1091/2026"] = doc("PROF 1091/2026", "order-PROF 1091/2026", "EUR", 500.00)
+			db.unmatched = []*entity.BankTransaction{credit("k1", tt.remittance, "CLIENT", tt.amount, "EUR")}
+
+			res, err := testMatcher(db).MatchBankPayments(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantDoc == "" {
+				if res.Matched != 0 {
+					t.Fatalf("matched %d, want 0", res.Matched)
+				}
+				return
+			}
+			if res.Matched != 1 {
+				t.Fatalf("matched %d, want 1", res.Matched)
+			}
+			if got := db.facts["order-"+tt.wantDoc]; got == nil || got.Status != entity.PaymentFactPaid {
+				t.Errorf("fact for %s = %+v, want paid", tt.wantDoc, got)
+			}
+		})
+	}
+}
+
+// TestBareNumberAmbiguous leaves a payment for a person when a proforma and an invoice
+// share the number, currency and total.
+func TestBareNumberAmbiguous(t *testing.T) {
+	db := newFakeMatchDB()
+	db.byNumber["PROF 1137/2026"] = doc("PROF 1137/2026", "order-1", "EUR", 100.00)
+	db.byNumber["FV 1137/2026"] = doc("FV 1137/2026", "order-2", "EUR", 100.00)
+	db.unmatched = []*entity.BankTransaction{credit("k1", "1137/2026", "CLIENT", 10000, "EUR")}
+
+	res, err := testMatcher(db).MatchBankPayments(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Matched != 0 {
+		t.Errorf("matched %d, want 0", res.Matched)
+	}
+}
+
+// TestOrderNumberOutranksBareNumber guards an order number whose digits also read as
+// "number + year".
+func TestOrderNumberOutranksBareNumber(t *testing.T) {
+	db := newFakeMatchDB()
+	db.byRef["12026"] = doc("FV 900/2026", "12026", "PLN", 100.00)
+	db.byNumber["PROF 1/2026"] = doc("PROF 1/2026", "order-other", "PLN", 100.00)
+	db.unmatched = []*entity.BankTransaction{credit("k1", "Numer zamówienia: 12026", "CLIENT", 10000, "PLN")}
+
+	if _, err := testMatcher(db).MatchBankPayments(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := db.facts["12026"]; !ok {
+		t.Error("order number was not used")
+	}
+	if _, ok := db.facts["order-other"]; ok {
+		t.Error("bare number reading won over the stated order number")
+	}
+}
+
+// TestSplitAcrossDocuments covers one transfer paying several proformas, each quoted by
+// number: every document is settled with its own total.
+func TestSplitAcrossDocuments(t *testing.T) {
+	const remit = "ProfiVN shop s.r.o. 1103/2026, 1104/2026, 1097/2026 FOREIGN-TRANSFER-IN"
+	setup := func() *fakeMatchDB {
+		db := newFakeMatchDB()
+		db.byNumber["PROF 1103/2026"] = doc("PROF 1103/2026", "o-1103", "EUR", 1000.00)
+		db.byNumber["PROF 1104/2026"] = doc("PROF 1104/2026", "o-1104", "EUR", 250.50)
+		db.byNumber["PROF 1097/2026"] = doc("PROF 1097/2026", "o-1097", "EUR", 49.50)
+		return db
+	}
+
+	t.Run("totals add up", func(t *testing.T) {
+		db := setup()
+		db.unmatched = []*entity.BankTransaction{credit("k1", remit, "PROFIVN SHOP", 130000, "EUR")}
+		res, err := testMatcher(db).MatchBankPayments(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Matched != 1 {
+			t.Fatalf("matched %d, want 1", res.Matched)
+		}
+		for ref, want := range map[string]int64{"o-1103": 100000, "o-1104": 25050, "o-1097": 4950} {
+			f := db.facts[ref]
+			if f == nil || f.AmountPaid != want || f.Status != entity.PaymentFactPaid {
+				t.Errorf("%s: fact = %+v, want paid %d", ref, f, want)
+			}
+		}
+		if db.marks["k1"] != entity.BankMatchMatched {
+			t.Errorf("mark = %q, want matched", db.marks["k1"])
+		}
+	})
+
+	t.Run("totals differ", func(t *testing.T) {
+		db := setup()
+		db.unmatched = []*entity.BankTransaction{credit("k1", remit, "PROFIVN SHOP", 129999, "EUR")}
+		res, err := testMatcher(db).MatchBankPayments(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Matched != 0 || len(db.facts) != 0 {
+			t.Errorf("matched %d, facts %d, want none", res.Matched, len(db.facts))
+		}
+	})
+
+	t.Run("one document missing", func(t *testing.T) {
+		db := setup()
+		delete(db.byNumber, "PROF 1097/2026")
+		db.unmatched = []*entity.BankTransaction{credit("k1", remit, "PROFIVN SHOP", 125050, "EUR")}
+		res, err := testMatcher(db).MatchBankPayments(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Matched != 0 {
+			t.Errorf("matched %d, want 0", res.Matched)
+		}
+	})
+}

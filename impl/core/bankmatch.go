@@ -36,10 +36,17 @@ import (
 // cannot turn into an unbounded burst of database work.
 const matchBatchLimit = 500
 
-// docNumberPattern finds a wFirma document number in a normalized payment reference.
+// docNumberPattern finds wFirma document numbers in a normalized payment reference.
 // Matching runs on the whitespace-stripped form, so "PROF 74 5/2026" — a reference the
-// bank broke mid-token when wrapping — still resolves.
-var docNumberPattern = regexp.MustCompile(`(FV|PROF)(\d+)/(\d{4})`)
+// bank broke mid-token when wrapping — still resolves. "PRO FORMA" spelled out counts as
+// the PROF prefix; a number with no prefix at all is captured too, since customers often
+// quote just "1137/2026", but it is only trusted once the amount confirms it.
+var docNumberPattern = regexp.MustCompile(`(FV|PROF|PRO-?FORMA)?(\d+)/(\d{4})`)
+
+// compactNumberPattern finds a document number written without the slash — "1100 2026"
+// or "11452026" once whitespace is stripped. Digit runs on either side rule out IBANs and
+// long references. Used only when no slashed number is present.
+var compactNumberPattern = regexp.MustCompile(`(?:^|\D)(\d{1,5})(20[2-3]\d)(?:\D|$)`)
 
 // orderNumberPattern finds an order number instead of a document number. Customers who
 // do not quote the document quote the order, in Polish, German or English.
@@ -124,12 +131,12 @@ func (c *Core) MatchBankPayments(ctx context.Context) (*BankMatchResult, error) 
 	}
 
 	for _, tx := range payments {
-		doc := matchDocument(tx, docs)
-		if doc == nil {
+		allocs := matchDocuments(tx, docs)
+		if len(allocs) == 0 {
 			result.Unmatched++
 			continue
 		}
-		if err := c.recordPayment(ctx, tx, doc, entity.MatchExact); err != nil {
+		if err := c.recordAllocations(tx, allocs, entity.MatchExact); err != nil {
 			c.log.Error("record payment fact", sl.Err(err), slog.String("key", tx.Key))
 			result.Unmatched++
 			continue
@@ -161,6 +168,57 @@ func classifyIgnored(tx *entity.BankTransaction) (string, bool) {
 	return "", false
 }
 
+// docRef is one document number found in a payment reference, with the stored forms it
+// may correspond to. A bare number names no document type, so it yields both a proforma
+// and an invoice candidate; the amount decides between them.
+type docRef struct {
+	candidates []string // normalized document numbers, e.g. "PROF1103/2026"
+	bare       bool
+}
+
+// documentRefs extracts the document numbers a reference quotes, in order, without
+// duplicates.
+func documentRefs(key string) []docRef {
+	var refs []docRef
+	seen := map[string]bool{}
+	add := func(prefix, num, year string) {
+		id := num + "/" + year
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		switch {
+		case prefix == "FV":
+			refs = append(refs, docRef{candidates: []string{"FV" + id}})
+		case prefix != "":
+			refs = append(refs, docRef{candidates: []string{"PROF" + id}})
+		default:
+			refs = append(refs, docRef{candidates: []string{"PROF" + id, "FV" + id}, bare: true})
+		}
+	}
+
+	for _, m := range docNumberPattern.FindAllStringSubmatch(key, -1) {
+		add(m[1], m[2], m[3])
+	}
+	if len(refs) == 0 {
+		if m := compactNumberPattern.FindStringSubmatch(key); m != nil {
+			add("", m[1], m[2])
+		}
+	}
+	return refs
+}
+
+// spacedNumber turns a normalized number into the stored form, "PROF1103/2026" into
+// "PROF 1103/2026".
+func spacedNumber(n string) string {
+	for _, p := range []string{"PROF", "FV"} {
+		if rest, ok := strings.CutPrefix(n, p); ok {
+			return p + " " + rest
+		}
+	}
+	return n
+}
+
 // loadCandidateDocuments fetches every document referenced by the batch in two queries,
 // keyed for lookup. Numbers are read in their normalized form, since that is what the
 // payment reference yields.
@@ -169,12 +227,13 @@ func (c *Core) loadCandidateDocuments(txs []*entity.BankTransaction) (map[string
 	refSet := map[string]bool{}
 
 	for _, tx := range txs {
-		if m := docNumberPattern.FindStringSubmatch(tx.RemittanceKey); m != nil {
-			// The stored number carries a space the reference may not ("FV 768/2026"
-			// vs "FV768/2026"); query for both forms rather than scanning with a regex.
-			numberSet[fmt.Sprintf("%s %s/%s", m[1], m[2], m[3])] = true
-			numberSet[fmt.Sprintf("%s%s/%s", m[1], m[2], m[3])] = true
-			continue
+		for _, r := range documentRefs(tx.RemittanceKey) {
+			for _, n := range r.candidates {
+				// The stored number carries a space the reference may not ("FV 768/2026"
+				// vs "FV768/2026"); query for both forms rather than scanning with a regex.
+				numberSet[n] = true
+				numberSet[spacedNumber(n)] = true
+			}
 		}
 		if m := orderNumberPattern.FindStringSubmatch(tx.RemittanceKey); m != nil {
 			refSet[m[1]] = true
@@ -211,39 +270,132 @@ func (c *Core) loadCandidateDocuments(txs []*entity.BankTransaction) (map[string
 	return docs, nil
 }
 
-// matchDocument resolves one payment to a document by the number stated in its reference.
+// allocation is the part of a transfer credited to one document.
+type allocation struct {
+	doc    *entity.LocalInvoice
+	amount int64
+}
+
+// matchDocuments resolves one payment to the documents it settles, by the numbers stated
+// in its reference.
 //
 // Only level 1 of the cascade is automatic. Matching by amount and counterparty alone is
 // a guess, and a wrong guess here marks somebody else's order paid — so those land in the
-// review queue instead, where a person decides.
-func matchDocument(tx *entity.BankTransaction, docs map[string]*entity.LocalInvoice) *entity.LocalInvoice {
-	if m := docNumberPattern.FindStringSubmatch(tx.RemittanceKey); m != nil {
-		if d, ok := docs["N:"+m[0]]; ok {
-			return d
+// review queue instead, where a person decides. The amount is consulted only to confirm
+// what the reference already says:
+//
+//   - One prefixed number is trusted as is, whatever the amount or currency.
+//   - One bare number is accepted only when exactly one candidate has the payment's
+//     currency and total.
+//   - Several numbers are each resolved separately, and the transfer is split by
+//     document total — only when every document is found, each unambiguously, in the
+//     payment's currency, and the totals add up to the payment exactly.
+func matchDocuments(tx *entity.BankTransaction, docs map[string]*entity.LocalInvoice) []allocation {
+	refs := documentRefs(tx.RemittanceKey)
+
+	if len(refs) == 1 && !refs[0].bare {
+		if d, ok := docs["N:"+refs[0].candidates[0]]; ok {
+			return []allocation{{doc: d, amount: tx.Amount}}
 		}
 	}
+
+	// An order number is stated explicitly, so it outranks a bare number, which may be
+	// nothing more than the same digits read as "number + year".
 	if m := orderNumberPattern.FindStringSubmatch(tx.RemittanceKey); m != nil {
 		if d, ok := docs["R:"+m[1]]; ok {
-			return d
+			return []allocation{{doc: d, amount: tx.Amount}}
 		}
+	}
+
+	switch {
+	case len(refs) == 1 && refs[0].bare:
+		if d := pickCandidate(refs[0], docs, tx.Currency, tx.Amount); d != nil {
+			return []allocation{{doc: d, amount: tx.Amount}}
+		}
+	case len(refs) > 1:
+		return splitByDocuments(tx, refs, docs)
 	}
 	return nil
 }
 
-// recordPayment writes the settlement record for the order the document belongs to, then
-// marks the statement entry resolved.
+// pickCandidate returns the only document among a reference's candidates in the given
+// currency — and, when amount is positive, with exactly that total. Ambiguity yields nil.
+func pickCandidate(r docRef, docs map[string]*entity.LocalInvoice, currency string, amount int64) *entity.LocalInvoice {
+	var found *entity.LocalInvoice
+	for _, n := range r.candidates {
+		d, ok := docs["N:"+n]
+		if !ok || !strings.EqualFold(d.Currency, currency) {
+			continue
+		}
+		if amount > 0 && toMinorUnits(d.Total) != amount {
+			continue
+		}
+		if found != nil {
+			return nil
+		}
+		found = d
+	}
+	return found
+}
+
+// splitByDocuments credits each quoted document with its own total. Documents of the
+// same order are merged, since the settlement record is kept per order.
+func splitByDocuments(tx *entity.BankTransaction, refs []docRef, docs map[string]*entity.LocalInvoice) []allocation {
+	var allocs []allocation
+	byOrder := map[string]int{}
+	var sum int64
+	for _, r := range refs {
+		d := pickCandidate(r, docs, tx.Currency, 0)
+		if d == nil {
+			return nil
+		}
+		total := toMinorUnits(d.Total)
+		sum += total
+		if i, ok := byOrder[d.IdExternal]; ok {
+			allocs[i].amount += total
+			continue
+		}
+		byOrder[d.IdExternal] = len(allocs)
+		allocs = append(allocs, allocation{doc: d, amount: total})
+	}
+	if sum != tx.Amount {
+		return nil
+	}
+	return allocs
+}
+
+// recordAllocations writes a settlement record per allocation, then marks the statement
+// entry resolved — last, so a failure part-way leaves the entry in the queue for the next
+// pass, which the per-record idempotency makes safe to repeat.
+func (c *Core) recordAllocations(tx *entity.BankTransaction, allocs []allocation, level string) error {
+	refs := make([]string, 0, len(allocs))
+	for _, a := range allocs {
+		ref, err := c.recordPayment(tx, a.doc, a.amount, level)
+		if err != nil {
+			return err
+		}
+		refs = append(refs, ref)
+	}
+	if err := c.bankMatchDb.SetBankTransactionMatch(tx.Key, entity.BankMatchMatched, strings.Join(refs, ",")); err != nil {
+		return fmt.Errorf("mark transaction matched: %w", err)
+	}
+	return nil
+}
+
+// recordPayment adds amount of the transfer to the settlement record of the order the
+// document belongs to, and returns that order's reference.
 //
 // Payments accumulate: an order can be settled by several transfers, and each pass adds
 // to what previous ones recorded rather than replacing it.
-func (c *Core) recordPayment(_ context.Context, tx *entity.BankTransaction, doc *entity.LocalInvoice, level string) error {
+func (c *Core) recordPayment(tx *entity.BankTransaction, doc *entity.LocalInvoice, amount int64, level string) (string, error) {
 	ref := doc.IdExternal
 	if ref == "" {
-		return fmt.Errorf("document %s has no external reference", doc.Number)
+		return "", fmt.Errorf("document %s has no external reference", doc.Number)
 	}
 
 	fact := &entity.PaymentFact{ExternalRef: ref}
 	if existing, err := c.bankMatchDb.GetPaymentFactsByRefs([]string{ref}); err != nil {
-		return fmt.Errorf("load payment fact: %w", err)
+		return "", fmt.Errorf("load payment fact: %w", err)
 	} else if len(existing) > 0 {
 		fact = existing[0]
 	}
@@ -251,7 +403,7 @@ func (c *Core) recordPayment(_ context.Context, tx *entity.BankTransaction, doc 
 	// Re-running a pass must not double-count a transfer already recorded.
 	for _, k := range fact.TransactionKeys {
 		if k == tx.Key {
-			return c.bankMatchDb.SetBankTransactionMatch(tx.Key, entity.BankMatchMatched, ref)
+			return ref, nil
 		}
 	}
 
@@ -261,7 +413,7 @@ func (c *Core) recordPayment(_ context.Context, tx *entity.BankTransaction, doc 
 	fact.CurrencyDoc = strings.ToUpper(doc.Currency)
 	fact.AmountDue = toMinorUnits(doc.Total)
 	fact.CurrencyPaid = tx.Currency
-	fact.AmountPaid += tx.Amount
+	fact.AmountPaid += amount
 	fact.TransactionKeys = append(fact.TransactionKeys, tx.Key)
 	fact.PartyName = tx.PartyName
 	fact.MatchLevel = level
@@ -269,17 +421,12 @@ func (c *Core) recordPayment(_ context.Context, tx *entity.BankTransaction, doc 
 	if paidAt, err := time.Parse(time.DateOnly, tx.BookingDate); err == nil && paidAt.After(fact.PaidAt) {
 		fact.PaidAt = paidAt
 	}
-	if doc.IdExternal != "" {
-		fact.OrderNumber = doc.IdExternal
-	}
+	fact.OrderNumber = ref
 
 	fact.AmountStatus, fact.Status = settlement(fact)
 
 	if err := c.bankMatchDb.SavePaymentFact(fact); err != nil {
-		return fmt.Errorf("save payment fact: %w", err)
-	}
-	if err := c.bankMatchDb.SetBankTransactionMatch(tx.Key, entity.BankMatchMatched, ref); err != nil {
-		return fmt.Errorf("mark transaction matched: %w", err)
+		return "", fmt.Errorf("save payment fact: %w", err)
 	}
 
 	c.log.Debug("payment matched",
@@ -289,7 +436,7 @@ func (c *Core) recordPayment(_ context.Context, tx *entity.BankTransaction, doc 
 		slog.Int64("due", fact.AmountDue),
 		slog.String("amount_status", fact.AmountStatus),
 		slog.Bool("tg_skip", true))
-	return nil
+	return ref, nil
 }
 
 // settlement derives how the paid sum compares with the document, and the resulting
@@ -348,7 +495,7 @@ func (c *Core) MatchBankPaymentManually(ctx context.Context, txKey, documentNumb
 		return fmt.Errorf("document %s not found", documentNumber)
 	}
 
-	return c.recordPayment(ctx, tx, docs[0], entity.MatchManual)
+	return c.recordAllocations(tx, []allocation{{doc: docs[0], amount: tx.Amount}}, entity.MatchManual)
 }
 
 // PaymentFacts returns settlement records for the given orders, which is how the B2B
