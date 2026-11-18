@@ -4,7 +4,9 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"slices"
 	"testing"
+	"time"
 
 	"wfsync/entity"
 )
@@ -14,6 +16,7 @@ type fakeMatchDB struct {
 	unmatched []*entity.BankTransaction
 	byNumber  map[string]*entity.LocalInvoice
 	byRef     map[string]*entity.LocalInvoice
+	byRefAll  map[string][]*entity.LocalInvoice // every document of an order, when set
 	facts     map[string]*entity.PaymentFact
 	marks     map[string]string // tx key → match status
 }
@@ -44,6 +47,10 @@ func (f *fakeMatchDB) GetInvoicesByNumbers(numbers []string) ([]*entity.LocalInv
 func (f *fakeMatchDB) GetInvoicesByExternalRefs(refs []string) ([]*entity.LocalInvoice, error) {
 	var out []*entity.LocalInvoice
 	for _, r := range refs {
+		if all, ok := f.byRefAll[r]; ok {
+			out = append(out, all...)
+			continue
+		}
 		if d, ok := f.byRef[r]; ok {
 			out = append(out, d)
 		}
@@ -496,4 +503,99 @@ func TestSplitAcrossDocuments(t *testing.T) {
 			t.Errorf("matched %d, want 0", res.Matched)
 		}
 	})
+}
+
+// fakeProformaDB serves B2B proforma records by order.
+type fakeProformaDB struct {
+	records map[string]*entity.ProformaRecord
+}
+
+func (f *fakeProformaDB) GetProformaRecord(id string) (*entity.ProformaRecord, error) {
+	return f.records[id], nil
+}
+func (f *fakeProformaDB) SaveProformaRecord(*entity.ProformaRecord) error { return nil }
+func (f *fakeProformaDB) DeleteProformaRecord(string) error               { return nil }
+
+// fakeFactDB lists every stored fact, whatever the range.
+type fakeFactDB struct{ db *fakeMatchDB }
+
+func (f fakeFactDB) GetPaymentFactsByDateRange(_, _ time.Time) ([]*entity.PaymentFact, error) {
+	var out []*entity.PaymentFact
+	for _, fact := range f.db.facts {
+		out = append(out, fact)
+	}
+	return out, nil
+}
+
+// splitOrder stores a B2B order issued as a set of proformas: byRef returns every local
+// document of the order, including one left over from an earlier, reissued set.
+func splitOrder(db *fakeMatchDB) *fakeProformaDB {
+	docs := []*entity.LocalInvoice{
+		doc("PROF 1138/2026", "uid-1", "EUR", 3677.33),
+		doc("PROF 1139/2026", "uid-1", "EUR", 2340.40),
+		doc("PROF 1001/2026", "uid-1", "EUR", 9999.99), // superseded set
+	}
+	for _, d := range docs {
+		db.byNumber[d.Number] = d
+	}
+	db.byRefAll = map[string][]*entity.LocalInvoice{"uid-1": docs}
+	return &fakeProformaDB{records: map[string]*entity.ProformaRecord{
+		"uid-1": {ExternalId: "uid-1", Payment: &entity.Payment{Id: "id-PROF 1138/2026", Parts: []*entity.Payment{
+			{Id: "id-PROF 1138/2026"}, {Id: "id-PROF 1139/2026"},
+		}}},
+	}}
+}
+
+// TestSplitOrderDue covers a B2B order issued as two proformas and paid by two transfers,
+// one per proforma: the order is due the whole set, so it ends exactly paid, not overpaid.
+func TestSplitOrderDue(t *testing.T) {
+	db := newFakeMatchDB()
+	c := testMatcher(db)
+	c.SetProformaDatabase(splitOrder(db))
+
+	db.unmatched = []*entity.BankTransaction{credit("k1", "1138/2026", "CLIENT", 367733, "EUR")}
+	if _, err := c.MatchBankPayments(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if f := db.facts["uid-1"]; f.AmountDue != 601773 || f.Status != entity.PaymentFactPartial {
+		t.Fatalf("after first: due=%d status=%s, want 601773 partial", f.AmountDue, f.Status)
+	}
+
+	db.unmatched = []*entity.BankTransaction{credit("k2", "1139/2026", "CLIENT", 234040, "EUR")}
+	if _, err := c.MatchBankPayments(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	f := db.facts["uid-1"]
+	if f.AmountPaid != 601773 || f.Status != entity.PaymentFactPaid {
+		t.Errorf("paid=%d status=%s, want 601773 paid", f.AmountPaid, f.Status)
+	}
+	if want := []string{"PROF 1138/2026", "PROF 1139/2026"}; !slices.Equal(f.DocumentNumbers, want) {
+		t.Errorf("documents = %v, want %v", f.DocumentNumbers, want)
+	}
+}
+
+// TestRecalculatePaymentDue repairs a record written when only one document of the set
+// counted as due.
+func TestRecalculatePaymentDue(t *testing.T) {
+	db := newFakeMatchDB()
+	c := testMatcher(db)
+	c.SetProformaDatabase(splitOrder(db))
+	c.SetBankFactDatabase(fakeFactDB{db})
+	db.facts["uid-1"] = &entity.PaymentFact{
+		ExternalRef: "uid-1", DocumentID: "id-PROF 1138/2026", DocumentNumber: "PROF 1138/2026",
+		CurrencyDoc: "EUR", CurrencyPaid: "EUR", AmountDue: 367733, AmountPaid: 601773,
+		Status: entity.PaymentFactOverpaid, AmountStatus: entity.AmountOver,
+	}
+
+	n, err := c.RecalculatePaymentDue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := db.facts["uid-1"]
+	if n != 1 || f.AmountDue != 601773 || f.Status != entity.PaymentFactPaid {
+		t.Errorf("changed=%d due=%d status=%s, want 1, 601773, paid", n, f.AmountDue, f.Status)
+	}
+	if n, _ := c.RecalculatePaymentDue(); n != 0 {
+		t.Errorf("second run changed %d, want 0", n)
+	}
 }

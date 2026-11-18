@@ -25,6 +25,7 @@ import (
 	"log/slog"
 	"math"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -411,7 +412,7 @@ func (c *Core) recordPayment(tx *entity.BankTransaction, doc *entity.LocalInvoic
 	fact.DocumentID = doc.Id
 	fact.DocumentType = doc.Type
 	fact.CurrencyDoc = strings.ToUpper(doc.Currency)
-	fact.AmountDue = toMinorUnits(doc.Total)
+	fact.AmountDue, fact.DocumentNumbers = c.orderDue(doc)
 	fact.CurrencyPaid = tx.Currency
 	fact.AmountPaid += amount
 	fact.TransactionKeys = append(fact.TransactionKeys, tx.Key)
@@ -437,6 +438,109 @@ func (c *Core) recordPayment(tx *entity.BankTransaction, doc *entity.LocalInvoic
 		slog.String("amount_status", fact.AmountStatus),
 		slog.Bool("tg_skip", true))
 	return ref, nil
+}
+
+// orderDue returns what the order behind doc asks for, and the documents that make it up.
+//
+// The settlement record is kept per order, but a large B2B order is issued as a set of
+// proformas sharing one id_external, and customers pay the set. Comparing the payment
+// with one document of it would report a fully paid order as overpaid. The set is taken
+// from the B2B proforma record rather than from every local document of the order: a
+// reissued set leaves its deleted predecessors behind in the local copy. Anything that
+// cannot be resolved completely falls back to doc alone.
+func (c *Core) orderDue(doc *entity.LocalInvoice) (int64, []string) {
+	single, singleNumbers := toMinorUnits(doc.Total), []string{doc.Number}
+	if c.proformaDb == nil || doc.IdExternal == "" {
+		return single, singleNumbers
+	}
+
+	rec, err := c.proformaDb.GetProformaRecord(doc.IdExternal)
+	if err != nil {
+		c.log.Warn("load proforma record", sl.Err(err), slog.String("external_ref", doc.IdExternal))
+		return single, singleNumbers
+	}
+	ids := rec.DocumentIds()
+	if len(ids) < 2 || !slices.Contains(ids, doc.Id) {
+		return single, singleNumbers
+	}
+
+	local, err := c.bankMatchDb.GetInvoicesByExternalRefs([]string{doc.IdExternal})
+	if err != nil {
+		c.log.Warn("load order documents", sl.Err(err), slog.String("external_ref", doc.IdExternal))
+		return single, singleNumbers
+	}
+	byID := make(map[string]*entity.LocalInvoice, len(local))
+	for _, d := range local {
+		byID[d.Id] = d
+	}
+	parts := map[string]*entity.Payment{}
+	for _, p := range rec.Payment.Parts {
+		if p != nil {
+			parts[p.Id] = p
+		}
+	}
+
+	var due int64
+	numbers := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if d, ok := byID[id]; ok && strings.EqualFold(d.Currency, doc.Currency) {
+			due += toMinorUnits(d.Total)
+			numbers = append(numbers, d.Number)
+			continue
+		}
+		// Records issued since document amounts were kept carry them; older ones do not.
+		if p, ok := parts[id]; ok && p.Amount > 0 && strings.EqualFold(p.Currency, doc.Currency) {
+			due += p.Amount
+			numbers = append(numbers, p.Number)
+			continue
+		}
+		return single, singleNumbers
+	}
+	return due, numbers
+}
+
+// RecalculatePaymentDue re-derives the amount due of every settlement record from its
+// order's current document set, and returns how many records changed.
+//
+// Records written before the whole set was counted show a split B2B order as overpaid.
+// Their transfers are already resolved, so no matching pass revisits them. Idempotent,
+// so it is safe to run on every start.
+func (c *Core) RecalculatePaymentDue() (int, error) {
+	if c.bankMatchDb == nil || c.bankFactDb == nil {
+		return 0, fmt.Errorf("bank match storage is not available")
+	}
+	facts, err := c.bankFactDb.GetPaymentFactsByDateRange(time.Time{}, time.Now().AddDate(1, 0, 0))
+	if err != nil {
+		return 0, fmt.Errorf("get payment facts: %w", err)
+	}
+
+	changed := 0
+	for _, fact := range facts {
+		if fact.DocumentID == "" || fact.ExternalRef == "" {
+			continue
+		}
+		docs, err := c.bankMatchDb.GetInvoicesByExternalRefs([]string{fact.ExternalRef})
+		if err != nil {
+			return changed, fmt.Errorf("get order documents: %w", err)
+		}
+		i := slices.IndexFunc(docs, func(d *entity.LocalInvoice) bool { return d.Id == fact.DocumentID })
+		if i < 0 {
+			continue
+		}
+
+		due, numbers := c.orderDue(docs[i])
+		if due == fact.AmountDue && slices.Equal(numbers, fact.DocumentNumbers) {
+			continue
+		}
+		fact.AmountDue, fact.DocumentNumbers = due, numbers
+		fact.AmountStatus, fact.Status = settlement(fact)
+		fact.UpdatedAt = time.Now()
+		if err := c.bankMatchDb.SavePaymentFact(fact); err != nil {
+			return changed, fmt.Errorf("save payment fact: %w", err)
+		}
+		changed++
+	}
+	return changed, nil
 }
 
 // settlement derives how the paid sum compares with the document, and the resulting

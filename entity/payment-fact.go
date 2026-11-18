@@ -53,6 +53,9 @@ type PaymentFact struct {
 	DocumentNumber string `json:"document_number,omitempty" bson:"document_number,omitempty"`
 	DocumentID     string `json:"document_id,omitempty" bson:"document_id,omitempty"`
 	DocumentType   string `json:"document_type,omitempty" bson:"document_type,omitempty"`
+	// DocumentNumbers lists every document the order's AmountDue covers. A large B2B
+	// order is split into several proformas, and a payment settles the whole set.
+	DocumentNumbers []string `json:"document_numbers,omitempty" bson:"document_numbers,omitempty"`
 
 	// CurrencyDoc and AmountDue are what the document asks for; CurrencyPaid and
 	// AmountPaid are what actually arrived. The two currencies differ on a

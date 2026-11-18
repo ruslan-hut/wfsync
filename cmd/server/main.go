@@ -151,6 +151,14 @@ func main() {
 			handler.SetBankMatchDatabase(mongo)
 			handler.SetBankFactDatabase(mongo)
 
+			// Before the poller starts, so the matcher never writes the same records
+			// concurrently.
+			if n, err := handler.RecalculatePaymentDue(); err != nil {
+				log.Error("recalculate payment due", sl.Err(err))
+			} else if n > 0 {
+				log.Info("payment due recalculated", slog.Int("changed", n))
+			}
+
 			bankPoller = core.NewBankPoller(ebClient, log,
 				conf.EnableBanking.PollIntervalMin,
 				conf.EnableBanking.LookbackDays,
