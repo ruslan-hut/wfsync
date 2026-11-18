@@ -227,3 +227,36 @@ func (c *Core) BankTransactions(_ context.Context, from, to string) ([]*entity.B
 	}
 	return c.bankTxDb.GetBankTransactionsByDateRange(from, to)
 }
+
+// BankBalances asks the bank for the current balances of every account the active
+// consent covers. It is a live call on every request — nothing is stored or polled —
+// because each call counts against the bank's daily limit for unattended access.
+func (c *Core) BankBalances(ctx context.Context) ([]*entity.BankAccountBalances, error) {
+	if c.eb == nil || !c.eb.Enabled() {
+		return nil, fmt.Errorf("enable banking is not configured")
+	}
+	session, err := c.BankSessionStatus()
+	if err != nil {
+		return nil, err
+	}
+	if session == nil || !session.IsUsable(time.Now()) {
+		return nil, fmt.Errorf("no authorized bank session")
+	}
+
+	out := make([]*entity.BankAccountBalances, 0, len(session.Accounts))
+	for _, acc := range session.Accounts {
+		item := &entity.BankAccountBalances{IBAN: acc.IBAN, Currency: acc.Currency}
+		balances, err := c.eb.Balances(ctx, acc.UID)
+		if err != nil {
+			// Kept per account and verbatim: a consent that does not cover balances
+			// shows up here, and the bank's wording is what tells it apart.
+			item.Error = err.Error()
+			c.log.Warn("bank balances", sl.Err(err), slog.String("iban", acc.IBAN))
+		}
+		for i := range balances {
+			item.Balances = append(item.Balances, enablebanking.ToBankBalance(&balances[i]))
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}

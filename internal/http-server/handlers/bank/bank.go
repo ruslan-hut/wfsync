@@ -35,6 +35,7 @@ type Core interface {
 	UnmatchedBankPayments(limit int) ([]*entity.BankTransaction, error)
 	MatchBankPaymentManually(ctx context.Context, txKey, documentNumber string) error
 	PaymentFactsByDateRange(from, to time.Time) ([]*entity.PaymentFact, error)
+	BankBalances(ctx context.Context) ([]*entity.BankAccountBalances, error)
 }
 
 // datePattern guards the range parameters; the stored dates are "YYYY-MM-DD" strings and
@@ -164,6 +165,32 @@ func Transactions(logger *slog.Logger, handler Core) http.HandlerFunc {
 			Count: len(txs),
 			Items: txs,
 		}))
+	}
+}
+
+// Balances handles GET /v1/bank/balances — current balances of every authorized
+// account, fetched live from the bank. Each call counts against the bank's daily limit
+// for unattended access, so it is meant for an occasional check, not for polling.
+func Balances(logger *slog.Logger, handler Core) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		log := logger.With(
+			sl.Module("http.handlers.bank"),
+			slog.String("request_id", middleware.GetReqID(r.Context())),
+		)
+
+		if handler == nil {
+			render.Status(r, http.StatusServiceUnavailable)
+			render.JSON(w, r, response.Error("Bank service not available"))
+			return
+		}
+
+		accounts, err := handler.BankBalances(r.Context())
+		if err != nil {
+			log.Error("bank balances", sl.Err(err))
+			render.JSON(w, r, response.Error(fmt.Sprintf("Balances: %v", err)))
+			return
+		}
+		render.JSON(w, r, response.Ok(accounts))
 	}
 }
 

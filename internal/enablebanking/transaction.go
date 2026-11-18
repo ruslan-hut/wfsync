@@ -109,3 +109,20 @@ func parseMinorUnits(s string) int64 {
 	}
 	return q.Int64()
 }
+
+// ToBankBalance converts a provider balance into the service model. Unlike a transaction
+// amount, a balance carries its own sign, which must survive: an overdraft is negative.
+func ToBankBalance(b *Balance) entity.BankBalance {
+	amount := parseMinorUnits(b.BalanceAmount.Amount)
+	if strings.HasPrefix(strings.TrimSpace(b.BalanceAmount.Amount), "-") {
+		amount = -amount
+	}
+	return entity.BankBalance{
+		Type:          b.BalanceType,
+		Name:          b.Name,
+		Amount:        amount,
+		Currency:      strings.ToUpper(b.BalanceAmount.Currency),
+		ReferenceDate: b.ReferenceDate,
+		LastChange:    b.LastChangeDate,
+	}
+}

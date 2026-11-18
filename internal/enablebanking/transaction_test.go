@@ -260,3 +260,20 @@ func TestAssignKeysSeparatesIdenticalEntries(t *testing.T) {
 		t.Error("a newly booked identical entry renumbered the existing ones")
 	}
 }
+
+func TestToBankBalance(t *testing.T) {
+	tests := []struct {
+		in   string
+		want int64
+	}{
+		{"1234.56", 123456},
+		{"-50.10", -5010},
+		{"0", 0},
+	}
+	for _, tt := range tests {
+		got := ToBankBalance(&Balance{BalanceAmount: Amount{Currency: "pln", Amount: tt.in}, BalanceType: "CLBD"})
+		if got.Amount != tt.want || got.Currency != "PLN" {
+			t.Errorf("ToBankBalance(%q) = %d %s, want %d PLN", tt.in, got.Amount, got.Currency, tt.want)
+		}
+	}
+}
