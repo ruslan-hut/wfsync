@@ -119,8 +119,19 @@ func (c *Core) BankCompleteAuthorization(ctx context.Context, state, code string
 	pending.Status = entity.BankSessionActive
 	pending.ASPSP = session.ASPSP.Name
 	pending.AuthorizedAt = time.Now()
-	pending.ValidUntil = parseValidUntil(session.AccessValidUntil)
+	pending.ValidUntil = parseValidUntil(session.Access.ValidUntil)
 	pending.Accounts = accountRefs(session.Accounts)
+
+	// A zero expiry would make the poller expire the session on its first run while
+	// the callback page still reports success.
+	if pending.ValidUntil.IsZero() {
+		pending.Status = entity.BankSessionRevoked
+		pending.FailureReason = fmt.Sprintf("unreadable consent expiry %q", session.Access.ValidUntil)
+		if saveErr := c.bankDb.SaveBankSession(pending); saveErr != nil {
+			c.log.Error("save failed session", sl.Err(saveErr))
+		}
+		return nil, fmt.Errorf("create session: %s", pending.FailureReason)
+	}
 
 	if err := c.bankDb.SaveBankSession(pending); err != nil {
 		return nil, fmt.Errorf("save session: %w", err)

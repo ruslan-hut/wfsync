@@ -71,16 +71,16 @@ type SessionRequest struct {
 	Code string `json:"code"`
 }
 
-// Session is an authorized connection to the bank, valid until AccessValidUntil.
+// Session is an authorized connection to the bank, valid until Access.ValidUntil.
 type Session struct {
 	SessionID string    `json:"session_id"`
 	Accounts  []Account `json:"accounts"`
-	// AccessValidUntil is when the consent lapses (RFC 3339). Re-authorization by the
+	// Access.ValidUntil is when the consent lapses (RFC 3339). Re-authorization by the
 	// account holder is the only way past it; there is no refresh.
-	AccessValidUntil string `json:"access_valid_until"`
-	ASPSP            ASPSP  `json:"aspsp,omitempty"`
-	PSUType          string `json:"psu_type,omitempty"`
-	Status           string `json:"status,omitempty"`
+	Access  AuthAccess `json:"access"`
+	ASPSP   ASPSP      `json:"aspsp,omitempty"`
+	PSUType string     `json:"psu_type,omitempty"`
+	Status  string     `json:"status,omitempty"`
 }
 
 // Account describes one bank account exposed by a session.

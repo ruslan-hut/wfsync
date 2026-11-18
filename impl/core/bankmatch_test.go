@@ -334,3 +334,21 @@ func TestManualMatch(t *testing.T) {
 		t.Errorf("mark = %q, want matched", db.marks["k1"])
 	}
 }
+
+func TestParseValidUntil(t *testing.T) {
+	tests := []struct {
+		in   string
+		zero bool
+	}{
+		{"2027-05-17T08:12:00.000000+00:00", false},
+		{"2027-05-17T08:12:00Z", false},
+		{"2027-05-17", false},
+		{"", true},
+		{"garbage", true},
+	}
+	for _, tt := range tests {
+		if got := parseValidUntil(tt.in); got.IsZero() != tt.zero {
+			t.Errorf("parseValidUntil(%q) = %v, zero want %v", tt.in, got, tt.zero)
+		}
+	}
+}
