@@ -26,11 +26,11 @@ func (t *TgBot) plainResponse(chatId int64, text string) {
 			ParseMode: "MarkdownV2",
 		})
 		if err != nil {
-			t.log.With(slog.Int64("id", chatId)).Warn("sending message", sl.Err(err))
+			t.log.With(slog.Int64("id", chatId)).Warn("sending message", t.errAttr(err))
 			// Fallback: try without markdown, still respecting the limit
 			_, err = t.api.SendMessage(chatId, part, &tgbotapi.SendMessageOpts{})
 			if err != nil {
-				t.log.With(slog.Int64("id", chatId)).Error("sending safe message", sl.Err(err))
+				t.log.With(slog.Int64("id", chatId)).Error("sending safe message", t.errAttr(err))
 			}
 		}
 	}
@@ -210,13 +210,13 @@ func (t *TgBot) sendWithKeyboard(chatId int64, text string, keyboard tgbotapi.In
 		ReplyMarkup: keyboard,
 	})
 	if err != nil {
-		t.log.With(slog.Int64("id", chatId)).Warn("sending message with keyboard", sl.Err(err))
+		t.log.With(slog.Int64("id", chatId)).Warn("sending message with keyboard", t.errAttr(err))
 		// Fallback: try without markdown
 		_, err = t.api.SendMessage(chatId, text, &tgbotapi.SendMessageOpts{
 			ReplyMarkup: keyboard,
 		})
 		if err != nil {
-			t.log.With(slog.Int64("id", chatId)).Error("sending message with keyboard fallback", sl.Err(err))
+			t.log.With(slog.Int64("id", chatId)).Error("sending message with keyboard fallback", t.errAttr(err))
 		}
 	}
 }
@@ -299,11 +299,11 @@ func (t *TgBot) reportError(chatId int64, command string, err error) {
 	t.log.Error("bot command failed",
 		slog.String("command", command),
 		slog.Int64("user_id", chatId),
-		sl.Err(err),
+		t.errAttr(err),
 	)
 	t.notifyAdmins(fmt.Sprintf(
 		"Command `%s` failed\nUser: `%d`\nError: `%s`",
-		Sanitize(command), chatId, Sanitize(err.Error()),
+		Sanitize(command), chatId, Sanitize(t.redact(err)),
 	))
 	t.plainResponse(chatId, "Something went wrong\\. Please try again later\\.")
 }

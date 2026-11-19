@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"log/slog"
 	"wfsync/entity"
 
 	tgbotapi "github.com/PaulSonOfLars/gotgbot/v2"
@@ -47,7 +48,7 @@ func (t *TgBot) setDefaultCommands() {
 		Scope: tgbotapi.BotCommandScopeDefault{},
 	})
 	if err != nil {
-		t.log.Warn("setting default commands", "error", err)
+		t.log.Warn("setting default commands", t.errAttr(err))
 	}
 }
 
@@ -67,7 +68,7 @@ func (t *TgBot) setUserCommands(chatId int64, role entity.TelegramRole) {
 		Scope: tgbotapi.BotCommandScopeChat{ChatId: chatId},
 	})
 	if err != nil {
-		t.log.Warn("setting user commands", "chat_id", chatId, "error", err)
+		t.log.Warn("setting user commands", slog.Int64("chat_id", chatId), t.errAttr(err))
 	}
 }
 

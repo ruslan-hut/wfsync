@@ -24,6 +24,8 @@ package bot
 import (
 	"fmt"
 	"log/slog"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 	"wfsync/entity"
@@ -73,6 +75,7 @@ type RetryRunner interface {
 type TgBot struct {
 	log         *slog.Logger
 	api         *tgbotapi.Bot
+	token       string
 	db          Database
 	mu          sync.RWMutex           // guards users, adminIds and retryQueue
 	users       map[int64]*entity.User // telegram_id → User; includes all roles
@@ -118,9 +121,13 @@ func NewTgBot(apiKey string, db Database, log *slog.Logger, cfg BotConfig) (*TgB
 		config:      cfg,
 	}
 
-	api, err := tgbotapi.NewBot(apiKey, nil)
+	tgBot.token = apiKey
+
+	api, err := tgbotapi.NewBot(apiKey, &tgbotapi.BotOpts{
+		BotClient: &tgbotapi.BaseBotClient{Client: newHTTPClient()},
+	})
 	if err != nil {
-		return nil, fmt.Errorf("creating api instance: %v", err)
+		return nil, fmt.Errorf("creating api instance: %s", tgBot.redact(err))
 	}
 	tgBot.api = api
 
@@ -138,12 +145,19 @@ func (t *TgBot) Start() error {
 
 	dispatcher := ext.NewDispatcher(&ext.DispatcherOpts{
 		Error: func(b *tgbotapi.Bot, ctx *ext.Context, err error) ext.DispatcherAction {
-			t.log.Error("handling update:", sl.Err(err))
+			t.log.Error("handling update", t.errAttr(err))
 			return ext.DispatcherActionNoop
 		},
 		MaxRoutines: ext.DefaultMaxRoutines,
 	})
-	t.updater = ext.NewUpdater(dispatcher, nil)
+	t.updater = ext.NewUpdater(dispatcher, &ext.UpdaterOpts{
+		// The default handler prints the request URL, which carries the bot token.
+		// It also sleeps 1s before the next poll, so keep that pause.
+		UnhandledErrFunc: func(err error) {
+			t.log.Warn("get updates", t.errAttr(err))
+			time.Sleep(time.Second)
+		},
+	})
 
 	// User commands
 	dispatcher.AddHandler(handlers.NewCommand("start", t.start))
@@ -186,11 +200,38 @@ func (t *TgBot) Start() error {
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to start polling: %w", err)
+		return fmt.Errorf("failed to start polling: %s", t.redact(err))
 	}
 
 	t.updater.Idle()
 	return nil
+}
+
+// newHTTPClient returns the client for Telegram API calls. The default transport never
+// health-checks an HTTP/2 connection: a request timeout cancels the stream but keeps the
+// connection, so after a silent drop getUpdates kept timing out for 30–45 minutes on the
+// same dead connection. With pings it is closed within ~40 s and the next poll redials.
+func newHTTPClient() http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.HTTP2 = &http.HTTP2Config{
+		SendPingTimeout: 30 * time.Second,
+		PingTimeout:     10 * time.Second,
+	}
+	return http.Client{Transport: tr}
+}
+
+// redact returns the error text with the bot token masked: transport errors quote the
+// request URL, which carries the token.
+func (t *TgBot) redact(err error) string {
+	if t.token == "" {
+		return err.Error()
+	}
+	return strings.ReplaceAll(err.Error(), t.token, "***")
+}
+
+// errAttr is sl.Err for errors that may come from a Telegram API call.
+func (t *TgBot) errAttr(err error) slog.Attr {
+	return slog.String("error", t.redact(err))
 }
 
 func (t *TgBot) Stop() {
