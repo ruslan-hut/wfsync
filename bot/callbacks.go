@@ -390,13 +390,11 @@ func (t *TgBot) onApproveCallback(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	// Update the message to show result instead of buttons
 	if msg := cq.Message; msg != nil {
 		if im, ok := msg.(tgbotapi.Message); ok {
-			_, _, _ = t.api.EditMessageText(
-				fmt.Sprintf("%s\n\n✓ Approved by %s", im.Text, Sanitize(userDisplayName(t.findUser(chatId)))),
-				&tgbotapi.EditMessageTextOpts{
-					ChatId:    chatId,
-					MessageId: im.MessageId,
-				},
-			)
+			_, _, _ = t.api.EditMessageText(&tgbotapi.EditMessageTextOpts{
+				ChatId:    chatId,
+				MessageId: im.MessageId,
+				Text:      fmt.Sprintf("%s\n\n✓ Approved by %s", im.Text, Sanitize(userDisplayName(t.findUser(chatId)))),
+			})
 		}
 	}
 
@@ -445,13 +443,11 @@ func (t *TgBot) onRevokeCallback(_ *tgbotapi.Bot, ctx *ext.Context) error {
 	// Update the message to show result instead of buttons
 	if msg := cq.Message; msg != nil {
 		if im, ok := msg.(tgbotapi.Message); ok {
-			_, _, _ = t.api.EditMessageText(
-				fmt.Sprintf("%s\n\n✗ Revoked by %s", im.Text, Sanitize(userDisplayName(t.findUser(chatId)))),
-				&tgbotapi.EditMessageTextOpts{
-					ChatId:    chatId,
-					MessageId: im.MessageId,
-				},
-			)
+			_, _, _ = t.api.EditMessageText(&tgbotapi.EditMessageTextOpts{
+				ChatId:    chatId,
+				MessageId: im.MessageId,
+				Text:      fmt.Sprintf("%s\n\n✗ Revoked by %s", im.Text, Sanitize(userDisplayName(t.findUser(chatId)))),
+			})
 		}
 	}
 

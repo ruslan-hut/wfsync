@@ -11,8 +11,8 @@ WFSync is a Go-based payment and invoice management service that integrates Stri
 
 ## Tech Stack
 
-- **Language**: Go 1.24
-- **HTTP Router**: chi v5.2.2
+- **Language**: Go 1.26
+- **HTTP Router**: chi v5.5.0
 - **Database**: MongoDB (optional), MySQL (OpenCart)
 - **Payment**: Stripe API (stripe-go/v76)
 - **Invoice**: Wfirma API

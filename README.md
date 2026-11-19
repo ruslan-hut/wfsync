@@ -1,6 +1,6 @@
 # WFSync
 
-![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)
 ![Stripe](https://img.shields.io/badge/Stripe-API-635BFF?logo=stripe&logoColor=white)
 ![MongoDB](https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL-4479A1?logo=mysql&logoColor=white)
@@ -58,7 +58,7 @@ WFSync is a payment and invoice management service that bridges **OpenCart**, **
 
 ### Prerequisites
 
-- Go 1.24 or higher
+- Go 1.26 or higher
 - MongoDB (optional, can be enabled in config)
 - Stripe account with API keys
 - Wfirma account with API credentials
