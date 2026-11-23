@@ -286,7 +286,7 @@ func (c *Core) processInvoice(ctx context.Context, params *entity.CheckoutParams
 			slog.Bool("tg_skip", true),
 		).Error("register invoice")
 		if c.retryQueue != nil {
-			c.retryQueue.Enqueue(params, err.Error())
+			c.retryQueue.Enqueue(params, err)
 		}
 		return nil
 	}

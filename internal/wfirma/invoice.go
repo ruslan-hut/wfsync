@@ -127,6 +127,19 @@ func (c *Client) invoice(ctx context.Context, invType invoiceType, params *entit
 	if existing == nil {
 		contractorID, err = c.createContractor(ctx, params.ClientDetails)
 		if err != nil {
+			// Reported here rather than by the callers so every path (Stripe flow, HTTP
+			// endpoints, B2B) gets the alert. Retry attempts stay silent: the queue
+			// reports its own outcome.
+			if cde := entity.AsCustomerDataError(err); cde != nil && !entity.IsRetry(ctx) {
+				log.With(
+					slog.String("field", cde.Field),
+					slog.String("message", cde.Message),
+					slog.String("email", params.ClientDetails.Email),
+					slog.String("action", fmt.Sprintf("fix %s in OpenCart order %s, then /retry %s",
+						cde.Field, params.OrderId, params.OrderId)),
+					slog.String("tg_topic", entity.TopicError),
+				).Error("wfirma rejected customer data, invoice not issued, no auto-retry")
+			}
 			return nil, fmt.Errorf("create contractor: %w", err)
 		}
 	} else {

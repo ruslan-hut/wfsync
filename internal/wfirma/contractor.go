@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"wfsync/entity"
 	"wfsync/lib/sl"
@@ -67,37 +68,58 @@ func (c *Client) createContractor(ctx context.Context, customer *entity.ClientDe
 			sl.Err(err))
 		return "", err
 	}
-	var addResp Response
-	if err = json.Unmarshal(createRes, &addResp); err != nil {
-		c.log.Error("parse contractor creation response", sl.Err(err))
-		return "", err
-	}
-	contr := addResp.Contractors["0"].Contractor
-	if addResp.Status.Code == "ERROR" {
-		if len(contr.ErrorsRaw) > 0 {
-			for _, w := range contr.ErrorsRaw { // берём первый элемент мапы
-				c.log.With(
-					slog.String("field", w.Error.Field),
-					slog.String("message", w.Error.Message),
-					slog.String("method", w.Error.Method.Name),
-					slog.String("parameters", w.Error.Method.Parameters),
-					slog.String("email", customer.Email),
-					slog.String("name", customer.Name),
-					slog.String("tg_topic", entity.TopicError),
-				).Error("add contractor")
-				break
-			}
+	id, err := parseContractorAdd(createRes)
+	if err != nil {
+		log := c.log.With(
+			slog.String("email", customer.Email),
+			slog.String("name", customer.Name),
+			sl.Err(err))
+		if entity.AsCustomerDataError(err) == nil {
+			log = log.With(slog.String("response", truncateBody(string(createRes))))
 		}
-		return "", fmt.Errorf("no contractor id returned")
-	}
-	if contr.ID == "" {
-		c.log.Error("no contractor ID returned from wFirma", slog.String("response", string(createRes)))
-		return "", fmt.Errorf("no contractor id returned")
+		// No Telegram here: the caller knows the order and reports it once, with what to fix.
+		log.Error("add contractor")
+		return "", err
 	}
 	c.log.Debug("new contractor created",
 		slog.String("email", customer.Email),
 		slog.String("name", customer.Name),
-		slog.String("contractorID", contr.ID))
+		slog.String("contractorID", id))
+	return id, nil
+}
+
+// parseContractorAdd extracts the new contractor ID from a contractors/add response.
+// A field-level rejection becomes *entity.CustomerDataError (permanent, the buyer's data
+// must be fixed); any other failure is a plain error and stays retryable. Several field
+// errors are possible; the lowest key is reported so the message is deterministic. An error
+// without a field is not attributable to the buyer (account, limits) and stays retryable.
+func parseContractorAdd(body []byte) (string, error) {
+	var resp Response
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return "", fmt.Errorf("parse contractor response: %w", err)
+	}
+	contr := resp.Contractors["0"].Contractor
+	if resp.Status.Code == "ERROR" {
+		if len(contr.ErrorsRaw) > 0 {
+			keys := make([]string, 0, len(contr.ErrorsRaw))
+			for k := range contr.ErrorsRaw {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			e := contr.ErrorsRaw[keys[0]].Error
+			if e.Field != "" {
+				return "", &entity.CustomerDataError{Field: e.Field, Message: e.Message}
+			}
+			return "", fmt.Errorf("wfirma error: %s", e.Message)
+		}
+		if resp.Status.Message != "" {
+			return "", fmt.Errorf("wfirma error: %s", resp.Status.Message)
+		}
+		return "", fmt.Errorf("wfirma error without details")
+	}
+	if contr.ID == "" {
+		return "", fmt.Errorf("no contractor id returned")
+	}
 	return contr.ID, nil
 }
 

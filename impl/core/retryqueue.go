@@ -69,9 +69,13 @@ func (rq *RetryQueue) SetDatabase(db RetryDatabase)         { rq.db = db }
 func (rq *RetryQueue) SetInvoiceService(inv InvoiceService) { rq.inv = inv }
 func (rq *RetryQueue) SetOpencart(oc *occlient.Opencart)    { rq.oc = oc }
 
-// Enqueue creates a pending retry job for a failed invoice registration.
+// Enqueue records a failed invoice registration as a retry job.
 // Idempotent by EventId — if a job for this event already exists, it's a no-op.
-func (rq *RetryQueue) Enqueue(params *entity.CheckoutParams, errMsg string) {
+//
+// A rejection of the buyer's data (entity.CustomerDataError) is stored already failed:
+// automatic retries cannot fix it, but the job must exist so /retry can re-run it once
+// the order is corrected in OpenCart.
+func (rq *RetryQueue) Enqueue(params *entity.CheckoutParams, cause error) {
 	// No mutex needed: SaveRetryJob is an upsert by _id (= EventId), so
 	// concurrent enqueues for the same event collapse to a single document.
 	if rq.db == nil {
@@ -87,19 +91,7 @@ func (rq *RetryQueue) Enqueue(params *entity.CheckoutParams, errMsg string) {
 		return
 	}
 
-	now := time.Now()
-	job := &entity.RetryJob{
-		ID:          params.EventId,
-		EventId:     params.EventId,
-		OrderId:     params.OrderId,
-		Status:      entity.RetryJobPending,
-		Attempts:    0,
-		MaxAttempts: rq.maxRetries,
-		LastError:   errMsg,
-		NextRetryAt: now.Add(rq.baseDelay),
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
+	job := rq.newJob(params, cause, time.Now())
 
 	if err := rq.db.SaveRetryJob(job); err != nil {
 		rq.log.Error("save retry job", sl.Err(err),
@@ -112,8 +104,29 @@ func (rq *RetryQueue) Enqueue(params *entity.CheckoutParams, errMsg string) {
 	rq.log.Info("retry job enqueued",
 		slog.String("event_id", params.EventId),
 		slog.String("order_id", params.OrderId),
-		slog.String("error", errMsg),
+		slog.String("status", string(job.Status)),
+		slog.String("error", job.LastError),
 		slog.Bool("tg_skip", true))
+}
+
+// newJob builds the retry job for a failed registration, classifying the cause.
+func (rq *RetryQueue) newJob(params *entity.CheckoutParams, cause error, now time.Time) *entity.RetryJob {
+	job := &entity.RetryJob{
+		ID:          params.EventId,
+		EventId:     params.EventId,
+		OrderId:     params.OrderId,
+		Status:      entity.RetryJobPending,
+		MaxAttempts: rq.maxRetries,
+		LastError:   cause.Error(),
+		NextRetryAt: now.Add(rq.baseDelay),
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if entity.AsCustomerDataError(cause) != nil {
+		job.Status = entity.RetryJobFailed
+		job.NextRetryAt = time.Time{}
+	}
+	return job
 }
 
 // Start launches the background polling goroutine.
@@ -286,6 +299,8 @@ func (rq *RetryQueue) processOneJob(job *entity.RetryJob, manual bool) {
 		}
 	}
 
+	rq.refreshClientDetails(params, log)
+
 	// Flag the context as a retry so the wFirma layer keeps per-attempt failures local —
 	// the original error was already reported to Telegram when the job was enqueued.
 	ctx := entity.WithRetry(context.Background())
@@ -311,6 +326,13 @@ func (rq *RetryQueue) processOneJob(job *entity.RetryJob, manual bool) {
 	job.UpdatedAt = time.Now()
 
 	if err != nil {
+		if cde := entity.AsCustomerDataError(err); cde != nil {
+			// The operator who ran /retry sees LastError in the reply; only an unattended
+			// attempt needs the Telegram alert.
+			reportCustomerDataError(rq.log.With(slog.String("event_id", job.EventId)), job.OrderId, cde, !manual)
+			rq.failJob(job, err.Error())
+			return
+		}
 		log.Warn("retry invoice registration failed", sl.Err(err))
 		rq.retryLater(job, log, err.Error())
 		return
@@ -332,6 +354,56 @@ func (rq *RetryQueue) processOneJob(job *entity.RetryJob, manual bool) {
 	log.Info("retry job completed successfully",
 		slog.String("invoice_id", payment.Id),
 		slog.String("tg_topic", entity.TopicPayment))
+}
+
+// refreshClientDetails replaces the stored buyer data with the current OpenCart order,
+// the same precedence processInvoice applies. The stored params are a snapshot from the
+// failed attempt, so without this a /retry after the order was corrected would resend
+// the very data wFirma rejected. A lookup failure keeps the snapshot.
+func (rq *RetryQueue) refreshClientDetails(params *entity.CheckoutParams, log *slog.Logger) {
+	if rq.oc == nil || params.OrderId == "" {
+		return
+	}
+	orderId, err := rq.oc.ResolveOrderId(params.OrderId)
+	if err != nil {
+		log.Warn("resolve opencart order for retry, using stored client data", sl.Err(err))
+		return
+	}
+	if orderId == 0 {
+		log.Warn("opencart order not resolved for retry, using stored client data")
+		return
+	}
+	order, err := rq.oc.GetOrder(orderId)
+	if err != nil {
+		log.Warn("load opencart order for retry, using stored client data", sl.Err(err))
+		return
+	}
+	if order == nil || order.ClientDetails == nil {
+		log.Warn("opencart order has no client details, using stored client data")
+		return
+	}
+	if order.ClientDetails.Email == "" && params.ClientDetails != nil {
+		order.ClientDetails.Email = params.ClientDetails.Email
+	}
+	params.ClientDetails = order.ClientDetails
+}
+
+// reportCustomerDataError raises the alert for a retry attempt blocked by the buyer's
+// data. The first failure is reported by the wFirma layer (see Client.invoice), which
+// stays silent on retry attempts; notify=false keeps it local when the operator ran
+// /retry and sees the outcome in the reply.
+func reportCustomerDataError(log *slog.Logger, orderId string, e *entity.CustomerDataError, notify bool) {
+	tg := slog.String("tg_topic", entity.TopicError)
+	if !notify {
+		tg = slog.Bool("tg_skip", true)
+	}
+	log.With(
+		slog.String("order_id", orderId),
+		slog.String("field", e.Field),
+		slog.String("message", e.Message),
+		slog.String("action", fmt.Sprintf("fix %s in OpenCart order %s, then /retry %s", e.Field, orderId, orderId)),
+		tg,
+	).Error("wfirma rejected customer data, invoice not issued, no auto-retry")
 }
 
 // retryLater records a failed attempt: it applies exponential backoff, or marks the job

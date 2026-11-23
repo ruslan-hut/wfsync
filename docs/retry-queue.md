@@ -14,7 +14,7 @@ A persistent MongoDB-backed retry queue with exponential backoff. Failed invoice
 2. `RegisterInvoice()` is called to create the invoice in wFirma
 3. If it fails, the retry queue's `Enqueue()` method saves a `RetryJob` to MongoDB and returns early (the webhook responds with 200 to Stripe to prevent Stripe's own retries from causing duplicate processing)
 4. A background goroutine polls for pending retry jobs at a configurable interval
-5. Each due job loads its original `CheckoutParams` from MongoDB and retries `RegisterInvoice()`
+5. Each due job loads its original `CheckoutParams` from MongoDB, refreshes the customer details from the current OpenCart order, and retries `RegisterInvoice()`
 6. On success: the invoice ID is saved to OpenCart and the job is marked `completed`
 7. On failure: exponential backoff is applied and the job is rescheduled
 8. After exhausting all attempts, the job is marked `failed`
@@ -44,6 +44,21 @@ re-run or the payment reconciler re-enqueues an ancient order that will never su
 (such as a months-old order with an invalid contractor email). Age is measured from the
 order/payment date in the stored checkout params, falling back to the job creation time
 when that is unset. Abandonment is reported to Telegram (`error` topic).
+
+## Rejected Customer Data
+
+When wFirma rejects the buyer's data with a field-level error (e.g. `email` —
+"Nieprawidłowy adres e-mail." for a `@gmail.con` typo), the error is an
+`entity.CustomerDataError` and `last_error` reads e.g.
+`create contractor: wfirma rejected email: Nieprawidłowy adres e-mail.`.
+
+Such a failure cannot fix itself, so it is not retried automatically: the job is stored
+(or, if it hits this on a later attempt, marked) `failed` straight away, and one Telegram
+message (`error` topic) names the order, the field, wFirma's text and what to do. After
+correcting the order in OpenCart run `/retry <order_id>`: each attempt re-reads the
+customer details from the order, so the corrected data is what reaches wFirma.
+
+Network errors and wFirma outages are retried with backoff as before.
 
 ## Exponential Backoff
 
