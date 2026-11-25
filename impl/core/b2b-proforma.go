@@ -12,7 +12,8 @@ import (
 	"wfsync/lib/sl"
 )
 
-// ProformaDatabase remembers the proforma set issued for each B2B order.
+// ProformaDatabase remembers the proforma set issued for each order (B2B by order_uid,
+// OpenCart by order id).
 type ProformaDatabase interface {
 	GetProformaRecord(externalId string) (*entity.ProformaRecord, error)
 	SaveProformaRecord(record *entity.ProformaRecord) error
@@ -67,27 +68,46 @@ func (c *Core) B2BCreateProforma(ctx context.Context, order *entity.B2BOrder) (*
 	}
 
 	if record != nil && record.Fingerprint == fingerprint {
-		present, err := c.proformasPresent(ctx, record.DocumentIds())
-		if err != nil {
-			return nil, fmt.Errorf("check issued proformas: %w", err)
+		payment, err := c.reuseRecorded(ctx, record, log)
+		if err != nil || payment != nil {
+			return payment, err
 		}
-		if present {
-			// The documents are valid and may already be with the client; a failed PDF
-			// download is a reason to retry, never to replace them under new numbers.
-			payment, err := c.reuseProforma(ctx, record.Payment)
-			if err != nil {
-				return nil, fmt.Errorf("reuse issued proforma: %w", err)
-			}
-			log.With(slog.Any("proforma_ids", record.DocumentIds())).Info("proforma unchanged, reusing issued documents")
-			return payment, nil
-		}
-		log.With(slog.Any("proforma_ids", record.DocumentIds())).Info("issued proforma missing in wFirma, issuing anew")
 	}
 
 	if err := c.discardProformas(ctx, ref, record, log); err != nil {
 		return nil, err
 	}
 
+	return c.issueProforma(ctx, params, ref, fingerprint, log)
+}
+
+// reuseRecorded returns the recorded proforma set when every document of it still exists
+// in wFirma, nil when one is gone and the set has to be issued anew. The caller has
+// already checked that the order is unchanged.
+func (c *Core) reuseRecorded(ctx context.Context, record *entity.ProformaRecord, log *slog.Logger) (*entity.Payment, error) {
+	ids := record.DocumentIds()
+	present, err := c.proformasPresent(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("check issued proformas: %w", err)
+	}
+	if !present {
+		log.With(slog.Any("proforma_ids", ids)).Info("issued proforma missing in wFirma, issuing anew")
+		return nil, nil
+	}
+	// The documents are valid and may already be with the client; a failed PDF
+	// download is a reason to retry, never to replace them under new numbers.
+	payment, err := c.reuseProforma(ctx, record.Payment)
+	if err != nil {
+		return nil, fmt.Errorf("reuse issued proforma: %w", err)
+	}
+	payment.Reused = true
+	log.With(slog.Any("proforma_ids", ids)).Info("proforma unchanged, reusing issued documents")
+	return payment, nil
+}
+
+// issueProforma registers a new proforma set, downloads its PDFs and records it under ref
+// with the fingerprint of the data it was issued from.
+func (c *Core) issueProforma(ctx context.Context, params *entity.CheckoutParams, ref, fingerprint string, log *slog.Logger) (*entity.Payment, error) {
 	payment, err := c.inv.RegisterProforma(ctx, params)
 	if err != nil {
 		// A set that failed part-way comes back with the parts already registered;

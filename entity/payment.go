@@ -23,6 +23,9 @@ type Payment struct {
 	// Includes the first part as well, so consumers can iterate uniformly.
 	// Empty when the order produced a single document.
 	Parts []*Payment `json:"parts,omitempty"`
+	// Reused is set when a proforma request returned the documents already issued for
+	// the unchanged order instead of issuing new ones. Never stored.
+	Reused bool `json:"reused,omitempty" bson:"-"`
 }
 
 func (p *Payment) Bind(_ *http.Request) error {

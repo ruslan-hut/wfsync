@@ -145,7 +145,10 @@ curl -X GET "https://api.example.com/v1/wf/order/123456" \
 
 ### Get Proforma File for Order
 
-Retrieves or creates a proforma invoice for an OpenCart order and returns the file link.
+Issues the proforma for an OpenCart order, or returns the one already issued when the
+order is unchanged, and returns the PDF file name. The site (darkbyrior.com) calls it
+synchronously at checkout for bank-transfer orders and attaches the PDF to the
+"order received" e-mail.
 
 ```
 GET /v1/wf/file/proforma/{id}
@@ -159,30 +162,49 @@ GET /v1/wf/file/proforma/{id}
 
 #### How It Works
 
-1. Fetches order data from OpenCart
-2. If the order already has a proforma (it was changed and is being re-issued), the old one is fully discarded first: the document is deleted in Wfirma, the proforma reference is cleared on the OpenCart order, and the local PDF is removed. Each step is best-effort and never blocks re-issuing.
-3. Creates a fresh proforma in Wfirma
-4. Downloads proforma PDF file
-5. Returns file link and metadata
+1. Reads the order from the OpenCart database.
+2. **Unchanged order → no re-issue.** Every issued proforma set is recorded (Mongo,
+   `b2b_proformas`, keyed by the order id) with a fingerprint of everything printed on
+   it: client and billing address, currency, amounts and every line. When the order's
+   fingerprint matches, the order still points at that proforma, and every document of
+   the set still exists in wFirma, the same documents are returned (`"reused": true`).
+   A PDF missing on disk is downloaded again under a new file name; the number stays.
+3. **Changed order → re-issue.** The recorded set and the proforma the order points at
+   are deleted in wFirma, the local PDFs are removed, and a new proforma is issued,
+   downloaded and recorded. The same happens for a proforma issued without a record
+   (by the order-status job or before records were kept): it cannot be compared, so it
+   is replaced.
+4. Saves the proforma id and file in the order (`wf_proforma`, `wf_file_proforma`).
 
-> **Note:** Automatic deletion applies to **proformas only**. Invoices are final and are never deleted on re-request. The Wfirma delete call is guarded to refuse any document whose type is not `proforma`.
+Issuance is detached from the request and serialized per order: if the caller times out,
+the proforma is still issued and recorded, and the next call returns it immediately.
+Without Mongo there is no record and every call re-issues.
+
+Each call logs `order proforma ready` (INFO) with `order_id`, `proforma_id`, `number`,
+`duration_ms`, `parts`, `reused`.
+
+> The order-status job (status → proforma → next status) and `POST /v1/wf/proforma`
+> keep re-issuing on every run. Deletion applies to **proformas only**; invoices are never
+> deleted. The wFirma delete call refuses any document whose type is not `proforma`.
 
 #### Response
-
-Returns `Payment` object:
 
 ```json
 {
   "success": true,
   "data": {
     "amount": 15000,
-    "id": "wfirma_proforma_id",
+    "id": "100200300",
     "order_id": "123456",
-    "link": "https://files.example.com/uuid.pdf",
-    "invoice_file": "uuid.pdf"
+    "link": "https://files.example.com/3f0c2b1e-....pdf",
+    "invoice_file": "3f0c2b1e-....pdf",
+    "number": "PRO 12/11/2026",
+    "date": "2026-11-26",
+    "currency": "PLN",
+    "reused": true
   },
   "status_message": "Success",
-  "timestamp": "2025-07-07T11:41:40Z"
+  "timestamp": "2026-11-26T10:00:00Z"
 }
 ```
 
@@ -190,11 +212,16 @@ Returns `Payment` object:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `amount` | integer | Total amount in minor units |
-| `id` | string | Wfirma proforma ID |
+| `amount` | integer | Amount of the (first) document in minor units |
+| `id` | string | wFirma proforma ID |
 | `order_id` | string | OpenCart order ID |
-| `link` | string | Public URL to download the PDF file |
-| `invoice_file` | string | Filename of the PDF file |
+| `link` | string | Public URL of the PDF |
+| `invoice_file` | string | PDF file name in the service `file_path` (`image/invoice/` of the shop) |
+| `number` | string | wFirma document number |
+| `date` | string | Issue date, `YYYY-MM-DD` |
+| `currency` | string | ISO 4217 |
+| `reused` | bool | `true` — the proforma issued earlier was returned; absent — a new one was issued |
+| `parts` | array | Only for an order split into several documents (≥ 220 lines): every document with its own `id`, `number`, `invoice_file`; the top-level fields mirror the first one |
 
 #### Example
 
@@ -205,11 +232,11 @@ curl -X GET "https://api.example.com/v1/wf/file/proforma/123456" \
 
 #### Errors
 
-| Code | Description |
-|------|-------------|
-| 400 | Invalid order ID or order not found |
-| 401 | Unauthorized |
-| 500 | OpenCart or Wfirma service unavailable |
+| HTTP | Body | Description |
+|------|------|-------------|
+| 400 | `success: false` | Order id is not numeric |
+| 401 | `success: false` | Missing or unknown token |
+| 200 | `success: false`, `status_message: "Request failed: ..."` | Order not found, wFirma or OpenCart error — always check `success` |
 
 ---
 

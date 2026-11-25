@@ -690,32 +690,6 @@ func (c *Core) StripePayAmount(_ context.Context, params *entity.CheckoutParams)
 	return c.sc.PayAmount(params)
 }
 
-func (c *Core) WFirmaOrderFileProforma(ctx context.Context, orderId int64) (*entity.Payment, error) {
-	if c.inv == nil {
-		return nil, fmt.Errorf("invoice service not connected")
-	}
-	if c.oc == nil {
-		return nil, fmt.Errorf("opencart service not connected")
-	}
-
-	params, err := c.oc.GetOrder(orderId)
-	if err != nil {
-		return nil, err
-	}
-	if params == nil {
-		return nil, fmt.Errorf("order not found")
-	}
-
-	payment, err := c.WFirmaRegisterProforma(ctx, params)
-	if err != nil {
-		return nil, err
-	}
-	if c.oc != nil {
-		_ = c.oc.UpdateOrderWithProforma(orderId, payment.Id, payment.InvoiceFile)
-	}
-	return payment, nil
-}
-
 func (c *Core) WFirmaOrderFileInvoice(ctx context.Context, orderId int64) (*entity.Payment, error) {
 	if c.inv == nil {
 		return nil, fmt.Errorf("invoice service not connected")
