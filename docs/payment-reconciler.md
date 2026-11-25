@@ -29,6 +29,14 @@ against its **live** Stripe PaymentIntent status, taking action only where neede
 
 4. Records are "closed" by stamping `closed` so subsequent ticks skip them; pending holds
    stay open and are re-checked until they settle or cancel.
+5. Refunds: a refunded payment was usually closed long before, so refunds are found
+   separately. Each tick lists the account's refunds created since the previous scan
+   (one Stripe list call; the first scan after a restart looks back 7 days, later scans
+   overlap the previous one by an hour) and, for every PaymentIntent of ours among them,
+   syncs all its refunds into `stripe_refunds` and sets `oc_order.wf_payment_status` to
+   `partially_refunded` / `refunded`. This catches refunds made in the Stripe Dashboard
+   when the `charge.refunded` webhook was missed. The `succeeded` branch above writes
+   the refund status instead of `paid` when refunds are already recorded.
 
 ## Inspecting the queue
 
@@ -41,7 +49,9 @@ per-order ticks are no longer logged; only the per-run queue size is.
 ## Notifications
 
 Telegram messages are emitted **only when the job takes an action** — an invoice is
-requested (`invoice` topic) or a cancellation is reflected (`payment` topic). Idle ticks
+requested (`invoice` topic), a cancellation is reflected (`payment` topic), or a refund
+not seen before is recorded (`payment` topic; `error` topic when the order already has a
+wFirma invoice, asking for a manual correcting invoice). Idle ticks
 and watched-but-unchanged holds produce structured logs only, no Telegram.
 
 ## Configuration

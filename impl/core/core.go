@@ -65,6 +65,8 @@ type Core struct {
 	bankBalanceDb BankBalanceReader
 	retryQueue    *RetryQueue
 	proformaDb    ProformaDatabase
+	refundDb      RefundDatabase
+	refundLocks   *keylock.Map
 	// proformaLocks serializes B2B proforma issuance per order.
 	proformaLocks *keylock.Map
 	amountAlerts  *amountAlerts
@@ -78,6 +80,7 @@ func New(conf *config.Config, log *slog.Logger) Core {
 		filePath:      conf.FilePath,
 		fileUrl:       conf.OpenCart.FileUrl,
 		proformaLocks: keylock.New(),
+		refundLocks:   keylock.New(),
 		amountAlerts:  &amountAlerts{},
 		log:           log.With(sl.Module("core")),
 	}
@@ -130,6 +133,16 @@ func (c *Core) StripeVerifySignature(payload []byte, header string, tolerance ti
 }
 
 func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
+	// A refund — ours or one made in the Stripe Dashboard — is synced from Stripe by its
+	// PaymentIntent; it never leads to an invoice.
+	if evt.Type == stripe.EventTypeChargeRefunded || evt.Type == stripe.EventTypeChargeRefundUpdated {
+		if err := c.syncRefundsByPayment(evt.GetObjectValue("payment_intent")); err != nil {
+			c.log.With(sl.Err(err), slog.String("event_id", evt.ID), slog.Any("event_type", evt.Type)).
+				Error("sync refunds from webhook")
+		}
+		return
+	}
+
 	// create checkout params from the stripe event
 	params := c.sc.HandleEvent(evt)
 	if params == nil {
@@ -143,7 +156,7 @@ func (c *Core) StripeEvent(ctx context.Context, evt *stripe.Event) {
 			status = "pending"
 		}
 		if params.Paid {
-			status = "paid"
+			status = c.settledStatus(params)
 		}
 		if err := c.oc.SavePaymentData(params.OrderId, params.PaymentId, params.SessionId, status, params.Total); err != nil {
 			c.log.With(
@@ -636,7 +649,12 @@ func (c *Core) StripePaymentStatus(orderId string) (*entity.PaymentStatus, error
 	if c.sc == nil {
 		return nil, fmt.Errorf("stripe service not connected")
 	}
-	return c.sc.PaymentStatus(orderId)
+	st, err := c.sc.PaymentStatus(orderId)
+	if err != nil {
+		return nil, err
+	}
+	c.attachRefunds(st)
+	return st, nil
 }
 
 // StripeCancelPayment cancels a held payment. It returns the checkout params (resolved

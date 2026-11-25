@@ -29,6 +29,7 @@ const (
 	collectionPaymentFacts    = "payment_facts"
 	collectionBankBalances    = "bank_balances"
 	collectionProformas       = "b2b_proformas"
+	collectionRefunds         = "stripe_refunds"
 )
 
 type MongoDB struct {

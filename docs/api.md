@@ -60,6 +60,7 @@ On error, `success` is `false` and `status_message` contains the error descripti
 | 401 | Unauthorized - Missing or invalid token |
 | 403 | Forbidden - Insufficient permissions |
 | 404 | Not Found - Resource not found |
+| 409 | Conflict - e.g. an `Idempotency-Key` reused for another payment |
 | 500 | Internal Server Error |
 
 ## Endpoints Overview
@@ -88,6 +89,9 @@ See [Wfirma API Documentation](api-wfirma.md) for details.
 | POST | `/v1/st/pay` | Create direct payment |
 | POST | `/v1/st/capture/{id}` | Capture held payment |
 | POST | `/v1/st/cancel/{id}` | Cancel held payment |
+| POST | `/v1/st/refund/{id}` | Refund captured payment (full or partial, `Idempotency-Key` required) |
+| GET | `/v1/st/status/{id}` | Live payment status by OpenCart order id, with refunds |
+| GET | `/v1/st/queue` | Held payments awaiting reconciliation |
 
 See [Stripe API Documentation](api-stripe.md) for details.
 

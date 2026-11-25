@@ -44,4 +44,10 @@ type PaymentStatus struct {
 	Captured       bool   `json:"captured"`
 	InvoiceId      string `json:"invoice_id,omitempty"`
 	Source         string `json:"source"`
+	// AmountRefunded is the live total refunded on the charge; PaymentStatus is what
+	// oc_order.wf_payment_status holds for a captured payment (paid / partially_refunded
+	// / refunded). Refunds lists the recorded refunds, oldest first.
+	AmountRefunded int64     `json:"amount_refunded,omitempty"`
+	PaymentStatus  string    `json:"payment_status,omitempty"`
+	Refunds        []*Refund `json:"refunds,omitempty"`
 }

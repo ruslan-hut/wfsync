@@ -11,6 +11,7 @@ This guide explains how to use the API to create a payment authorization (hold) 
 4. POST /v1/st/capture  → Capture full or partial amount
    OR
    POST /v1/st/cancel   → Release held funds
+5. POST /v1/st/refund   → Return captured money, fully or in parts (after capture only)
 ```
 
 All `/v1` endpoints require authentication via Bearer token.
@@ -385,29 +386,52 @@ curl -X POST "https://api.example.com/v1/st/cancel/cs_...b1ELPMpzHCbEuE9ab" \
 
 ---
 
+## 5) Refund a Captured Payment
+
+**Endpoint:** `POST /v1/st/refund/{id}` — same `cs_...` id as capture. Requires an
+`Idempotency-Key` header; optional JSON body `{"amount": <minor units>, "reason": "..."}`
+(no amount = refund the remainder). Partial refunds can repeat until the captured amount
+is used up. Only a captured (`succeeded`) payment can be refunded; while the funds are
+still only held, use cancel instead — it releases the hold with no money moving.
+
+```bash
+curl -X POST "https://api.example.com/v1/st/refund/cs_...b1ELPMpzHCbEuE9ab" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Idempotency-Key: 18400-refund-1" \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 2500, "reason": "item out of stock"}'
+```
+
+The order's `wf_payment_status` becomes `partially_refunded` or `refunded`. A refund made
+in the Stripe Dashboard reaches the same record and status through the `charge.refunded`
+webhook or the reconciler. See [Refund Captured Payment](api-stripe.md#refund-captured-payment)
+for the response and errors.
+
+---
+
 ## Tips and Notes
 
-- Use the **Checkout Session ID** (cs_...) in capture/cancel path, not PaymentIntent ID
+- Use the **Checkout Session ID** (cs_...) in capture/cancel/refund path, not PaymentIntent ID
 - Webhook must process `checkout.session.completed` before capture/cancel works
 - Partial captures are allowed if `total` <= authorized amount
 - Zero amount is rejected by validation
-- Cancel releases funds without capturing
+- Cancel releases funds without capturing; refund returns funds already captured
 - For direct payments (no hold), use `POST /v1/st/pay`
 
 ## OpenCart Order Columns
 
-Every payment outcome (webhook, capture, cancel, reconciler) is written to the OpenCart
+Every payment outcome (webhook, capture, cancel, refund, reconciler) is written to the OpenCart
 order row. Writing these columns does **not** change `date_modified` or the order status
 (except status 17 on a confirmed hold), so readers that poll for payments must use
 `wf_payment_time`.
 
 | Column | Type | Meaning |
 |---|---|---|
-| `wf_payment_status` | VARCHAR(32) | `pending`, `requires_capture`, `paid`, `canceled` |
+| `wf_payment_status` | VARCHAR(32) | `pending`, `requires_capture`, `paid`, `canceled`, `partially_refunded`, `refunded` |
 | `wf_payment_id` | VARCHAR(64) | Stripe PaymentIntent id (`pi_...`) |
 | `wf_payment_amount` | BIGINT | amount in minor units (captured amount once `paid`) |
 | `wf_payment_session` | VARCHAR(128) | Checkout Session id (`cs_...`) |
-| `wf_payment_time` | DATETIME NULL, indexed | UTC moment the status changed into `paid` or `canceled`; repeated writes of the same outcome keep the first moment, `NULL` until final |
+| `wf_payment_time` | DATETIME NULL, indexed | UTC moment the status changed into `paid` or `canceled`; repeated writes of the same outcome keep the first moment, `NULL` until final. A refund does not move it: it keeps the payment time |
 
 On start the service fills `wf_payment_time` for orders of the last 90 days that were
 final before the column existed, using the `closed` (or `modified`) time of the local

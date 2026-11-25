@@ -61,6 +61,9 @@ func main() {
 		if err := mongo.EnsureInvoiceIndexes(); err != nil {
 			log.Error("wfirma invoice indexes", sl.Err(err))
 		}
+		if err := mongo.EnsureRefundIndexes(); err != nil {
+			log.Error("stripe refund indexes", sl.Err(err))
+		}
 	}
 
 	// Initialize Telegram bot if enabled
@@ -131,6 +134,7 @@ func main() {
 	if mongo != nil {
 		handler.SetPaymentDatabase(mongo)
 		handler.SetProformaDatabase(mongo)
+		handler.SetRefundDatabase(mongo)
 	}
 	handler.SetOpencart(oc)
 	go handler.BackfillPaymentTime(context.Background())

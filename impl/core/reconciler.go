@@ -12,6 +12,12 @@
 //     auto-canceled, only watched (logged, no Telegram).
 //   - any other non-terminal status -> left pending and re-checked next tick.
 //
+// Refunds are reconciled separately, because a refunded payment was long closed above:
+// each tick lists the account's refunds created since the previous scan (one Stripe list
+// call, not one per order) and syncs every PaymentIntent of ours among them, so a refund
+// made in the Stripe Dashboard reaches stripe_refunds and wf_payment_status even when
+// the charge.refunded webhook is missed.
+//
 // Telegram notifications are emitted only when the job takes an action (invoice
 // requested or cancellation reflected), never for idle/no-op ticks.
 package core
@@ -33,6 +39,14 @@ import (
 // reconcileBatchLimit caps how many unresolved holds are pulled per tick so a backlog
 // cannot trigger an unbounded burst of Stripe calls in a single run.
 const reconcileBatchLimit = 200
+
+// Refund scan window: after a restart the scan looks back refundLookback; afterwards it
+// starts refundScanOverlap before the previous scan so a refund created during a scan is
+// not missed. Overlap is harmless, refund sync is idempotent.
+const (
+	refundLookback    = 7 * 24 * time.Hour
+	refundScanOverlap = time.Hour
+)
 
 // ReconcileDatabase defines the persistence methods the reconciler needs.
 type ReconcileDatabase interface {
@@ -60,8 +74,10 @@ type Reconciler struct {
 	log      *slog.Logger
 	interval time.Duration
 	firstRun bool
-	done     chan struct{}
-	stopped  chan struct{}
+	// refundsSince is where the next refund scan starts; zero before the first scan.
+	refundsSince time.Time
+	done         chan struct{}
+	stopped      chan struct{}
 }
 
 // NewReconciler creates a reconciler. Call Start() to begin background processing.
@@ -121,6 +137,12 @@ func (r *Reconciler) reconcile() {
 	firstRun := r.firstRun
 	r.firstRun = false
 
+	r.reconcileHolds(firstRun)
+	r.reconcileRefunds()
+}
+
+// reconcileHolds resolves the current batch of unresolved held payments.
+func (r *Reconciler) reconcileHolds(firstRun bool) {
 	params, err := r.db.GetUnresolvedHeldParams(reconcileBatchLimit)
 	if err != nil {
 		r.log.Error("get unresolved held params", sl.Err(err))
@@ -195,6 +217,35 @@ func (r *Reconciler) reconcileOne(params *entity.CheckoutParams) reconcileOutcom
 	}
 }
 
+// reconcileRefunds syncs every payment of ours that got a refund since the last scan.
+// The scan window advances only when the listing and every sync succeeded, so a refund
+// whose sync failed (Mongo or Stripe down) is retried on the next tick.
+func (r *Reconciler) reconcileRefunds() {
+	if r.core.refundDb == nil {
+		return
+	}
+	started := time.Now()
+	since := r.refundsSince
+	if since.IsZero() {
+		since = started.Add(-refundLookback)
+	}
+	ids, err := r.core.sc.RecentRefunds(since)
+	if err != nil {
+		r.log.Warn("list recent refunds", sl.Err(err))
+		return
+	}
+	failed := false
+	for _, id := range ids {
+		if err := r.core.syncRefundsByPayment(id); err != nil {
+			r.log.Warn("sync refunds", slog.String("payment_id", id), sl.Err(err))
+			failed = true
+		}
+	}
+	if !failed {
+		r.refundsSince = started.Add(-refundScanOverlap)
+	}
+}
+
 // handleSucceeded reconciles a captured payment: mark the order paid, and register the
 // wFirma invoice if one does not already exist. Idempotent — an order that already
 // carries an invoice is simply closed without re-invoicing.
@@ -238,7 +289,7 @@ func (r *Reconciler) handleSucceeded(log *slog.Logger, params *entity.CheckoutPa
 		log.Info("recovered opencart order from payment reference")
 	}
 
-	if err := oc.SavePaymentData(params.OrderId, params.PaymentId, params.SessionId, "paid", params.Total); err != nil {
+	if err := oc.SavePaymentData(params.OrderId, params.PaymentId, params.SessionId, r.core.settledStatus(params), params.Total); err != nil {
 		log.Error("update payment status during reconcile", sl.Err(err))
 	}
 

@@ -555,11 +555,19 @@ func (s *StripeClient) PaymentStatus(orderId string) (*entity.PaymentStatus, err
 	}
 
 	if params.PaymentId != "" {
-		pi, err := s.sc.PaymentIntents.Get(params.PaymentId, nil)
+		pi, err := s.sc.PaymentIntents.Get(params.PaymentId, &stripe.PaymentIntentParams{
+			Expand: []*string{stripe.String("latest_charge")},
+		})
 		if err != nil {
 			return nil, fmt.Errorf("stripe response: %w", s.parseErr(err))
 		}
 		st.Status = string(pi.Status)
+		if pi.LatestCharge != nil {
+			st.AmountRefunded = pi.LatestCharge.AmountRefunded
+		}
+		if pi.Status == stripe.PaymentIntentStatusSucceeded {
+			st.PaymentStatus = entity.RefundState(pi.AmountReceived, st.AmountRefunded)
+		}
 		st.Amount = pi.Amount
 		st.AmountReceived = pi.AmountReceived
 		st.Currency = strings.ToUpper(string(pi.Currency))

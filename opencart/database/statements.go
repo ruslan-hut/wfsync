@@ -77,7 +77,8 @@ func (s *MySql) stmtUpdateOrderInvoice() (*sql.Stmt, error) {
 }
 
 // stmtUpdateOrderPayment writes the payment columns. wf_payment_time is stamped only
-// when the status changes into a final state (paid/canceled), so the repeated writes of
+// when the status changes into a final state (paid/canceled); a later refund
+// (partially_refunded/refunded) leaves it at the payment time. Repeated writes of
 // the same outcome (webhook, capture call, reconciler) keep the first moment. MySQL
 // evaluates single-table UPDATE assignments left to right, which is why the time is
 // assigned before wf_payment_status: it still sees the previous status.

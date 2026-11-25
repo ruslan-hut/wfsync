@@ -2,10 +2,13 @@ package payment
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"wfsync/entity"
+	"wfsync/lib/api/cont"
 	"wfsync/lib/api/response"
 	"wfsync/lib/sl"
 
@@ -18,6 +21,7 @@ type Core interface {
 	StripeHoldAmount(params *entity.CheckoutParams) (*entity.Payment, error)
 	StripeCaptureAmount(sessionId string, amount int64) (*entity.Payment, *entity.CheckoutParams, error)
 	StripeCancelPayment(sessionId, reason string) (*entity.Payment, *entity.CheckoutParams, error)
+	StripeRefund(sessionId string, req *entity.RefundRequest, requestedBy, idempotencyKey string) (*entity.RefundResult, *entity.CheckoutParams, error)
 	StripePayAmount(ctx context.Context, params *entity.CheckoutParams) (*entity.Payment, error)
 	StripePaymentStatus(orderId string) (*entity.PaymentStatus, error)
 	ReconcileQueue() ([]*entity.HeldPaymentSummary, error)
@@ -176,6 +180,76 @@ func Cancel(log *slog.Logger, handler Core) http.HandlerFunc {
 		logger.Debug("payment canceled")
 
 		render.JSON(w, r, response.Ok(pm))
+	}
+}
+
+// Refund refunds a captured payment by its checkout session id (the same id as capture).
+// The JSON body is optional: {"amount": <minor units>, "reason": "..."}; amount 0 or no
+// body refunds the unrefunded remainder. The Idempotency-Key header is required: a repeat
+// with the same key returns the first refund instead of refunding again.
+func Refund(log *slog.Logger, handler Core) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		mod := sl.Module("http.handlers.payment")
+		id := chi.URLParam(r, "id")
+		key := r.Header.Get("Idempotency-Key")
+		user := cont.GetUser(r.Context())
+
+		logger := log.With(
+			mod,
+			slog.String("request_id", middleware.GetReqID(r.Context())),
+			slog.String("session_id", id),
+			slog.String("idempotency_key", key),
+			slog.String("user", user.Username),
+		)
+
+		if handler == nil {
+			logger.Error("stripe service not available")
+			render.JSON(w, r, response.Error("Stripe service not available"))
+			return
+		}
+
+		if key == "" || len(key) > 255 {
+			render.Status(r, 400)
+			render.JSON(w, r, response.Error("Idempotency-Key header required (up to 255 characters)"))
+			return
+		}
+
+		var req entity.RefundRequest
+		if r.ContentLength != 0 {
+			if err := render.Bind(r, &req); err != nil && !errors.Is(err, io.EOF) {
+				logger.Error("bind request", sl.Err(err))
+				render.Status(r, 400)
+				render.JSON(w, r, response.Error(fmt.Sprintf("Invalid request: %v", err)))
+				return
+			}
+		}
+		if !isValidReason(req.Reason) {
+			render.Status(r, 400)
+			render.JSON(w, r, response.Error("Invalid reason"))
+			return
+		}
+		logger = logger.With(slog.Int64("amount", req.Amount), slog.String("reason", req.Reason))
+
+		res, params, err := handler.StripeRefund(id, &req, user.Username, key)
+		if params != nil && params.OrderId != "" {
+			logger = logger.With(slog.String("order_id", params.OrderId))
+		}
+		if err != nil {
+			logger.Error("refund", sl.Err(err))
+			status := 400
+			if errors.Is(err, entity.ErrRefundKeyReused) {
+				status = 409
+			}
+			render.Status(r, status)
+			render.JSON(w, r, response.Error(fmt.Sprintf("Refund: %v", err)))
+			return
+		}
+		logger.Debug("payment refunded",
+			slog.String("refund_id", res.Refund.RefundId),
+			slog.Bool("replayed", res.Replayed),
+		)
+
+		render.JSON(w, r, response.Ok(res))
 	}
 }
 

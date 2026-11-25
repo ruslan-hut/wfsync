@@ -96,6 +96,7 @@ func New(conf *config.Config, log *slog.Logger, handler Handler) (*Server, error
 			st.Post("/pay", payment.Pay(log, handler))
 			st.Post("/capture/{id}", payment.Capture(log, handler))
 			st.Post("/cancel/{id}", payment.Cancel(log, handler))
+			st.Post("/refund/{id}", payment.Refund(log, handler))
 			st.Get("/status/{id}", payment.Status(log, handler))
 			st.Get("/queue", payment.Queue(log, handler))
 		})

@@ -336,6 +336,117 @@ curl -X POST "https://api.example.com/v1/st/cancel/cs_live_abc123" \
 
 ---
 
+### Refund Captured Payment
+
+Refunds a captured payment, fully or partially. Partial refunds can be repeated until
+their sum reaches the captured amount; Stripe rejects anything above the unrefunded
+remainder. Works for held-then-captured payments and for payments taken without a hold
+(`capture_method=automatic`), for which a refund is the only way to return money. An
+uncaptured hold cannot be refunded — release it with [Cancel](#cancel-held-payment).
+
+```
+POST /v1/st/refund/{id}
+```
+
+#### Path Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | Yes | Stripe Checkout Session ID (cs_...), the same id as for capture/cancel |
+
+#### Headers
+
+| Header | Required | Description |
+|--------|----------|-------------|
+| `Idempotency-Key` | Yes | Caller-chosen unique key per refund (≤ 255 chars). A repeat with the same key returns the first refund (`replayed: true`) instead of refunding again. Use a new key for each intended refund. |
+
+#### Request Body (optional)
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `amount` | integer | No | Amount to refund in minor units; `0` or omitted refunds the whole unrefunded remainder |
+| `reason` | string | No | Free-text reason (≤ 255 chars), stored with the refund and in Stripe metadata. `duplicate`, `fraudulent`, `requested_by_customer` are also passed as Stripe's refund reason |
+
+#### Example Request (Partial Refund)
+
+```bash
+curl -X POST "https://api.example.com/v1/st/refund/cs_live_abc123..." \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Idempotency-Key: 18400-refund-1" \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 2500, "reason": "item out of stock"}'
+```
+
+#### Example Request (Full Refund)
+
+```bash
+curl -X POST "https://api.example.com/v1/st/refund/cs_live_abc123..." \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Idempotency-Key: 18400-refund-full"
+```
+
+#### Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "refund": {
+      "refund_id": "re_3Q...",
+      "payment_id": "pi_3Q...",
+      "session_id": "cs_live_abc123...",
+      "order_id": "18400",
+      "amount": 2500,
+      "currency": "PLN",
+      "status": "succeeded",
+      "reason": "item out of stock",
+      "requested_by": "zoho.support",
+      "idempotency_key": "18400-refund-1",
+      "source": "api",
+      "created": "2026-11-25T12:00:00Z",
+      "recorded": "2026-11-25T12:00:01Z"
+    },
+    "order_id": "18400",
+    "amount_received": 10000,
+    "amount_refunded": 2500,
+    "payment_status": "partially_refunded"
+  },
+  "status_message": "Success",
+  "timestamp": "2026-11-25T12:00:01Z"
+}
+```
+
+#### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `refund` | object | The refund (see fields above); `status` is Stripe's: `pending`, `requires_action`, `succeeded`, `failed`, `canceled` |
+| `amount_received` | integer | Captured amount, minor units |
+| `amount_refunded` | integer | Total refunded on the payment so far, minor units |
+| `payment_status` | string | `paid`, `partially_refunded` or `refunded` — also written to `oc_order.wf_payment_status` |
+| `replayed` | boolean | `true` when the key matched an earlier refund and nothing new was refunded |
+
+#### Side Effects
+
+- The refund is stored in MongoDB (`stripe_refunds`, unique by Stripe refund id) with
+  amount, time, reason, the calling user and the idempotency key; `GET /v1/st/status/{id}`
+  lists it.
+- `oc_order.wf_payment_status` becomes `partially_refunded` or `refunded`;
+  `wf_payment_amount` keeps the captured amount and `wf_payment_time` keeps the payment time.
+- A Telegram message is sent. The wFirma side is **not** automated: when the order was
+  invoiced the message (`error` topic) asks for a correcting invoice (faktura korygująca)
+  to be issued manually.
+
+#### Errors
+
+| Code | Description |
+|------|-------------|
+| 400 | Missing `Idempotency-Key`, invalid body, session not found, payment not captured (hold or failed), amount above the unrefunded remainder, or Stripe error |
+| 401 | Unauthorized |
+| 409 | `Idempotency-Key` already used for a refund of another payment or of a different amount |
+
+---
+
 ### Get Payment Status
 
 Returns the live Stripe payment state for an OpenCart order. The status is read
@@ -396,6 +507,9 @@ curl "https://api.example.com/v1/st/status/16463" \
 | `captured` | boolean | True when any funds have been captured |
 | `invoice_id` | string | wFirma invoice ID, if already registered |
 | `source` | string | Where the status was read: `payment_intent`, `checkout_session`, or `stored` |
+| `amount_refunded` | integer | Live total refunded on the charge, minor units (omitted when nothing was refunded) |
+| `payment_status` | string | For a succeeded payment: `paid`, `partially_refunded` or `refunded` |
+| `refunds` | array | Recorded refunds, oldest first (same fields as the refund object of [Refund](#refund-captured-payment)), including refunds made in the Stripe Dashboard |
 
 #### Errors
 
@@ -428,11 +542,13 @@ POST /webhook/event
 - `invoice.finalized` - Processes finalized Stripe invoices
 - `payment_intent.amount_capturable.updated` - Marks a hold as confirmed (capturable)
 - `payment_intent.succeeded` - Marks a PaymentIntent as captured/paid and registers the invoice in real time. Critically, this fires for captures done **outside the API** (e.g. in the Stripe Dashboard), which otherwise leave no capture trace until the reconciler notices. Logged as `payment captured`. Invoice creation is idempotent across triggers (capture API, this webhook, reconciler), so no duplicate is created.
+- `charge.refunded`, `charge.refund.updated` - Syncs the payment's refunds from Stripe into `stripe_refunds` and `oc_order.wf_payment_status`. Catches refunds made in the Stripe Dashboard in real time; refunds of PaymentIntents unknown to the service are ignored.
 
 #### Notes
 
 - The webhook must be configured and reachable for capture/cancel operations to work
 - To capture Dashboard captures in real time, enable `payment_intent.succeeded` in your Stripe webhook event selection
+- To reflect Dashboard refunds in real time, enable `charge.refunded` and `charge.refund.updated`; without them the reconciler picks refunds up on its next tick
 - After a successful checkout, the webhook stores the PaymentIntent ID needed for capture
 - Configure your Stripe webhook URL to point to this endpoint
 - When wFirma invoice creation fails during webhook processing (e.g., API downtime), the job is automatically enqueued for retry with exponential backoff if the retry queue is enabled (see [Configuration](#retry-queue-configuration))

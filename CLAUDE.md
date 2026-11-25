@@ -69,6 +69,7 @@ All `/v1/*` endpoints require `Authorization: Bearer TOKEN`
 - `POST /v1/st/pay` - Create direct payment
 - `POST /v1/st/capture/{id}` - Capture held payment (enqueues wFirma invoice async)
 - `POST /v1/st/cancel/{id}` - Cancel payment (with reason)
+- `POST /v1/st/refund/{id}` - Refund captured payment, full or partial (`Idempotency-Key` required; records in `stripe_refunds`, sets `wf_payment_status`)
 - `GET /v1/st/status/{id}` - Get live Stripe payment status by OpenCart order id
 - `GET /v1/st/queue` - List held payments awaiting reconciliation (unresolved holds)
 
@@ -152,7 +153,8 @@ GitHub Actions CI/CD:
 - `internal/http-server/api/api.go` - Route definitions
 - `entity/checkout-params.go` - Payment/order data structure
 - `impl/core/retryqueue.go` - Invoice retry queue with exponential backoff
-- `impl/core/reconciler.go` - Periodic job reconciling held Stripe payments with live status (invoices captured holds, reflects cancellations)
+- `impl/core/reconciler.go` - Periodic job reconciling held Stripe payments with live status (invoices captured holds, reflects cancellations, picks up Dashboard refunds)
+- `impl/core/refund.go` - Refund API flow and the refund sync shared by API, `charge.refunded` webhook and reconciler
 
 ## API Documentation
 
