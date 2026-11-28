@@ -149,9 +149,17 @@ func (c *Client) syncContractor(ctx context.Context, stored *Contractor, custome
 	// contractor created before this normalization existed holds a bare or malformed
 	// value with tax_id_type "custom", and that record is exactly what makes wFirma
 	// emit an invalid KSeF KodUE. Re-resolving repairs it on the next order.
+	//
+	// A non-EU number on the order is the buyer's real identifier, so the stored one is
+	// not reused: it is typically the same number mis-prefixed with the address country
+	// ("HUCHE266473703"), and keeping it would leave the record wrong forever.
+	storedNip := stored.Nip
+	if dropReason == reasonNonEUTaxId {
+		storedNip = ""
+	}
 	effectiveNip, taxIdType, storedDropReason := resolveTaxId(
 		firstNonEmpty(countryCode, stored.Country),
-		firstNonEmpty(nip, stored.Nip),
+		firstNonEmpty(nip, storedNip),
 	)
 	if storedDropReason != "" && dropReason == "" {
 		logDroppedTaxId(c.log, customer, countryCode, "stored tax ID "+storedDropReason)

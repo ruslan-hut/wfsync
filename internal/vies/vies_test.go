@@ -154,3 +154,89 @@ func TestMalformedTaxIdIsInvalidWithoutCall(t *testing.T) {
 		t.Errorf("VIES calls = %d, want 0", calls)
 	}
 }
+
+// Which numbers reach VIES, and under which country/number. Non-EU prefixes (the Swiss
+// UID from .com order 18463, a UK number) and non-EU fallback countries are decided
+// without a call; separators are stripped before the number goes into the URL.
+func TestValidateTaxIdRouting(t *testing.T) {
+	cases := []struct {
+		name     string
+		taxId    string
+		fallback string
+		want     entity.VIESResult
+		wantPath string // "" = VIES must not be called
+	}{
+		{"Swiss UID on a Hungarian address", "CHE-266.473.703", "HU", entity.VIESNotEU, ""},
+		{"UK VAT number", "GB 123 4567 89", "GB", entity.VIESNotEU, ""},
+		{"Norwegian number", "NO123456789MVA", "NO", entity.VIESNotEU, ""},
+		{"bare number, non-EU address", "123456789", "US", entity.VIESNotEU, ""},
+		{"DE with dots and spaces", " de 123.456 789 ", "DE", entity.VIESValid, "/ms/DE/vat/123456789"},
+		{"PL without prefix uses the address", "525-286-34-76", "PL", entity.VIESValid, "/ms/PL/vat/5252863476"},
+		{"Greek address maps to EL", "123456789", "GR", entity.VIESValid, "/ms/EL/vat/123456789"},
+		{"Northern Ireland XI", "XI123456789", "GB", entity.VIESValid, "/ms/XI/vat/123456789"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls int32
+			var path string
+			s := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt32(&calls, 1)
+				path = r.URL.Path
+				_, _ = io.WriteString(w, `{"isValid":true,"userError":"VALID"}`)
+			})
+
+			if got := s.ValidateTaxId(tc.taxId, tc.fallback); got != tc.want {
+				t.Errorf("result = %v, want %v", got, tc.want)
+			}
+			switch {
+			case tc.wantPath == "" && calls != 0:
+				t.Errorf("VIES calls = %d, want 0", calls)
+			case tc.wantPath != "" && (calls != 1 || path != tc.wantPath):
+				t.Errorf("VIES calls = %d path %q, want 1 call to %q", calls, path, tc.wantPath)
+			}
+		})
+	}
+}
+
+// HTTP errors: a format rejection is final (invalid, one call), unavailability is
+// retried on the attempt budget and ends inconclusive.
+func TestHTTPErrorClassification(t *testing.T) {
+	cases := []struct {
+		name      string
+		status    int
+		body      string
+		want      entity.VIESResult
+		wantCalls int32
+	}{
+		{"400 VOW-ERR-2600 is invalid without retries", http.StatusBadRequest,
+			`{"actionSucceed":false,"errorWrappers":[{"error":"VOW-ERR-2600","message":"The input data is invalid"}]}`,
+			entity.VIESInvalid, 1},
+		{"400 without a body is invalid without retries", http.StatusBadRequest, ``, entity.VIESInvalid, 1},
+		{"400 carrying MS_UNAVAILABLE is retried", http.StatusBadRequest,
+			`{"actionSucceed":false,"errorWrappers":[{"error":"MS_UNAVAILABLE"}]}`, entity.VIESInconclusive, 3},
+		{"429 is retried", http.StatusTooManyRequests, ``, entity.VIESInconclusive, 3},
+		{"503 is retried", http.StatusServiceUnavailable, ``, entity.VIESInconclusive, 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls int32
+			s := newTestService(t, func(w http.ResponseWriter, _ *http.Request) {
+				atomic.AddInt32(&calls, 1)
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			})
+			db := &stubDB{}
+			s.db = db
+
+			if got := s.ValidateTaxId("HU12345678", "HU"); got != tc.want {
+				t.Errorf("result = %v, want %v", got, tc.want)
+			}
+			if calls != tc.wantCalls {
+				t.Errorf("VIES calls = %d, want %d", calls, tc.wantCalls)
+			}
+			if db.saved != nil {
+				t.Errorf("result cached: %+v", db.saved)
+			}
+		})
+	}
+}

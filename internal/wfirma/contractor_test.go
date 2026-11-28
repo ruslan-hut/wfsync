@@ -1,6 +1,11 @@
 package wfirma
 
 import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 	"wfsync/entity"
 )
@@ -90,5 +95,47 @@ func TestParseContractorAdd(t *testing.T) {
 				t.Errorf("got %s/%q, want %s/%q", cde.Field, cde.Message, tc.wantField, tc.wantMsg)
 			}
 		})
+	}
+}
+
+// Contractor 200295636 (.com order 18463) was stored as nip "HUCHE266473703", type
+// "custom": the Swiss UID glued to the Hungarian address country. The next order
+// carrying the same UID must clear it rather than fall back to the stored value.
+func TestSyncContractorClearsMisprefixedNonEUNumber(t *testing.T) {
+	var path, body string
+	c, _ := newLocalCopyClient(t, func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		_, _ = io.WriteString(w, `{"status":{"code":"OK"},"contractors":{"0":{"contractor":{"id":"200295636"}}}}`)
+	})
+	stored := &Contractor{
+		ID: "200295636", Name: "Buyer", Country: "HU", Zip: "1051", City: "Budapest",
+		Street: "Street 1", Nip: "HUCHE266473703", TaxIdType: taxIdTypeCustom,
+	}
+	customer := &entity.ClientDetails{
+		Name: "Buyer", Email: "buyer@example.com", Country: "HU", ZipCode: "1051",
+		City: "Budapest", Street: "Street 1", TaxId: "CHE-266.473.703",
+	}
+
+	if err := c.syncContractor(context.Background(), stored, customer); err != nil {
+		t.Fatalf("syncContractor: %v", err)
+	}
+	if !strings.Contains(path, "contractors/edit/200295636") {
+		t.Fatalf("edit not called, last path %q", path)
+	}
+	var req struct {
+		API struct {
+			Contractors []struct {
+				Contractor map[string]string `json:"contractor"`
+			} `json:"contractors"`
+		} `json:"api"`
+	}
+	if err := json.Unmarshal([]byte(body), &req); err != nil || len(req.API.Contractors) != 1 {
+		t.Fatalf("decode edit payload %q: %v", body, err)
+	}
+	got := req.API.Contractors[0].Contractor
+	if got["nip"] != "" || got["tax_id_type"] != taxIdTypeNone {
+		t.Errorf("nip/tax_id_type = %q/%q, want \"\"/%q", got["nip"], got["tax_id_type"], taxIdTypeNone)
 	}
 }

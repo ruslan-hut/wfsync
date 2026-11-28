@@ -99,6 +99,10 @@ func TestResolveTaxId(t *testing.T) {
 		{"no country to derive a prefix from is dropped", "", "28982711", "", taxIdTypeNone, true},
 		{"empty tax id is not a failure", "CZ", "", "", taxIdTypeNone, false},
 		{"Cyrillic look-alike letter is dropped", "BE", "\u0412E1034615262", "", taxIdTypeNone, true},
+		{"Swiss UID is not prefixed with the address country", "HU", "CHE-266.473.703", "", taxIdTypeNone, true},
+		{"UK number is not prefixed with the address country", "DE", "GB123456789", "", taxIdTypeNone, true},
+		{"DE with dots and spaces", "DE", "de 123.456 789", "DE123456789", taxIdTypeCustom, false},
+		{"Northern Ireland XI kept", "GB", "XI123456789", "XI123456789", taxIdTypeCustom, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

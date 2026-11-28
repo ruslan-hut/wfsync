@@ -139,13 +139,6 @@ func ExpectedB2BVATRate(countryCode string, hasTaxId bool, vp VATProvider) int {
 	return rate
 }
 
-// euVatPrefixes maps an ISO 3166 alpha-2 country code to its EU VAT-UE number
-// prefix where it differs from the country code. The only such case is Greece,
-// whose VAT numbers carry the "EL" prefix while its country code is "GR".
-var euVatPrefixes = map[string]string{
-	"GR": "EL",
-}
-
 // wFirma contractor tax_id_type values. The type decides how wFirma identifies the
 // buyer in the KSeF XML: "nip" emits Podmiot2/DaneIdentyfikacyjne/NIP, "custom"
 // emits KodUE + NrVatUE (which is why a custom id without a resolvable EU country
@@ -173,7 +166,7 @@ const (
 // the tax ID carries no prefix of its own.
 func resolveTaxId(countryCode, taxId string) (nip, taxIdType, reason string) {
 	// Strip separators so wFirma receives a compact number (e.g. "DE 362-155" → "DE362155").
-	taxId = strings.ToUpper(strings.NewReplacer(" ", "", "-", "", ".", "").Replace(strings.TrimSpace(taxId)))
+	taxId = entity.NormalizeTaxId(taxId)
 	if taxId == "" {
 		return "", taxIdTypeNone, ""
 	}
@@ -186,6 +179,11 @@ func resolveTaxId(countryCode, taxId string) (nip, taxIdType, reason string) {
 	// A prefix on the number wins over the address country: a buyer registered for
 	// VAT abroad may well have a billing address elsewhere.
 	prefix, rest := splitVatPrefix(taxId)
+	if prefix == "" && isForeignTaxId(taxId) {
+		// A Swiss UID "CHE…" or a UK "GB…" number: prefixing it with the address country
+		// produced "HUCHE266473703" stored as a Hungarian VAT-UE number.
+		return "", taxIdTypeNone, reasonNonEUTaxId
+	}
 	if prefix == "" {
 		rest = taxId
 		prefix = vatPrefixForCountry(strings.ToUpper(strings.TrimSpace(countryCode)))
@@ -204,6 +202,24 @@ func resolveTaxId(countryCode, taxId string) (nip, taxIdType, reason string) {
 	}
 }
 
+// reasonNonEUTaxId is the drop reason for a number carrying a non-EU country prefix.
+// It is a well-formed identifier the buyer really holds, so syncContractor lets it
+// override the stored number instead of falling back to it.
+//
+// The number is left out because no tax_id_type is known to carry it correctly: "custom"
+// makes wFirma emit KodUE from the prefix, and "CH"/"GB" are not valid KodUE values.
+const reasonNonEUTaxId = "non-EU tax ID (not a VAT-UE number), left out of the contractor"
+
+// isForeignTaxId reports whether taxId (normalized) opens with two letters that are not
+// an EU VAT prefix, e.g. "CHE266473703" or "GB123456789".
+func isForeignTaxId(taxId string) bool {
+	if len(taxId) < 3 {
+		return false
+	}
+	isLetter := func(b byte) bool { return b >= 'A' && b <= 'Z' }
+	return isLetter(taxId[0]) && isLetter(taxId[1]) && !entity.IsEUVatPrefix(taxId[:2])
+}
+
 // splitVatPrefix separates a leading EU VAT country prefix from the rest of the
 // number. It returns an empty prefix when the number does not start with a known
 // one, so a national number that happens to begin with two letters is not mistaken
@@ -212,7 +228,7 @@ func splitVatPrefix(taxId string) (prefix, rest string) {
 	if len(taxId) < 3 {
 		return "", taxId
 	}
-	if p := taxId[:2]; euVatNumberPrefixes[p] {
+	if p := taxId[:2]; entity.IsEUVatPrefix(p) {
 		return p, taxId[2:]
 	}
 	return "", taxId
@@ -228,27 +244,7 @@ func vatPrefixForCountry(countryCode string) string {
 	if !euCountries[countryCode] {
 		return ""
 	}
-	if alt, ok := euVatPrefixes[countryCode]; ok {
-		return alt
-	}
-	return countryCode
-}
-
-// euVatNumberPrefixes is the set of prefixes that may legitimately open a VAT-UE
-// number: the EU country codes, Poland, "EL" for Greece and "XI" for Northern
-// Ireland. It matches the value list KSeF accepts for the KodUE field.
-var euVatNumberPrefixes = buildEUVatNumberPrefixes()
-
-func buildEUVatNumberPrefixes() map[string]bool {
-	m := map[string]bool{"PL": true, "XI": true}
-	for code := range euCountries {
-		if alt, ok := euVatPrefixes[code]; ok {
-			m[alt] = true
-			continue
-		}
-		m[code] = true
-	}
-	return m
+	return entity.VATPrefixForCountry(countryCode)
 }
 
 // isValidPolishNIP reports whether s is a syntactically valid Polish NIP: exactly

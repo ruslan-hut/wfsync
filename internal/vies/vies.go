@@ -5,6 +5,7 @@ package vies
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -62,23 +63,22 @@ func (r *viesResponse) result() entity.VIESResult {
 	}
 }
 
-// splitTaxId separates a tax ID into its VIES country code and national number.
-// If the ID already carries a 2-letter alphabetic prefix it is taken as the country
-// code; otherwise fallbackCountry (the client's address country) is used. Any spaces
-// and hyphens in the number are stripped. Returns an empty country code when neither a
-// prefix nor a fallback is available, so the caller can reject the input.
+// splitTaxId separates a tax ID into its country prefix and national number.
+// Separators (spaces, hyphens, dots, ...) are stripped first, so "CHE-266.473.703"
+// splits into "CH" + "E266473703" and "DE 123.456.789" into "DE" + "123456789".
+// A 2-letter alphabetic prefix is taken as the country, whether or not it is an EU one
+// — the caller decides that; otherwise fallbackCountry (the client's address country)
+// is used. Greece is mapped to its VAT prefix "EL" either way. Returns an empty country
+// when neither a prefix nor a fallback is available, so the caller can reject the input.
 func splitTaxId(taxId, fallbackCountry string) (country, number string) {
-	taxId = strings.TrimSpace(taxId)
-	isLetter := func(b byte) bool { return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') }
+	taxId = entity.NormalizeTaxId(taxId)
+	isLetter := func(b byte) bool { return b >= 'A' && b <= 'Z' }
 	if len(taxId) >= 2 && isLetter(taxId[0]) && isLetter(taxId[1]) {
-		country = strings.ToUpper(taxId[:2])
-		number = taxId[2:]
+		country, number = taxId[:2], taxId[2:]
 	} else {
-		country = strings.ToUpper(strings.TrimSpace(fallbackCountry))
-		number = taxId
+		country, number = strings.ToUpper(strings.TrimSpace(fallbackCountry)), taxId
 	}
-	number = strings.NewReplacer(" ", "", "-", "").Replace(number)
-	return country, number
+	return entity.VATPrefixForCountry(country), number
 }
 
 // boolToResult maps a cached boolean verdict to a definitive result.
@@ -137,6 +137,9 @@ func (s *Service) SetDatabase(db Database) {
 // so a bare national number like a Polish NIP "5252863476" is not mis-split into a bogus
 // "52" country code.
 //
+// A non-EU prefix (CH, GB, NO, ...) or, without a prefix, a non-EU fallbackCountry yields
+// VIESNotEU without calling VIES.
+//
 // Returns VIESValid / VIESInvalid for definitive verdicts, or VIESInconclusive when the
 // VIES service is unavailable or rate-limited (transient userError codes). Inconclusive
 // results are never cached and must not be reported as invalid. Errors are logged but
@@ -156,6 +159,15 @@ func (s *Service) ValidateTaxId(taxId, fallbackCountry string) entity.VIESResult
 			slog.String("tax_id", taxId),
 			slog.String("fallback_country", fallbackCountry))
 		return entity.VIESInvalid
+	}
+	// VIES only knows EU member states (plus XI); a Swiss UID or a UK VAT number would
+	// come back as HTTP 400 and, before, as an "unavailable" that burned the retry budget.
+	if !entity.IsEUVatPrefix(countryCode) {
+		s.log.Info("not an EU VAT number, VIES not asked",
+			slog.String("tax_id", taxId),
+			slog.String("country", countryCode),
+			slog.String("fallback_country", fallbackCountry))
+		return entity.VIESNotEU
 	}
 
 	// Check MongoDB cache first. Only definitive verdicts are ever stored, so a fresh
@@ -179,7 +191,16 @@ func (s *Service) ValidateTaxId(taxId, fallbackCountry string) entity.VIESResult
 	}
 
 	// Call the VIES API, retrying while the answer is not a verdict.
-	resp := s.checkWithRetry(countryCode, vatNumber)
+	resp, err := s.checkWithRetry(countryCode, vatNumber)
+	if err != nil {
+		// A rejected request format is about this number, not about VIES: it is invalid
+		// as typed. Not cached — the verdict costs a single call and no retries.
+		s.log.Warn("VIES rejected the tax ID format",
+			slog.String("country", countryCode),
+			slog.String("vat_number", vatNumber),
+			sl.Err(err))
+		return entity.VIESInvalid
+	}
 	if resp == nil {
 		return s.staleOr(countryCode, vatNumber, "API failure")
 	}
@@ -236,18 +257,25 @@ func (s *Service) ValidateTaxId(taxId, fallbackCountry string) entity.VIESResult
 // its 0% WDT rate (the order stays B2C and is invoiced under OSS at the destination
 // rate), a retryable answer is worth a short wait inside the invoice path.
 //
+// Only unavailability is retried: transient userError codes, transport errors, 5xx and
+// 429. Any other HTTP error (400 VOW-ERR-*, a malformed number) is final and returned as
+// a non-nil error at once — re-asking cannot change the answer.
+//
 // Backoff doubles from retryDelay and carries up to 50% jitter so that several orders
 // validating at once do not retry in lockstep and re-trigger the same throttle.
 //
 // Returns the response carrying a definitive verdict, the last inconclusive response when
 // every attempt was throttled, or nil when no attempt produced a response at all.
-func (s *Service) checkWithRetry(countryCode, vatNumber string) *viesResponse {
+func (s *Service) checkWithRetry(countryCode, vatNumber string) (*viesResponse, error) {
 	var last *viesResponse
 	delay := s.retryDelay
 
 	for attempt := 1; attempt <= s.attempts; attempt++ {
 		resp, err := s.checkVATNumber(countryCode, vatNumber)
+		var se *statusError
 		switch {
+		case errors.As(err, &se) && !se.retryable():
+			return nil, err
 		case err != nil:
 			s.log.Warn("VIES API call failed",
 				slog.String("country", countryCode),
@@ -255,7 +283,7 @@ func (s *Service) checkWithRetry(countryCode, vatNumber string) *viesResponse {
 				slog.Int("attempt", attempt),
 				sl.Err(err))
 		case resp.result() != entity.VIESInconclusive:
-			return resp
+			return resp, nil
 		default:
 			last = resp
 			s.log.Debug("VIES answer not a verdict, retrying",
@@ -272,7 +300,54 @@ func (s *Service) checkWithRetry(countryCode, vatNumber string) *viesResponse {
 		delay *= 2
 	}
 
-	return last
+	return last, nil
+}
+
+// statusError is a non-200 answer from VIES. Code is the error code from the body
+// (e.g. "VOW-ERR-2600", "MS_UNAVAILABLE"), empty when the body carries none.
+type statusError struct {
+	Status int
+	Code   string
+	Body   string
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("VIES API status %d (%s): %s", e.Status, e.Code, e.Body)
+}
+
+// transientCodes are the VIES error codes that mean "ask again later". They normally
+// arrive as a 200 userError, but are honoured on an HTTP error too.
+var transientCodes = map[string]bool{
+	"MS_UNAVAILABLE":            true,
+	"MS_MAX_CONCURRENT_REQ":     true,
+	"GLOBAL_MAX_CONCURRENT_REQ": true,
+	"SERVICE_UNAVAILABLE":       true,
+	"TIMEOUT":                   true,
+}
+
+// retryable reports whether the error means VIES is unavailable or throttling, as
+// opposed to rejecting the request itself.
+func (e *statusError) retryable() bool {
+	return e.Status >= 500 || e.Status == http.StatusTooManyRequests || transientCodes[e.Code]
+}
+
+// errorCode extracts the first error code from a VIES error body, which comes as
+// {"actionSucceed":false,"errorWrappers":[{"error":"VOW-ERR-2600","message":"..."}]}.
+func errorCode(body []byte) string {
+	var eb struct {
+		ErrorWrappers []struct {
+			Error string `json:"error"`
+		} `json:"errorWrappers"`
+	}
+	if json.Unmarshal(body, &eb) != nil {
+		return ""
+	}
+	for _, w := range eb.ErrorWrappers {
+		if w.Error != "" {
+			return strings.ToUpper(strings.TrimSpace(w.Error))
+		}
+	}
+	return ""
 }
 
 // staleOr returns a cached definitive verdict when the live check could not produce one,
@@ -312,7 +387,7 @@ func (s *Service) checkVATNumber(countryCode, vatNumber string) (*viesResponse, 
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("VIES API status %d: %s", resp.StatusCode, string(respBody))
+		return nil, &statusError{Status: resp.StatusCode, Code: errorCode(respBody), Body: string(respBody)}
 	}
 
 	var vr viesResponse

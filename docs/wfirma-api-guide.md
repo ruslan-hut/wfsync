@@ -212,7 +212,9 @@ POST /contractors/add?inputFormat=json&outputFormat=json
 > the invoice is rejected with *"Pole KodUE posiada niepoprawną wartość"*. `resolveTaxId`
 > (`internal/wfirma/vat.go`) picks the pair: bare digits + `"nip"` for a valid Polish NIP,
 > a country-prefixed number + `"custom"` for a foreign EU buyer, and `"none"` for anything
-> that fits neither (dropped with a Telegram alert).
+> that fits neither (dropped with a Telegram alert). A number with a non-EU prefix (Swiss
+> UID `CHE…`, `GB…`) is dropped too and never prefixed with the address country — the
+> old behaviour stored `CHE-266.473.703` on a Hungarian address as `HUCHE266473703`.
 
 #### Finding contractors
 

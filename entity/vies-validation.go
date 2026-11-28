@@ -16,8 +16,13 @@ const (
 	VIESInconclusive VIESResult = iota
 	// VIESValid means VIES confirmed the number is valid.
 	VIESValid
-	// VIESInvalid means VIES confirmed the number is not valid.
+	// VIESInvalid means VIES confirmed the number is not valid, or VIES rejected its
+	// format outright.
 	VIESInvalid
+	// VIESNotEU means the number belongs to a non-EU tax system (a CH, GB, NO, ...
+	// prefix, or no prefix and a non-EU billing country). VIES is not asked: it is
+	// neither a verdict nor a failure, just not a VAT-UE number.
+	VIESNotEU
 )
 
 // VIESValidation stores the result of a VIES VAT number validation check.
