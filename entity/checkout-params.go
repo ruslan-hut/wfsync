@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -138,31 +139,56 @@ func (c *CheckoutParams) RecalcWithDiscount() {
 		}
 		item.Price = int64(math.Round(float64(item.Price) * k))
 	}
-	itemsTotal = c.ItemsTotal()
-	diff := c.Total - itemsTotal
+	c.FitRoundingResidual()
+}
+
+// FitRoundingResidual makes the line items sum to Total to the cent when the gap is
+// what per-unit rounding leaves behind: OpenCart and Stripe carry line totals that a
+// unit price in whole cents times the quantity cannot always reproduce (2 × 39.8374 is
+// 79.67, but 2 × 39.84 is 79.68).
+//
+// wFirma prices brutto lines as count × price with no recalculation, so the residual is
+// absorbed in whole cents: a line whose quantity fits the remaining gap shifts its unit
+// price by one cent, otherwise it is split into n units at price ± 0.01 and the rest at
+// the original price. Corrections start from the last product line; shipping stays as
+// is. A gap larger than one cent per product unit is not a rounding residual and is left
+// for RecalcWithDiscount (or the caller) to handle. Reports whether the totals now match.
+func (c *CheckoutParams) FitRoundingResidual() bool {
+	diff := c.Total - c.ItemsTotal()
 	if diff == 0 {
-		return
+		return true
 	}
+	var units int64
 	for _, item := range c.LineItems {
-		if item.Shipping {
-			continue
-		}
-		if absInt64(diff) < item.Qty {
-			continue
-		}
-		if diff < 0 {
-			item.Price--
-			diff = diff + item.Qty
-		} else {
-			item.Price++
-			diff = diff - item.Qty
-		}
-		if diff == 0 {
-			break
+		if !item.Shipping {
+			units += item.Qty
 		}
 	}
-	itemsTotal = c.ItemsTotal()
-	diff = c.Total - itemsTotal
+	if absInt64(diff) > units {
+		return false
+	}
+	step := int64(1)
+	if diff < 0 {
+		step = -1
+	}
+	for i := len(c.LineItems) - 1; i >= 0 && diff != 0; i-- {
+		item := c.LineItems[i]
+		if item.Shipping || item.Price+step < 1 {
+			continue
+		}
+		n := min(absInt64(diff), item.Qty)
+		if n == item.Qty {
+			item.Price += step
+		} else {
+			part := *item
+			part.Qty = n
+			part.Price += step
+			item.Qty -= n
+			c.LineItems = slices.Insert(c.LineItems, i+1, &part)
+		}
+		diff -= step * n
+	}
+	return diff == 0
 }
 
 // TaxRate calculates the VAT rate percentage from available order data.
@@ -375,6 +401,8 @@ func NewFromCheckoutSession(sess *stripe.CheckoutSession) *CheckoutParams {
 	if sess.ShippingCost != nil && sess.ShippingCost.AmountTotal > 0 {
 		params.AddShipping("", sess.ShippingCost.AmountTotal)
 	}
+	// Unit prices above are truncated from line totals; restore the cents they lost.
+	params.FitRoundingResidual()
 	if sess.Metadata != nil {
 		id, ok := sess.Metadata["order_id"]
 		if ok {
@@ -431,6 +459,7 @@ func NewFromInvoice(inv *stripe.Invoice) *CheckoutParams {
 	if inv.ShippingCost != nil && inv.ShippingCost.AmountTotal > 0 {
 		params.AddShipping("", inv.ShippingCost.AmountTotal)
 	}
+	params.FitRoundingResidual()
 	if inv.Metadata != nil {
 		id, ok := inv.Metadata["order_id"]
 		if ok {

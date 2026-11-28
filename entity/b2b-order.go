@@ -128,6 +128,8 @@ func (o *B2BOrder) ToCheckoutParams() *CheckoutParams {
 		}
 		params.LineItems = append(params.LineItems, lineItem)
 	}
+	// Item prices may carry more than two decimals; the document must still equal Total.
+	params.FitRoundingResidual()
 
 	return params
 }
