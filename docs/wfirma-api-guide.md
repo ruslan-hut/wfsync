@@ -213,8 +213,13 @@ POST /contractors/add?inputFormat=json&outputFormat=json
 > (`internal/wfirma/vat.go`) picks the pair: bare digits + `"nip"` for a valid Polish NIP,
 > a country-prefixed number + `"custom"` for a foreign EU buyer, and `"none"` for anything
 > that fits neither (dropped with a Telegram alert). A number with a non-EU prefix (Swiss
-> UID `CHE…`, `GB…`) is dropped too and never prefixed with the address country — the
-> old behaviour stored `CHE-266.473.703` on a Hungarian address as `HUCHE266473703`.
+> UID `CHE…`, `GB…`) is never prefixed with the address country — the old behaviour
+> stored `CHE-266.473.703` on a Hungarian address as `HUCHE266473703`. With a non-EU
+> contractor country it goes out as-is with `"custom"`, which KSeF accepts (FV 1854/2026,
+> CH); with an EU address it is dropped, since that pairing is unproven in KSeF.
+>
+> Accepted `tax_id_type` values: `nip`, `vat` (wFirma checks VIES itself), `pesel`,
+> `regon`, `custom`, `none`. Any other value is silently stored as `""`.
 
 #### Finding contractors
 

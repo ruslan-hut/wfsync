@@ -101,6 +101,9 @@ func TestResolveTaxId(t *testing.T) {
 		{"Cyrillic look-alike letter is dropped", "BE", "\u0412E1034615262", "", taxIdTypeNone, true},
 		{"Swiss UID is not prefixed with the address country", "HU", "CHE-266.473.703", "", taxIdTypeNone, true},
 		{"UK number is not prefixed with the address country", "DE", "GB123456789", "", taxIdTypeNone, true},
+		{"Swiss UID on a Swiss address goes out as custom", "CH", "CHE-266.473.703", "CHE266473703", taxIdTypeCustom, false},
+		{"UK number on a UK address goes out as custom", "GB", "GB 461 6888 54", "GB461688854", taxIdTypeCustom, false},
+		{"non-EU number without an address country is dropped", "", "CHE266473703", "", taxIdTypeNone, true},
 		{"DE with dots and spaces", "DE", "de 123.456 789", "DE123456789", taxIdTypeCustom, false},
 		{"Northern Ireland XI kept", "GB", "XI123456789", "XI123456789", taxIdTypeCustom, false},
 	}

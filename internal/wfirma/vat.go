@@ -180,9 +180,16 @@ func resolveTaxId(countryCode, taxId string) (nip, taxIdType, reason string) {
 	// VAT abroad may well have a billing address elsewhere.
 	prefix, rest := splitVatPrefix(taxId)
 	if prefix == "" && isForeignTaxId(taxId) {
-		// A Swiss UID "CHE…" or a UK "GB…" number: prefixing it with the address country
-		// produced "HUCHE266473703" stored as a Hungarian VAT-UE number.
-		return "", taxIdTypeNone, reasonNonEUTaxId
+		// A Swiss UID "CHE…" or a UK "GB…" number is never prefixed with the address
+		// country: that produced "HUCHE266473703" stored as a Hungarian VAT-UE number.
+		// With a non-EU contractor country wFirma exports "custom" without KodUE, and
+		// KSeF accepts it (FV 1854/2026, CH). With an EU country it would go out as a
+		// KodUE + NrVatUE pair, which is unproven, so the number is left out there.
+		if vatPrefixForCountry(strings.ToUpper(strings.TrimSpace(countryCode))) != "" ||
+			strings.TrimSpace(countryCode) == "" {
+			return "", taxIdTypeNone, reasonNonEUTaxId
+		}
+		return taxId, taxIdTypeCustom, ""
 	}
 	if prefix == "" {
 		rest = taxId
@@ -202,13 +209,11 @@ func resolveTaxId(countryCode, taxId string) (nip, taxIdType, reason string) {
 	}
 }
 
-// reasonNonEUTaxId is the drop reason for a number carrying a non-EU country prefix.
-// It is a well-formed identifier the buyer really holds, so syncContractor lets it
-// override the stored number instead of falling back to it.
-//
-// The number is left out because no tax_id_type is known to carry it correctly: "custom"
-// makes wFirma emit KodUE from the prefix, and "CH"/"GB" are not valid KodUE values.
-const reasonNonEUTaxId = "non-EU tax ID (not a VAT-UE number), left out of the contractor"
+// reasonNonEUTaxId is the drop reason for a number carrying a non-EU country prefix on
+// a contractor with an EU (or unknown) address country. It is a well-formed identifier
+// the buyer really holds, so syncContractor lets it override the stored number instead
+// of falling back to it.
+const reasonNonEUTaxId = "non-EU tax ID on an EU address, left out of the contractor"
 
 // isForeignTaxId reports whether taxId (normalized) opens with two letters that are not
 // an EU VAT prefix, e.g. "CHE266473703" or "GB123456789".
