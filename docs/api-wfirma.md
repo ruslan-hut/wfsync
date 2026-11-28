@@ -723,6 +723,37 @@ letter is rejected with `400` and is not corrected — fix it in the calling sys
 
 ---
 
+### Line amounts and rounding
+
+Every document is sent to wFirma with `price_type: brutto`, and each line carries a gross
+unit price in whole grosze. wFirma values a line as `count × price` and does not round it
+again, so the document total is the sum of the lines.
+
+The order total is authoritative, but a unit price rounded to whole grosze cannot always
+reproduce it. An OpenCart order of 2 × 39.8374 totals 79.67, while 2 × 39.84 is 79.68.
+Before a document is built, the residual is absorbed in whole grosze, starting from the
+last product line:
+
+- If the residual is at least the line's quantity, the whole line's unit price shifts by 0.01.
+- Otherwise the line is **split** into two lines with the same name and SKU: *n* units at
+  price ± 0.01 and the remaining units at the original price.
+
+| Order line | Total | On the document |
+|------------|-------|-----------------|
+| 2 × 39.8374 | 79.67 | 1 × 39.84 + 1 × 39.83 |
+| 3 × 10.337 | 31.01 | 2 × 10.34 + 1 × 10.33 |
+
+A split line is therefore expected: the same product can appear twice with prices one
+grosz apart. The shipping line is never adjusted. A gap larger than one grosz per product
+unit is not a rounding residual and is left untouched, so for example a B2B payload whose
+item prices and `total` disagree is not "fixed" silently.
+
+Applies to OpenCart orders (proforma and invoice), Stripe sessions and invoices, and B2B
+orders. A split changes the lines, and so the proforma fingerprint: an order affected
+before this rule was added gets its proforma re-issued once on the next request.
+
+---
+
 ### Sync Invoices from Remote (Pull)
 
 Pulls invoices from Wfirma for a date range and syncs them to the local MongoDB collection. Upserts remote invoices locally — only number, type and date; the rest of the local record, including `id_external`, is kept — and deletes local records that no longer exist on Wfirma.
